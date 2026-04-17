@@ -1,30 +1,34 @@
 import streamlit as st
 from google import genai
 from pypdf import PdfReader
+from PIL import Image  # <-- LA NUEVA HERRAMIENTA PARA FOTOS
 
 # --- CONFIGURACIÓN VISUAL DE LA PÁGINA ---
 st.set_page_config(page_title="Lector de Facturas", layout="centered")
 st.title("📄 Lector Inteligente de Facturas AFIP")
-st.write("Subí la factura en PDF para extraer los datos automáticamente en formato Regente.")
+st.write("Subí la factura en PDF o una FOTO clara para extraer los datos.")
 
-# --- INTERFAZ: CAJÓN PARA SUBIR ARCHIVO ---
-archivo_subido = st.file_uploader("Arrastrá tu PDF acá o hacé clic para buscarlo", type=["pdf"])
+# --- INTERFAZ: AHORA ACEPTA FOTOS ---
+archivo_subido = st.file_uploader("Arrastrá tu PDF o Foto acá", type=["pdf", "png", "jpg", "jpeg"])
 
-# Si el usuario subió un archivo, mostramos el botón
 if archivo_subido is not None:
     if st.button("🚀 Extraer Datos", use_container_width=True):
         
         with st.spinner("Analizando con Inteligencia Artificial... (puede demorar unos segundos)"):
             try:
-                lector = PdfReader(archivo_subido)
-                texto_crudo = lector.pages[0].extract_text()
-
                 # --- LA CAJA FUERTE ---
-                # El sistema va a buscar tu clave a las opciones secretas de la nube
                 cliente = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
 
-                orden = f"""
-                Sos un administrador contable experto de Argentina. Analizá el siguiente texto de una factura de AFIP.
+                # --- EL DESVÍO INTELIGENTE: ¿Es PDF o Foto? ---
+                if archivo_subido.name.lower().endswith('.pdf'):
+                    lector = PdfReader(archivo_subido)
+                    material_para_ia = lector.pages[0].extract_text()
+                else:
+                    # ES UNA FOTO: La abrimos para que la IA la "vea"
+                    material_para_ia = Image.open(archivo_subido)
+
+                orden = """
+                Sos un administrador contable experto de Argentina. Analizá esta factura de AFIP.
 
                 REGLAS:
                 1. El "Proveedor" es el emisor.
@@ -33,33 +37,31 @@ if archivo_subido is not None:
 
                 ⚠️ INSTRUCCIÓN CRÍTICA:
                 Devolveme el resultado EXCLUSIVAMENTE en formato informático JSON, usando exactamente esta estructura:
-                {{
+                {
                   "proveedor_nombre": "...",
                   "proveedor_cuit": "...",
                   "numero_comprobante": "...",
                   "fecha_emision": "...",
                   "importe_total": 0.0,
                   "articulos": [
-                    {{
+                    {
                       "nombre_producto": "...",
                       "cantidad": 0,
                       "precio_unitario": 0.0,
                       "subtotal": 0.0
-                    }}
+                    }
                   ]
-                }}
-
-                Texto de la factura:
-                {texto_crudo}
+                }
                 """
 
+                # Le mandamos a la IA la orden Y el material (texto del pdf o la foto cruda)
                 respuesta = cliente.models.generate_content(
                     model='gemini-2.5-flash',
-                    contents=orden
+                    contents=[orden, material_para_ia]
                 )
 
                 st.success("¡Datos extraídos y empaquetados con éxito!")
                 st.code(respuesta.text, language="json")
 
             except Exception as e:
-                st.error(f"Ocurrió un error en la lectura: {e}")
+                st.error(f"Ocurrió un error: {e}")
