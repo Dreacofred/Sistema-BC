@@ -22,16 +22,9 @@ st.set_page_config(
 
 st.markdown(f"""
     <style>
-        .stApp {{
-            background-color: white !important;
-        }}
-        p, span, div {{
-            color: #333333;
-        }}
-        h1, h2, h3 {{
-            color: {COLOR_ROJO} !important;
-            font-family: 'Montserrat', sans-serif;
-        }}
+        .stApp {{ background-color: white !important; }}
+        p, span, div {{ color: #333333; }}
+        h1, h2, h3 {{ color: {COLOR_ROJO} !important; font-family: 'Montserrat', sans-serif; }}
         .stButton>button {{
             background-color: {COLOR_ROJO};
             color: white;
@@ -40,26 +33,18 @@ st.markdown(f"""
             font-weight: bold;
             transition: all 0.3s;
         }}
-        .stButton>button:hover {{
-            background-color: {COLOR_DORADO};
-            color: black;
-            transform: scale(1.05);
-        }}
+        .stButton>button:hover {{ background-color: {COLOR_DORADO}; color: black; transform: scale(1.05); }}
         [data-testid="stFileUploader"] button {{
             background-color: {COLOR_ROJO} !important;
             border-radius: 20px !important;
             border: none !important;
         }}
-        [data-testid="stFileUploader"] button,
-        [data-testid="stFileUploader"] button * {{
+        [data-testid="stFileUploader"] button, [data-testid="stFileUploader"] button * {{
             color: white !important;
             fill: white !important;
             font-weight: bold !important;
         }}
-        [data-testid="stSidebar"] {{
-            background-color: white;
-            border-right: 2px solid {COLOR_FONDO_AZUL};
-        }}
+        [data-testid="stSidebar"] {{ background-color: white; border-right: 2px solid {COLOR_FONDO_AZUL}; }}
     </style>
 """, unsafe_allow_html=True)
 
@@ -84,17 +69,13 @@ else:
 st.sidebar.markdown(f"<h3 style='text-align: center;'>Panel de Gestión</h3>", unsafe_allow_html=True)
 st.sidebar.divider()
 
-opcion = st.sidebar.radio(
-    "Seleccioná tarea:",
-    ["🚛 Ventas a Camiones", "📄 Facturas de Proveedores"],
-    key="menu_principal"
-)
+opcion = st.sidebar.radio("Seleccioná tarea:", ["🚛 Ventas a Camiones", "📄 Facturas de Proveedores"], key="menu_principal")
 
 st.sidebar.markdown("<br><br><br><br>", unsafe_allow_html=True)
 st.sidebar.info("Combustibles diseñados para rendir. Calidad garantizada.")
 
 # ==========================================
-# 3. LÓGICA DEL SISTEMA
+# 3. LÓGICA DEL SISTEMA (VERSIÓN 8B - ALTA DISPONIBILIDAD)
 # ==========================================
 cliente = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
 
@@ -103,7 +84,6 @@ if 'resumen_ventas' not in st.session_state:
 
 if "Ventas a Camiones" in opcion:
     st.title("🚛 Registro de Resumen de Carga")
-    st.write("Herramienta exclusiva para la administración de BC Combustibles.")
     
     col1, col2 = st.columns(2)
     with col1:
@@ -119,27 +99,17 @@ if "Ventas a Camiones" in opcion:
                     cosas_para_ia = [img_factura] 
 
                     if f_orden:
-                        img_orden = Image.open(f_orden) # Aseguramos que el paréntesis esté cerrado
+                        img_orden = Image.open(f_orden)
                         cosas_para_ia.append(img_orden)
-                        instruccion = """
-                        Sos un experto administrativo contable. Extraé los datos de las imágenes. 
-                        Si el efectivo está tachado poné 0.0.
-                        IMPORTANTE: Tu respuesta debe ser ÚNICA y EXCLUSIVAMENTE un objeto JSON válido. NO agregues saludos, NO uses formato markdown (```json), NO agregues explicaciones.
-                        Formato exacto requerido:
-                        {"fecha": "...", "chofer": "...", "cliente": "...", "litros": 0.0, "importe_total": 0.0, "efectivo": 0.0, "nro_factura": "...", "nro_orden": "..."}
-                        """
+                        instruccion = "Sos un experto administrativo. Extraé datos de factura y orden. Si el efectivo está tachado poné 0.0. Devolvé SOLO un JSON con: fecha, chofer, cliente, litros, importe_total, efectivo, nro_factura, nro_orden."
                     else:
-                        instruccion = """
-                        Analizá solo esta factura. En chofer y nro_orden poné 'Sin orden' y efectivo 0.0.
-                        IMPORTANTE: Tu respuesta debe ser ÚNICA y EXCLUSIVAMENTE un objeto JSON válido. NO agregues saludos, NO uses formato markdown (```json), NO agregues explicaciones.
-                        Formato exacto requerido:
-                        {"fecha": "...", "chofer": "Sin orden", "cliente": "...", "litros": 0.0, "importe_total": 0.0, "efectivo": 0.0, "nro_factura": "...", "nro_orden": "Sin orden"}
-                        """
+                        instruccion = "Analizá solo esta factura. Devolvé un JSON con fecha, cliente, litros, importe_total y nro_factura. En chofer y nro_orden poné 'Sin orden' y efectivo 0.0."
 
                     cosas_para_ia.insert(0, instruccion)
 
+                    # MODELO 8B: Más resistente a saturación de servidores
                     res = cliente.models.generate_content(
-                        model='gemini-2.5-flash', 
+                        model='gemini-1.5-flash-8b', 
                         contents=cosas_para_ia
                     )
                     
@@ -154,10 +124,8 @@ if "Ventas a Camiones" in opcion:
 
     if st.session_state.resumen_ventas:
         st.divider()
-        st.subheader("📋 Resumen Acumulado del Día")
         df = pd.DataFrame(st.session_state.resumen_ventas)
         st.dataframe(df, use_container_width=True)
-
         col_a, col_b = st.columns(2)
         with col_a:
             csv = df.to_csv(index=False).encode('utf-8')
@@ -169,30 +137,19 @@ if "Ventas a Camiones" in opcion:
 
 elif "Facturas de Proveedores" in opcion:
     st.title("📄 Carga de Facturas de Proveedores")
-    st.write("Subí el PDF o la foto de la factura para extraer los datos.")
-    
-    archivo_subido = st.file_uploader("Arrastrá archivo aquí", type=["pdf", "png", "jpg", "jpeg"], key="prov")
+    archivo_subido = st.file_uploader("Subir factura", type=["pdf", "png", "jpg", "jpeg"], key="prov")
 
-    if archivo_subido and st.button("🚀 Extraer Datos Proveedor"):
+    if archivo_subido and st.button("🚀 Extraer Datos"):
         with st.spinner("Analizando..."):
             try:
                 if archivo_subido.name.lower().endswith('.pdf'):
                     lector = PdfReader(archivo_subido)
                     material = lector.pages[0].extract_text()
                 else:
-                    material = Image.open(archivo_subido) # Aseguramos que el paréntesis esté cerrado
+                    material = Image.open(archivo_subido)
 
-                orden = """
-                Analizá esta factura de proveedor de Argentina. 
-                IMPORTANTE: Tu respuesta debe ser ÚNICA y EXCLUSIVAMENTE un objeto JSON válido. NO agregues saludos, NO uses formato markdown (```json).
-                Formato exacto requerido:
-                {"proveedor_nombre": "...", "proveedor_cuit": "...", "numero_comprobante": "...", "fecha_emision": "...", "importe_total": 0.0, "articulos": [{"descripcion": "...", "cantidad": 0, "precio_unitario": 0.0}]}
-                """
-                
-                respuesta = cliente.models.generate_content(model='gemini-2.5-flash', contents=[orden, material])
-                st.success("¡Datos extraídos!")
-                
-                texto_limpio = respuesta.text.replace("```json", "").replace("```", "").strip()
-                st.code(texto_limpio, language="json")
+                orden = "Extraé los datos de esta factura de proveedor en formato JSON puro."
+                respuesta = cliente.models.generate_content(model='gemini-1.5-flash-8b', contents=[orden, material])
+                st.code(respuesta.text.replace("```json", "").replace("```", "").strip(), language="json")
             except Exception as e:
-                st.error(f"Error al procesar el archivo: {e}")
+                st.error(f"Error: {e}")
