@@ -45,7 +45,6 @@ st.markdown(f"""
 # ==========================================
 cliente = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
 
-# CONTADOR PARA REINICIAR UPLOADERS
 if 'contador_carga' not in st.session_state:
     st.session_state.contador_carga = 0
 if 'resumen_ventas' not in st.session_state:
@@ -62,7 +61,7 @@ else:
 
 opcion = st.sidebar.radio("Seleccioná la tarea:", ["🚛 Ventas a Camiones", "📄 Facturas de Proveedores"])
 st.sidebar.divider()
-st.sidebar.info("Sistema v3.6 - Reset de Documentos")
+st.sidebar.info("Sistema v3.7 - Cámara + Reset")
 
 # ==========================================
 # 3. MÓDULO: VENTAS A CAMIONES
@@ -70,31 +69,46 @@ st.sidebar.info("Sistema v3.6 - Reset de Documentos")
 if opcion == "🚛 Ventas a Camiones":
     st.title("🚛 Registro de Carga de Camiones")
     
-    col_files = st.columns(2)
-    # La clave (key) cambia cada vez que contador_carga aumenta, limpiando el botón
-    with col_files[0]:
-        f_factura = st.file_uploader("1. Factura (Imagen o PDF)", 
-                                     type=["jpg", "png", "jpeg", "pdf"], 
-                                     key=f"fact_{st.session_state.contador_carga}")
-    with col_files[1]:
-        f_orden = st.file_uploader("2. Vale de Carga (Imagen)", 
-                                   type=["jpg", "png", "jpeg"], 
-                                   key=f"ord_{st.session_state.contador_carga}")
+    # --- ENTRADA DE DATOS (CÁMARA Y ARCHIVOS) ---
+    st.subheader("📸 Paso 1: Capturar o Subir Documentos")
+    
+    col_cam, col_file = st.columns(2)
+    
+    with col_cam:
+        st.markdown("**Usar Cámara**")
+        cam_f = st.camera_input("Foto Factura", key=f"cam_f_{st.session_state.contador_carga}")
+        cam_o = st.camera_input("Foto Vale de Carga", key=f"cam_o_{st.session_state.contador_carga}")
+        
+    with col_file:
+        st.markdown("**O subir archivos guardados**")
+        up_f = st.file_uploader("Archivo Factura (PDF/JPG)", type=["pdf","jpg","png","jpeg"], key=f"up_f_{st.session_state.contador_carga}")
+        up_o = st.file_uploader("Archivo Vale (JPG/PNG)", type=["jpg","png","jpeg"], key=f"up_o_{st.session_state.contador_carga}")
 
-    if f_factura and f_orden and st.button("🔍 ANALIZAR AMBOS DOCUMENTOS"):
-        with st.spinner("Procesando documentos..."):
+    # Prioridad: Cámara > Archivo
+    doc_f = cam_f if cam_f else up_f
+    doc_o = cam_o if cam_o else up_o
+
+    if doc_f and doc_o and st.button("🔍 ANALIZAR DOCUMENTOS"):
+        with st.spinner("Analizando con Inteligencia Artificial..."):
             try:
-                img_factura = Image.open(f_factura) if not f_factura.name.lower().endswith('.pdf') else f_factura
-                img_orden = Image.open(f_orden)
+                # Preparar factura (manejo de PDF o Imagen)
+                if hasattr(doc_f, 'name') and doc_f.name.lower().endswith('.pdf'):
+                    reader = PdfReader(doc_f)
+                    text_pdf = "\n".join([p.extract_text() for p in reader.pages[:1]])
+                    input_f = f"Texto de Factura: {text_pdf}"
+                else:
+                    input_f = Image.open(doc_f)
+                
+                input_o = Image.open(doc_o)
                 
                 prompt = """
                 Analizá estos dos documentos y extraé un JSON único:
-                1. DEL VALE: 'fecha', 'entidad_pagadora', 'chofer', 'orden_litros' (nro en recuadro ORDEN a la derecha de litros), 'efectivo' (monto), 'orden_efectivo' (nro en recuadro ORDEN a la derecha de efectivo).
+                1. DEL VALE: 'fecha', 'entidad_pagadora', 'chofer', 'orden_litros', 'efectivo', 'orden_efectivo'.
                 2. DE LA FACTURA: 'razon_social', 'litros_factura', 'importe', 'nro_factura'.
-                Devolvé ÚNICAMENTE el JSON.
+                Devolvé ÚNICAMENTE el JSON puro.
                 """
                 
-                res = cliente.models.generate_content(model='gemini-2.5-pro', contents=[prompt, img_factura, img_orden])
+                res = cliente.models.generate_content(model='gemini-2.5-pro', contents=[prompt, input_f, input_o])
                 raw_text = res.text.strip().replace('```json', '').replace('```', '')
                 start, end = raw_text.find('{'), raw_text.rfind('}') + 1
                 st.session_state.datos_temp = json.loads(raw_text[start:end])
@@ -102,9 +116,10 @@ if opcion == "🚛 Ventas a Camiones":
             except Exception as e:
                 st.error(f"Error: {e}")
 
+    # --- FORMULARIO DE VALIDACIÓN ---
     if st.session_state.datos_temp:
-        with st.form("validador_v6"):
-            st.subheader("📝 Confirmar Información")
+        with st.form("validador_v7"):
+            st.subheader("📝 Paso 2: Confirmar Información")
             
             c1, c2, c3 = st.columns([1, 1, 2])
             fecha = c1.text_input("Fecha", str(st.session_state.datos_temp.get('fecha', '')))
@@ -118,20 +133,19 @@ if opcion == "🚛 Ventas a Camiones":
 
             litros = c4.number_input("Litros", value=to_f(st.session_state.datos_temp.get('litros_factura', 0.0)), format="%.4f")
             importe = c5.number_input("Importe", value=to_f(st.session_state.datos_temp.get('importe', 0.0)))
-            factura_nro = c6.text_input("Factura", str(st.session_state.datos_temp.get('nro_factura', '')))
+            factura_nro = c6.text_input("Factura Nº", str(st.session_state.datos_temp.get('nro_factura', '')))
             
             entidad = st.text_input("Entidad pagadora", str(st.session_state.datos_temp.get('entidad_pagadora', '')))
             
-            with st.expander("Control de Orden y Efectivo", expanded=True):
+            with st.expander("Control de Órdenes y Efectivo", expanded=True):
                 ca1, ca2, ca3 = st.columns(3)
-                
                 def clean_order(v):
                     val = str(v).strip()
                     return int(val) if val.isdigit() else val
 
-                o_litros = ca1.text_input("Orden de Litros", str(st.session_state.datos_temp.get('orden_litros', '')))
+                o_litros = ca1.text_input("Orden Litros", str(st.session_state.datos_temp.get('orden_litros', '')))
                 v_efectivo = ca2.number_input("Efectivo", value=to_f(st.session_state.datos_temp.get('efectivo', 0.0)))
-                o_efectivo = ca3.text_input("Orden de Efectivo", str(st.session_state.datos_temp.get('orden_efectivo', '')))
+                o_efectivo = ca3.text_input("Orden Efectivo", str(st.session_state.datos_temp.get('orden_efectivo', '')))
 
             if st.form_submit_button("✅ GUARDAR EN PLANILLA"):
                 registro = {
@@ -140,85 +154,69 @@ if opcion == "🚛 Ventas a Camiones":
                     "Entidad pagadora": entidad, 
                     "Orden Litros": clean_order(o_litros) if o_litros != "None" else "",
                     "Efectivo": v_efectivo, 
-                    "Orden Efectivo": o_efectivo if o_efectivo != "None" else ""
+                    "Orden Efectivo": clean_order(o_efectivo) if o_efectivo != "None" else ""
                 }
                 st.session_state.resumen_ventas.append(registro)
                 st.session_state.datos_temp = None
-                
-                # ESTA ES LA CLAVE: Cambiar el contador limpia los uploaders
+                # Incrementamos contador para limpiar cámara y archivos
                 st.session_state.contador_carga += 1
-                
-                st.success("¡Venta guardada! Los botones de subida se han reiniciado.")
                 st.rerun()
 
+    # --- TABLA Y EXPORTACIÓN ---
     if st.session_state.resumen_ventas:
         st.divider()
         df = pd.DataFrame(st.session_state.resumen_ventas)
-        orden_columnas = ["Fecha", "Chofer", "Cliente", "Litros", "Importe", "Factura", "Entidad pagadora", "Orden Litros", "Efectivo", "Orden Efectivo"]
-        df = df[orden_columnas]
+        cols = ["Fecha", "Chofer", "Cliente", "Litros", "Importe", "Factura", "Entidad pagadora", "Orden Litros", "Efectivo", "Orden Efectivo"]
+        df = df[cols]
         
-        st.subheader(f"📋 Planilla de Control ({len(df)} registros)")
+        st.subheader(f"📋 Planilla Acumulada ({len(df)} registros)")
         st.dataframe(df, use_container_width=True)
         
-        col_btn1, col_btn2 = st.columns(2)
+        col_ex1, col_ex2 = st.columns(2)
         
         buffer = io.BytesIO()
         with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-            df.to_excel(writer, index=False, sheet_name='Ventas_Camiones')
-            worksheet = writer.sheets['Ventas_Camiones']
-            last_row = len(df) + 1
+            df.to_excel(writer, index=False, sheet_name='Ventas')
+            ws = writer.sheets['Ventas']
+            last_r = len(df) + 1
             
-            rojo_fill = PatternFill(start_color="C8102E", end_color="C8102E", fill_type="solid")
-            tot_fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
-            font_blanca = Font(color="FFFFFF", bold=True)
-            font_bold = Font(bold=True)
-            borde = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+            # Estilos Excel
+            fill_header = PatternFill(start_color="C8102E", end_color="C8102E", fill_type="solid")
+            fill_tot = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
+            f_white = Font(color="FFFFFF", bold=True)
+            f_bold = Font(bold=True)
+            border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
             
-            fmt_moneda = '"$"#,##0.00'
-            fmt_litros = '#,##0.0000'
+            for cell in ws[1]:
+                cell.fill, cell.font, cell.border, cell.alignment = fill_header, f_white, border, Alignment(horizontal="center")
 
-            for cell in worksheet[1]:
-                cell.fill, cell.font, cell.border, cell.alignment = rojo_fill, font_blanca, borde, Alignment(horizontal="center")
-
-            for row in worksheet.iter_rows(min_row=2, max_row=last_row):
+            for row in ws.iter_rows(min_row=2, max_row=last_r):
                 for cell in row:
-                    cell.border = borde
-                    if cell.column_letter in ['E', 'I']:
-                        cell.number_format = fmt_moneda
-                    if cell.column_letter == 'D':
-                        cell.number_format = fmt_litros
-                    if cell.column_letter in ['H', 'J']:
-                        cell.number_format = '0'
+                    cell.border = border
+                    if cell.column_letter in ['E', 'I']: cell.number_format = '"$"#,##0.00'
+                    if cell.column_letter == 'D': cell.number_format = '#,##0.0000'
+                    if cell.column_letter in ['H', 'J']: cell.number_format = '0'
 
-            # Fila de Totales
-            row_tot = last_row + 1
-            worksheet.cell(row=row_tot, column=3, value="TOTALES:").font = font_bold
-            worksheet.cell(row=row_tot, column=3).alignment = Alignment(horizontal="right")
-
-            for col_idx, col_let in [(4, 'D'), (5, 'E'), (9, 'I')]:
-                c = worksheet.cell(row=row_tot, column=col_idx)
-                c.value = f"=SUM({col_let}2:{col_let}{last_row})"
-                c.font, c.fill, c.border = font_bold, tot_fill, borde
-                c.number_format = fmt_moneda if col_let in ['E', 'I'] else fmt_litros
+            # Totales
+            row_t = last_r + 1
+            ws.cell(row=row_t, column=3, value="TOTALES:").font = f_bold
+            for c_idx, c_let in [(4, 'D'), (5, 'E'), (9, 'I')]:
+                cell_t = ws.cell(row=row_t, column=c_idx)
+                cell_t.value = f"=SUM({c_let}2:{c_let}{last_r})"
+                cell_t.font, cell_t.fill, cell_t.border = f_bold, fill_tot, border
+                cell_t.number_format = '"$"#,##0.00' if c_let != 'D' else '#,##0.0000'
 
             for i, col in enumerate(df.columns):
-                column_len = max(df[col].astype(str).map(len).max(), len(col)) + 4
-                worksheet.column_dimensions[get_column_letter(i + 1)].width = column_len
+                w = max(df[col].astype(str).map(len).max(), len(col)) + 4
+                ws.column_dimensions[get_column_letter(i + 1)].width = w
         
-        col_btn1.download_button(
-            label="📥 Descargar Excel con Totales", 
-            data=buffer.getvalue(), 
-            file_name="ventas_bc_final.xlsx", 
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True
-        )
-        
-        if col_btn2.button("🗑️ Limpiar Planilla", use_container_width=True):
+        col_ex1.download_button("📥 Descargar Excel Pro", buffer.getvalue(), "ventas_bc.xlsx", use_container_width=True)
+        if col_ex2.button("🗑️ Vaciar Todo", use_container_width=True):
             st.session_state.resumen_ventas = []
             st.rerun()
 
 # ==========================================
-# 4. MÓDULO: PROVEEDORES (Estable)
+# 4. MÓDULO: PROVEEDORES
 # ==========================================
 elif opcion == "📄 Facturas de Proveedores":
     st.title("📄 Gestión de Proveedores")
@@ -229,10 +227,14 @@ elif opcion == "📄 Facturas de Proveedores":
                 if archivo_prov.name.lower().endswith('.pdf'):
                     reader = PdfReader(archivo_prov)
                     text_pdf = "\n".join([page.extract_text() for page in reader.pages[:2]])
-                    mat = [f"Texto: {text_pdf}"]
+                    input_data = [f"Texto: {text_pdf}"]
                 else:
-                    mat = [Image.open(archivo_prov)]
-                res = cliente.models.generate_content(model='gemini-2.5-pro', contents=mat + ["Extraé CUIT, Razón Social, Fecha, Neto, IVA y Total en JSON."])
+                    input_data = [Image.open(archivo_prov)]
+                
+                res = cliente.models.generate_content(
+                    model='gemini-2.5-pro',
+                    contents=input_data + ["Extraé CUIT, Razón Social, Fecha, Neto, IVA y Total en JSON."]
+                )
                 raw = res.text.strip().replace('```json', '').replace('```', '')
                 st.json(raw[raw.find('{'):raw.rfind('}')+1])
             except Exception as e:
