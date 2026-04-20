@@ -166,4 +166,17 @@ elif opcion == "📄 Facturas de Proveedores":
     if archivo_prov and st.button("🚀 PROCESAR FACTURA"):
         with st.spinner("Analizando comprobante..."):
             try:
-                if archivo_prov.name.lower().
+                if archivo_prov.name.lower().endswith('.pdf'):
+                    reader = PdfReader(archivo_prov)
+                    text_pdf = "\n".join([page.extract_text() for page in reader.pages])
+                    input_prov = [f"Texto extraído del PDF:\n{text_pdf}"]
+                else:
+                    input_prov = [Image.open(archivo_prov)]
+                
+                prompt_prov = "Extraé CUIT, Razón Social, Fecha, Total e Impuestos en un formato JSON limpio."
+                res_prov = cliente.models.generate_content(model='gemini-2.5-pro', contents=input_prov + [prompt_prov])
+                
+                res_text = res_prov.text.strip().replace('```json', '').replace('```', '')
+                st.json(res_text[res_text.find('{'):res_text.rfind('}')+1])
+            except Exception as e:
+                st.error(f"Error: {e}")
