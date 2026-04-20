@@ -49,10 +49,13 @@ st.sidebar.divider()
 st.sidebar.success("💎 NIVEL: GEMINI 1.5 PRO (PAGO ACTIVO)")
 
 # ==========================================
-# 3. CONEXIÓN PRO (LIMPIA Y DIRECTA)
+# 3. CONEXIÓN PRO (BLINDADA A V1)
 # ==========================================
-# Quitamos el parche 'v1'. Dejamos que la conexión fluya natural ahora que sos usuario de pago.
-cliente = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
+# Forzamos v1 para que NUNCA MÁS busque la ruta v1beta que da error 404
+cliente = genai.Client(
+    api_key=st.secrets["GEMINI_API_KEY"],
+    http_options={'api_version': 'v1'}
+)
 
 if 'resumen_ventas' not in st.session_state:
     st.session_state.resumen_ventas = []
@@ -70,21 +73,21 @@ if "Ventas a Camiones" in opcion:
                 material = [img_f]
                 if f_orden: material.append(Image.open(f_orden))
                 
-                prompt = """Sos un experto administrativo. Extraé: fecha, chofer, cliente, litros, importe_total, efectivo, nro_factura, nro_orden. 
-                Si el efectivo está tachado o no figura, poné 0.0. 
-                Devolvé ÚNICAMENTE un objeto JSON puro."""
+                # Le pedimos específicamente los campos para que arme las llaves del JSON
+                prompt = """Extraé los siguientes datos: fecha, chofer, cliente, litros, importe_total, efectivo, nro_factura, nro_orden. 
+                Si el efectivo está tachado o no figura, el valor debe ser 0.0."""
                 
-                # MODELO 1.5-PRO (Usamos el alias 'latest' para asegurar que siempre agarre el más inteligente)
+                # Usamos el modelo estable (sin -latest) y le exigimos salida JSON nativa
                 res = cliente.models.generate_content(
-                    model='gemini-1.5-pro-latest', 
-                    contents=[prompt] + material
+                    model='gemini-1.5-pro', 
+                    contents=[prompt] + material,
+                    config={
+                        "response_mime_type": "application/json"
+                    }
                 )
                 
-                # Limpieza de respuesta para asegurar que la tabla no se rompa
-                txt = res.text.strip().replace('```json', '').replace('```', '')
-                inicio = txt.find('{')
-                fin = txt.rfind('}') + 1
-                datos = json.loads(txt[inicio:fin])
+                # Como la API ya nos devuelve un JSON perfecto, lo cargamos directo sin limpiar texto
+                datos = json.loads(res.text)
                 
                 st.session_state.resumen_ventas.append(datos)
                 st.success("¡Venta cargada correctamente en la planilla!")
@@ -115,7 +118,11 @@ elif "Facturas de Proveedores" in opcion:
                 else:
                     mat = Image.open(archivo)
                 
-                res = cliente.models.generate_content(model='gemini-1.5-pro-latest', contents=["Extraé datos de esta factura en JSON puro", mat])
+                res = cliente.models.generate_content(
+                    model='gemini-1.5-pro', 
+                    contents=["Extraé datos de esta factura", mat],
+                    config={"response_mime_type": "application/json"}
+                )
                 st.code(res.text)
             except Exception as e:
                 st.error(f"Error: {e}")
