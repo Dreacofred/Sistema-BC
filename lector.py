@@ -62,7 +62,7 @@ st.sidebar.divider()
 st.sidebar.info("Sistema v3.5 - Reporte con Totales")
 
 # ==========================================
-# 3. MÓDULO: VENTAS A CAMIONES
+# 3. MÓDULO: VENTAS A CAMIONES (CORREGIDO)
 # ==========================================
 if opcion == "🚛 Ventas a Camiones":
     st.title("🚛 Registro de Carga de Camiones")
@@ -94,48 +94,55 @@ if opcion == "🚛 Ventas a Camiones":
             except Exception as e:
                 st.error(f"Error: {e}")
 
+    # FORMULARIO CON PROTECCIÓN CONTRA ERRORES DE TIPO (Fix TypeError)
     if st.session_state.datos_temp:
-        with st.form("validador_v5"):
+        with st.form("validador_v5_fix"):
             st.subheader("📝 Confirmar Información")
+            
+            # Función auxiliar para convertir a float de forma segura
+            def safe_float(val):
+                try:
+                    return float(val) if val is not None else 0.0
+                except:
+                    return 0.0
+
             c1, c2, c3 = st.columns([1, 1, 2])
-            fecha = c1.text_input("Fecha", str(st.session_state.datos_temp.get('fecha', '')))
-            chofer = c2.text_input("Chofer", str(st.session_state.datos_temp.get('chofer', '')))
-            cliente_rs = c3.text_input("Cliente", str(st.session_state.datos_temp.get('razon_social', '')))
+            fecha = c1.text_input("Fecha", str(st.session_state.datos_temp.get('fecha') or ''))
+            chofer = c2.text_input("Chofer", str(st.session_state.datos_temp.get('chofer') or ''))
+            cliente_rs = c3.text_input("Cliente", str(st.session_state.datos_temp.get('razon_social') or ''))
             
             c4, c5, c6 = st.columns(3)
-            litros = c4.number_input("Litros", value=float(st.session_state.datos_temp.get('litros_factura', 0.0)))
-            importe = c5.number_input("Importe", value=float(st.session_state.datos_temp.get('importe', 0.0)))
-            factura_nro = c6.text_input("Factura", str(st.session_state.datos_temp.get('nro_factura', '')))
+            v_litros_val = safe_float(st.session_state.datos_temp.get('litros_factura'))
+            v_importe_val = safe_float(st.session_state.datos_temp.get('importe'))
             
-            entidad = st.text_input("Entidad pagadora", str(st.session_state.datos_temp.get('entidad_pagadora', '')))
+            litros = c4.number_input("Litros", value=v_litros_val)
+            importe = c5.number_input("Importe", value=v_importe_val)
+            factura_nro = c6.text_input("Factura", str(st.session_state.datos_temp.get('nro_factura') or ''))
+            
+            entidad = st.text_input("Entidad pagadora", str(st.session_state.datos_temp.get('entidad_pagadora') or ''))
             
             with st.expander("Control de Orden y Efectivo", expanded=True):
                 ca1, ca2, ca3 = st.columns(3)
-                o_litros = ca1.text_input("Orden Litros", str(st.session_state.datos_temp.get('orden_litros', '')))
-                v_efectivo = ca2.number_input("Efectivo", value=float(st.session_state.datos_temp.get('efectivo', 0.0)))
-                o_efectivo = ca3.text_input("Orden Efectivo", str(st.session_state.datos_temp.get('orden_efectivo', '')))
+                o_litros = ca1.text_input("Orden Litros", str(st.session_state.datos_temp.get('orden_litros') or ''))
+                
+                v_efec_val = safe_float(st.session_state.datos_temp.get('efectivo'))
+                v_efectivo = ca2.number_input("Efectivo", value=v_efec_val)
+                
+                o_efectivo = ca3.text_input("Orden Efectivo", str(st.session_state.datos_temp.get('orden_efectivo') or ''))
 
+            # EL BOTÓN QUE FALTABA PARA CERRAR EL FORMULARIO
             if st.form_submit_button("✅ GUARDAR EN PLANILLA"):
                 registro = {
                     "Fecha": fecha, "Chofer": chofer, "Cliente": cliente_rs,
                     "Litros": litros, "Importe": importe, "Factura": factura_nro,
-                    "Entidad pagadora": entidad, "Orden Litros": o_litros if o_litros else "",
-                    "Efectivo": v_efectivo, "Orden Efectivo": o_efectivo if o_efectivo else ""
+                    "Entidad pagadora": entidad, 
+                    "Orden Litros": o_litros if o_litros != 'None' else "",
+                    "Efectivo": v_efectivo, 
+                    "Orden Efectivo": o_efectivo if o_efectivo != 'None' else ""
                 }
                 st.session_state.resumen_ventas.append(registro)
                 st.session_state.datos_temp = None
                 st.rerun()
-
-    if st.session_state.resumen_ventas:
-        st.divider()
-        df = pd.DataFrame(st.session_state.resumen_ventas)
-        orden_columnas = ["Fecha", "Chofer", "Cliente", "Litros", "Importe", "Factura", "Entidad pagadora", "Orden Litros", "Efectivo", "Orden Efectivo"]
-        df = df[orden_columnas]
-        
-        st.subheader(f"📋 Planilla de Control ({len(df)} registros)")
-        st.dataframe(df, use_container_width=True)
-        
-        col_btn1, col_btn2 = st.columns(2)
         
         # ==========================================
         # EXPORTACIÓN A EXCEL CON TOTALES Y FORMATO $
