@@ -22,10 +22,19 @@ st.set_page_config(
 
 st.markdown(f"""
     <style>
+        /* Forzar fondo blanco en toda la aplicación */
+        .stApp {{
+            background-color: white !important;
+        }}
+        p, span, div {{
+            color: #333333;
+        }}
+        /* Títulos */
         h1, h2, h3 {{
             color: {COLOR_ROJO} !important;
             font-family: 'Montserrat', sans-serif;
         }}
+        /* Botones de acción normales */
         .stButton>button {{
             background-color: {COLOR_ROJO};
             color: white;
@@ -39,6 +48,15 @@ st.markdown(f"""
             color: black;
             transform: scale(1.05);
         }}
+        /* Botones de Subir Archivo (Upload) */
+        [data-testid="stFileUploader"] button {{
+            background-color: {COLOR_ROJO} !important;
+            color: white !important;
+            font-weight: bold !important;
+            border-radius: 20px !important;
+            border: none !important;
+        }}
+        /* Fondo de la barra lateral */
         [data-testid="stSidebar"] {{
             background-color: white;
             border-right: 2px solid {COLOR_FONDO_AZUL};
@@ -47,13 +65,12 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. BARRA LATERAL CON LOGO
+# 2. BARRA LATERAL CON LOGO Y MENÚ
 # ==========================================
 st.sidebar.markdown("<br>", unsafe_allow_html=True)
 
-# Buscamos automáticamente el archivo sin importar si es mayúscula o JPG/JPEG
 ruta_logo = None
-for variante in ["Logo.jpeg", "Logo.jpg", "logo.jpeg", "logo.jpg"]:
+for variante in ["Logo.jpeg", "Logo.jpg", "logo.jpeg", "logo.jpg", "logo.png"]:
     if os.path.exists(variante):
         ruta_logo = variante
         break
@@ -68,6 +85,15 @@ else:
 st.sidebar.markdown(f"<h3 style='text-align: center;'>Panel de Gestión</h3>", unsafe_allow_html=True)
 st.sidebar.divider()
 
+opcion = st.sidebar.radio(
+    "Seleccioná tarea:",
+    ["🚛 Ventas a Camiones", "📄 Facturas de Proveedores"],
+    key="menu_principal"
+)
+
+st.sidebar.markdown("<br><br><br><br>", unsafe_allow_html=True)
+st.sidebar.info("Combustibles diseñados para rendir. Calidad garantizada.")
+
 # ==========================================
 # 3. LÓGICA DEL SISTEMA
 # ==========================================
@@ -76,7 +102,6 @@ cliente = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
 if 'resumen_ventas' not in st.session_state:
     st.session_state.resumen_ventas = []
 
-# --- SECCIÓN: VENTAS A CAMIONES ---
 if "Ventas a Camiones" in opcion:
     st.title("🚛 Registro de Resumen de Carga")
     st.write("Herramienta exclusiva para la administración de BC Combustibles.")
@@ -129,7 +154,6 @@ if "Ventas a Camiones" in opcion:
                 except Exception as e:
                     st.error(f"Error al leer los datos. Detalle: {e}")
 
-    # Mostrar tabla acumulada
     if st.session_state.resumen_ventas:
         st.divider()
         st.subheader("📋 Resumen Acumulado del Día")
@@ -145,7 +169,6 @@ if "Ventas a Camiones" in opcion:
                 st.session_state.resumen_ventas = []
                 st.rerun()
 
-# --- SECCIÓN: PROVEEDORES ---
 elif "Facturas de Proveedores" in opcion:
     st.title("📄 Carga de Facturas de Proveedores")
     st.write("Subí el PDF o la foto de la factura para extraer los datos.")
@@ -166,7 +189,6 @@ elif "Facturas de Proveedores" in opcion:
                 respuesta = cliente.models.generate_content(model='gemini-2.0-flash', contents=[orden, material])
                 st.success("¡Datos extraídos!")
                 
-                # Limpiamos el texto por si Gemini devuelve markdown
                 texto_limpio = respuesta.text.replace("```json", "").replace("```", "").strip()
                 st.code(texto_limpio, language="json")
             except Exception as e:
