@@ -126,9 +126,9 @@ if "Ventas a Camiones" in opcion:
 
                     cosas_para_ia.insert(0, instruccion)
 
-                    # CAMBIO CLAVE: USAMOS 1.5 FLASH PARA EVITAR EL BLOQUEO
+                    # CAMBIO CLAVE: USAMOS 2.5 FLASH PARA EVITAR EL BLOQUEO
                     res = cliente.models.generate_content(
-                        model='gemini-1.5-flash', 
+                        model='gemini-2.5-flash', 
                         contents=cosas_para_ia
                     )
                     
@@ -170,8 +170,8 @@ elif "Facturas de Proveedores" in opcion:
 
                 orden = "Extraé los datos de esta factura de proveedor en formato JSON."
                 
-                # CAMBIO CLAVE: USAMOS 1.5 FLASH
-                respuesta = cliente.models.generate_content(model='gemini-1.5-flash', contents=[orden, material])
+                # CAMBIO CLAVE: USAMOS 2.5 FLASH
+                respuesta = cliente.models.generate_content(model='gemini-2.5-flash', contents=[orden, material])
                 st.code(respuesta.text.replace("```json", "").replace("```", "").strip(), language="json")
             except Exception as e:
                 st.error(f"Error: {e}")
