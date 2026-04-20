@@ -74,20 +74,22 @@ if opcion == "🚛 Ventas a Camiones":
     if f_factura and f_orden and st.button("🔍 ANALIZAR AMBOS DOCUMENTOS"):
         with st.spinner("Procesando documentos y cruzando datos..."):
             try:
-                # Cargar imágenes para enviar a Gemini
                 img_factura = Image.open(f_factura) if not f_factura.name.lower().endswith('.pdf') else f_factura
                 img_orden = Image.open(f_orden)
                 
+                # PROMPT CORREGIDO: Explicación visual exacta del Vale de Carga
                 prompt = """
                 Analizá estos dos documentos de una estación de servicio y extraé un JSON único con estas reglas estrictas:
                 
-                1. DEL PAPEL DE CARGA (Orden):
+                1. DEL PAPEL DE CARGA (Vale de Carga):
                    - 'fecha'
                    - 'entidad_pagadora'
                    - 'chofer'
-                   - 'orden_litros' (los litros que figuran en este papel)
-                   - 'efectivo' (monto numérico si lo hay, de lo contrario 0.0)
-                   - 'orden_efectivo' (número de comprobante o referencia de efectivo en el papel)
+                   - ATENCIÓN A LA ESTRUCTURA DE CASILLEROS:
+                     * 'litros_papel': El valor numérico en la casilla que dice "LITROS" a la izquierda.
+                     * 'orden_litros': El valor alfanumérico en la casilla "ORDEN" que está a la derecha de Litros. Si está vacía, dejá un string vacío "".
+                     * 'efectivo': El valor numérico en la casilla "EFECTIVO" a la izquierda. Si está vacía, poné 0.0.
+                     * 'orden_efectivo': El valor alfanumérico en la casilla "ORDEN" que está a la derecha de Efectivo. Si está vacía, dejá "".
                 
                 2. DE LA FACTURA:
                    - 'razon_social' (el nombre del cliente)
@@ -103,7 +105,6 @@ if opcion == "🚛 Ventas a Camiones":
                     contents=[prompt, img_factura, img_orden]
                 )
                 
-                # Limpieza del texto recibido
                 raw_text = res.text.strip().replace('```json', '').replace('```', '')
                 start, end = raw_text.find('{'), raw_text.rfind('}') + 1
                 st.session_state.datos_temp = json.loads(raw_text[start:end])
@@ -111,20 +112,17 @@ if opcion == "🚛 Ventas a Camiones":
             except Exception as e:
                 st.error(f"Error en el procesamiento: {e}")
 
-    # Formulario de validación con el orden de columnas exacto
+    # Formulario de validación
     if st.session_state.datos_temp:
         with st.form("validador_v3"):
             st.subheader("📝 Confirmar Información Cruzada")
             
-            # Fila 1
             c1, c2, c3 = st.columns([1, 1, 2])
             fecha = c1.text_input("Fecha", str(st.session_state.datos_temp.get('fecha', '')))
             chofer = c2.text_input("Chofer", str(st.session_state.datos_temp.get('chofer', '')))
             cliente_rs = c3.text_input("Cliente (Razón Social)", str(st.session_state.datos_temp.get('razon_social', '')))
             
-            # Fila 2
             c4, c5, c6 = st.columns(3)
-            # Manejo seguro de conversiones a float por si la IA devuelve un string vacío
             try: litros_val = float(st.session_state.datos_temp.get('litros_factura', 0.0))
             except: litros_val = 0.0
             
@@ -137,16 +135,17 @@ if opcion == "🚛 Ventas a Camiones":
             
             entidad = st.text_input("Entidad pagadora", str(st.session_state.datos_temp.get('entidad_pagadora', '')))
             
-            # Fila 3: Datos de la Orden y Efectivo
-            with st.expander("Datos adicionales del Papel de Carga", expanded=True):
-                ca1, ca2, ca3 = st.columns(3)
+            # Fila 3: Datos extraídos explícitamente del Vale de Carga
+            with st.expander("Datos adicionales del Vale de Carga", expanded=True):
+                ca1, ca2, ca3, ca4 = st.columns(4)
                 
                 try: efectivo_val = float(st.session_state.datos_temp.get('efectivo', 0.0))
                 except: efectivo_val = 0.0
 
-                o_litros = ca1.text_input("Orden de Litros", str(st.session_state.datos_temp.get('orden_litros', '')))
-                v_efectivo = ca2.number_input("Efectivo", value=efectivo_val)
-                o_efectivo = ca3.text_input("Orden de Efectivo", str(st.session_state.datos_temp.get('orden_efectivo', '')))
+                l_papel = ca1.text_input("Litros en Papel", str(st.session_state.datos_temp.get('litros_papel', '')))
+                o_litros = ca2.text_input("Orden de Litros", str(st.session_state.datos_temp.get('orden_litros', '')))
+                v_efectivo = ca3.number_input("Efectivo", value=efectivo_val)
+                o_efectivo = ca4.text_input("Orden de Efectivo", str(st.session_state.datos_temp.get('orden_efectivo', '')))
 
             if st.form_submit_button("✅ GUARDAR EN PLANILLA"):
                 registro = {
@@ -164,6 +163,27 @@ if opcion == "🚛 Ventas a Camiones":
                 st.session_state.resumen_ventas.append(registro)
                 st.session_state.datos_temp = None
                 st.rerun()
+
+    if st.session_state.resumen_ventas:
+        st.divider()
+        df = pd.DataFrame(st.session_state.resumen_ventas)
+        
+        orden_columnas = [
+            "Fecha", "Chofer", "Cliente", "Litros", "Importe", 
+            "Factura", "Entidad pagadora", "Orden Litros", "Efectivo", "Orden Efectivo"
+        ]
+        df = df[orden_columnas]
+        
+        st.subheader(f"📋 Planilla de Control ({len(df)} registros)")
+        st.dataframe(df, use_container_width=True)
+        
+        col_btn1, col_btn2 = st.columns(2)
+        csv = df.to_csv(index=False).encode('utf-8')
+        col_btn1.download_button("📥 Descargar Planilla CSV", data=csv, file_name="ventas_estacion.csv", use_container_width=True)
+        
+        if col_btn2.button("🗑️ Limpiar Planilla", use_container_width=True):
+            st.session_state.resumen_ventas = []
+            st.rerun()
 
     # Mostrar Planilla y Botones de acción
     if st.session_state.resumen_ventas:
