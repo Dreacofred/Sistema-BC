@@ -84,7 +84,7 @@ opcion = st.sidebar.radio(
 )
 
 # Espacio publicitario/institucional abajo en el menú
-st.sidebar.v_spacer(height=100)
+st.sidebar.markdown("<br><br><br><br>", unsafe_allow_html=True)
 st.sidebar.info("Combustibles diseñados para rendir. Calidad garantizada.")
 
 
