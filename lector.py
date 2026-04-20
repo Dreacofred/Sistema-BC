@@ -26,36 +26,64 @@ if opcion == "Facturas de Proveedores":
         # ... (aquí va tu lógica de proveedores que ya funciona) ...
         st.write("Procesando...")
 
-# SECCIÓN 2: VENTAS A CAMIONES (Con Memoria)
+# SECCIÓN 2: VENTAS A CAMIONES (Con Memoria y Orden Opcional)
 elif opcion == "Ventas a Camiones":
     st.title("🚛 Resumen de Carga para Clientes")
     
     col1, col2 = st.columns(2)
     with col1:
-        f_factura = st.file_uploader("Foto Factura", type=["jpg", "png"], key="f1")
+        f_factura = st.file_uploader("1. Foto Factura (Obligatorio)", type=["jpg", "png", "jpeg"], key="f1")
     with col2:
-        f_orden = st.file_uploader("Foto Orden Manual", type=["jpg", "png"], key="f2")
+        f_orden = st.file_uploader("2. Foto Orden Manual (Opcional)", type=["jpg", "png", "jpeg"], key="f2")
 
-    if f_factura and f_orden:
-        if st.button("🔍 Analizar Par de Fotos"):
-            with st.spinner("La IA está cruzando datos..."):
-                img1 = Image.open(f_factura)
-                img2 = Image.open(f_orden)
-                
-                instruccion = "Sos un experto administrativo. Leé la factura y el papel manuscrito. Extraé: fecha, chofer, cliente, litros, total factura, nro factura y nro orden. Devolveme SOLO un JSON puro."
-                
-                res = cliente.models.generate_content(model='gemini-2.0-flash', contents=[instruccion, img1, img2])
-                
+    # Ahora solo exigimos que f_factura esté cargada
+    if f_factura:
+        if st.button("🔍 Analizar Venta", use_container_width=True):
+            with st.spinner("La IA está leyendo los datos..."):
                 try:
-                    # Limpiamos la respuesta por si la IA pone texto extra
+                    img_factura = Image.open(f_factura)
+                    
+                    # Preparamos la lista de cosas para mandarle a la IA
+                    cosas_para_ia = [img_factura] 
+
+                    # Si Nancy subió la orden, la sumamos a la lista y le damos una instrucción
+                    if f_orden:
+                        img_orden = Image.open(f_orden)
+                        cosas_para_ia.append(img_orden)
+                        instruccion = """
+                        Sos un experto administrativo contable. Te paso dos imágenes: factura y orden manual.
+                        Extraé y cruzá los datos. 
+                        Devolveme SOLO un JSON puro con:
+                        {"fecha": "...", "chofer": "...", "cliente": "...", "litros": 0.0, "importe_total": 0.0, "nro_factura": "...", "nro_orden": "..."}
+                        """
+                    # Si NO subió la orden, cambiamos la instrucción
+                    else:
+                        instruccion = """
+                        Sos un experto administrativo contable. Te paso SOLO una factura de surtidor (esta venta no tiene orden manual).
+                        Extraé de la factura la fecha, cliente, litros (si figuran, si no poné 0), total y nro de factura.
+                        Como no hay orden, en chofer y nro_orden poné "Sin orden".
+                        Devolveme SOLO un JSON puro con:
+                        {"fecha": "...", "chofer": "Sin orden", "cliente": "...", "litros": 0.0, "importe_total": 0.0, "nro_factura": "...", "nro_orden": "Sin orden"}
+                        """
+
+                    # Agregamos la instrucción al principio de la lista
+                    cosas_para_ia.insert(0, instruccion)
+
+                    # Le mandamos el paquete a Gemini
+                    res = cliente.models.generate_content(
+                        model='gemini-2.0-flash', 
+                        contents=cosas_para_ia
+                    )
+                    
+                    # Limpiamos y guardamos el JSON
                     limpio = res.text.replace("```json", "").replace("```", "").strip()
                     datos = json.loads(limpio)
                     
-                    # Guardamos en la memoria
                     st.session_state.resumen_ventas.append(datos)
                     st.success("¡Venta agregada al resumen!")
-                except:
-                    st.error("Error al leer los datos. Asegurate que las fotos sean claras.")
+                
+                except Exception as e:
+                    st.error(f"Error al leer los datos. Detalle: {e}")
 
     # --- MOSTRAR LA TABLA ACUMULADA ---
     if st.session_state.resumen_ventas:
@@ -64,13 +92,10 @@ elif opcion == "Ventas a Camiones":
         df = pd.DataFrame(st.session_state.resumen_ventas)
         st.dataframe(df, use_container_width=True)
 
-        # Botones de acción
         col_a, col_b = st.columns(2)
         with col_a:
-            # Convertimos a CSV para que Nancy lo abra en Excel
             csv = df.to_csv(index=False).encode('utf-8')
             st.download_button("📥 Descargar Excel (CSV)", data=csv, file_name="resumen_carga.csv", mime="text/csv")
-        
         with col_b:
             if st.button("🗑️ Borrar todo y empezar de nuevo"):
                 st.session_state.resumen_ventas = []
