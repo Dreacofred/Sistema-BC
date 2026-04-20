@@ -51,24 +51,22 @@ st.markdown(f"""
 # ==========================================
 st.sidebar.markdown("<br>", unsafe_allow_html=True)
 
-if os.path.exists("logo.png"):
+# Buscamos automáticamente el archivo sin importar si es mayúscula o JPG/JPEG
+ruta_logo = None
+for variante in ["Logo.jpeg", "Logo.jpg", "logo.jpeg", "logo.jpg"]:
+    if os.path.exists(variante):
+        ruta_logo = variante
+        break
+
+if ruta_logo:
     col_logo1, col_logo2, col_logo3 = st.sidebar.columns([1, 2, 1])
     with col_logo2:
-        st.image("logo.png", use_container_width=True)
+        st.image(ruta_logo, use_container_width=True)
 else:
     st.sidebar.markdown(f"<h1 style='text-align: center; color: {COLOR_ROJO};'>BC</h1>", unsafe_allow_html=True)
 
 st.sidebar.markdown(f"<h3 style='text-align: center;'>Panel de Gestión</h3>", unsafe_allow_html=True)
 st.sidebar.divider()
-
-opcion = st.sidebar.radio(
-    "Seleccioná tarea:",
-    ["🚛 Ventas a Camiones", "📄 Facturas de Proveedores"],
-    key="menu_principal"
-)
-
-st.sidebar.markdown("<br><br><br><br>", unsafe_allow_html=True)
-st.sidebar.info("Combustibles diseñados para rendir. Calidad garantizada.")
 
 # ==========================================
 # 3. LÓGICA DEL SISTEMA
