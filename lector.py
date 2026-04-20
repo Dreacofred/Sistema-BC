@@ -22,19 +22,16 @@ st.set_page_config(
 
 st.markdown(f"""
     <style>
-        /* Forzar fondo blanco en toda la aplicación */
         .stApp {{
             background-color: white !important;
         }}
         p, span, div {{
             color: #333333;
         }}
-        /* Títulos */
         h1, h2, h3 {{
             color: {COLOR_ROJO} !important;
             font-family: 'Montserrat', sans-serif;
         }}
-        /* Botones de acción normales */
         .stButton>button {{
             background-color: {COLOR_ROJO};
             color: white;
@@ -48,23 +45,17 @@ st.markdown(f"""
             color: black;
             transform: scale(1.05);
         }}
-        
-        /* --- CORRECCIÓN DEL BOTÓN UPLOAD --- */
-        /* Primero le damos el fondo rojo y la forma */
         [data-testid="stFileUploader"] button {{
             background-color: {COLOR_ROJO} !important;
             border-radius: 20px !important;
             border: none !important;
         }}
-        /* Ahora forzamos que el texto y el ícono sean blancos y en negrita */
         [data-testid="stFileUploader"] button,
         [data-testid="stFileUploader"] button * {{
             color: white !important;
             fill: white !important;
             font-weight: bold !important;
         }}
-        
-        /* Fondo de la barra lateral */
         [data-testid="stSidebar"] {{
             background-color: white;
             border-right: 2px solid {COLOR_FONDO_AZUL};
@@ -103,7 +94,7 @@ st.sidebar.markdown("<br><br><br><br>", unsafe_allow_html=True)
 st.sidebar.info("Combustibles diseñados para rendir. Calidad garantizada.")
 
 # ==========================================
-# 3. LÓGICA DEL SISTEMA
+# 3. LÓGICA DEL SISTEMA (USANDO 1.5 FLASH)
 # ==========================================
 cliente = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
 
@@ -112,7 +103,6 @@ if 'resumen_ventas' not in st.session_state:
 
 if "Ventas a Camiones" in opcion:
     st.title("🚛 Registro de Resumen de Carga")
-    st.write("Herramienta exclusiva para la administración de BC Combustibles.")
     
     col1, col2 = st.columns(2)
     with col1:
@@ -130,26 +120,15 @@ if "Ventas a Camiones" in opcion:
                     if f_orden:
                         img_orden = Image.open(f_orden)
                         cosas_para_ia.append(img_orden)
-                        instruccion = """
-                        Sos un experto administrativo contable. Te paso dos imágenes: factura y orden manual.
-                        Extraé y cruzá los datos. 
-                        Si el campo de Efectivo está tachado, rayado o en blanco en la orden, devolvé 0.0.
-                        Devolveme SOLO un JSON puro con:
-                        {"fecha": "...", "chofer": "...", "cliente": "...", "litros": 0.0, "importe_total": 0.0, "efectivo": 0.0, "nro_factura": "...", "nro_orden": "..."}
-                        """
+                        instruccion = "Sos un experto administrativo. Extraé los datos de la factura y la orden. Si el efectivo está tachado poné 0.0. Devolvé un JSON con: fecha, chofer, cliente, litros, importe_total, efectivo, nro_factura, nro_orden."
                     else:
-                        instruccion = """
-                        Sos un experto administrativo contable. Te paso SOLO una factura de surtidor (esta venta no tiene orden manual).
-                        Extraé de la factura la fecha, cliente, litros (si figuran, si no poné 0), total y nro de factura.
-                        Como no hay orden, en chofer y nro_orden poné "Sin orden" y en efectivo 0.0.
-                        Devolveme SOLO un JSON puro con:
-                        {"fecha": "...", "chofer": "Sin orden", "cliente": "...", "litros": 0.0, "importe_total": 0.0, "efectivo": 0.0, "nro_factura": "...", "nro_orden": "Sin orden"}
-                        """
+                        instruccion = "Analizá solo esta factura. Devolvé un JSON con fecha, cliente, litros, importe_total y nro_factura. En chofer y nro_orden poné 'Sin orden' y efectivo 0.0."
 
                     cosas_para_ia.insert(0, instruccion)
 
+                    # CAMBIO CLAVE: USAMOS 1.5 FLASH PARA EVITAR EL BLOQUEO
                     res = cliente.models.generate_content(
-                        model='gemini-2.0-flash', 
+                        model='gemini-1.5-flash', 
                         contents=cosas_para_ia
                     )
                     
@@ -157,14 +136,13 @@ if "Ventas a Camiones" in opcion:
                     datos = json.loads(limpio)
                     
                     st.session_state.resumen_ventas.append(datos)
-                    st.success("¡Venta agregada al resumen!")
+                    st.success("¡Venta agregada!")
                 
                 except Exception as e:
-                    st.error(f"Error al leer los datos. Detalle: {e}")
+                    st.error(f"Error: {e}")
 
     if st.session_state.resumen_ventas:
         st.divider()
-        st.subheader("📋 Resumen Acumulado del Día")
         df = pd.DataFrame(st.session_state.resumen_ventas)
         st.dataframe(df, use_container_width=True)
 
@@ -173,17 +151,15 @@ if "Ventas a Camiones" in opcion:
             csv = df.to_csv(index=False).encode('utf-8')
             st.download_button("📥 Descargar Excel (CSV)", data=csv, file_name="resumen_carga.csv", mime="text/csv")
         with col_b:
-            if st.button("🗑️ Borrar todo y empezar de nuevo"):
+            if st.button("🗑️ Borrar todo"):
                 st.session_state.resumen_ventas = []
                 st.rerun()
 
 elif "Facturas de Proveedores" in opcion:
     st.title("📄 Carga de Facturas de Proveedores")
-    st.write("Subí el PDF o la foto de la factura para extraer los datos.")
-    
-    archivo_subido = st.file_uploader("Arrastrá archivo aquí", type=["pdf", "png", "jpg", "jpeg"], key="prov")
+    archivo_subido = st.file_uploader("Subir archivo", type=["pdf", "png", "jpg", "jpeg"], key="prov")
 
-    if archivo_subido and st.button("🚀 Extraer Datos Proveedor"):
+    if archivo_subido and st.button("🚀 Extraer Datos"):
         with st.spinner("Analizando..."):
             try:
                 if archivo_subido.name.lower().endswith('.pdf'):
@@ -192,12 +168,10 @@ elif "Facturas de Proveedores" in opcion:
                 else:
                     material = Image.open(archivo_subido)
 
-                orden = "Analizá esta factura de proveedor de Argentina. Devolveme un JSON puro con proveedor_nombre, proveedor_cuit, numero_comprobante, fecha_emision, importe_total y articulos."
+                orden = "Extraé los datos de esta factura de proveedor en formato JSON."
                 
-                respuesta = cliente.models.generate_content(model='gemini-2.0-flash', contents=[orden, material])
-                st.success("¡Datos extraídos!")
-                
-                texto_limpio = respuesta.text.replace("```json", "").replace("```", "").strip()
-                st.code(texto_limpio, language="json")
+                # CAMBIO CLAVE: USAMOS 1.5 FLASH
+                respuesta = cliente.models.generate_content(model='gemini-1.5-flash', contents=[orden, material])
+                st.code(respuesta.text.replace("```json", "").replace("```", "").strip(), language="json")
             except Exception as e:
-                st.error(f"Error al procesar el archivo: {e}")
+                st.error(f"Error: {e}")
