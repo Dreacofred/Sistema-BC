@@ -49,13 +49,10 @@ st.sidebar.divider()
 st.sidebar.success("💎 NIVEL: GEMINI 1.5 PRO (PAGO ACTIVO)")
 
 # ==========================================
-# 3. CONEXIÓN PRO (VERSIÓN ESTABLE V1)
+# 3. CONEXIÓN PRO (LIMPIA Y DIRECTA)
 # ==========================================
-# Configuración blindada para evitar errores de conexión
-cliente = genai.Client(
-    api_key=st.secrets["GEMINI_API_KEY"],
-    http_options={'api_version': 'v1'}
-)
+# Quitamos el parche 'v1'. Dejamos que la conexión fluya natural ahora que sos usuario de pago.
+cliente = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
 
 if 'resumen_ventas' not in st.session_state:
     st.session_state.resumen_ventas = []
@@ -77,9 +74,9 @@ if "Ventas a Camiones" in opcion:
                 Si el efectivo está tachado o no figura, poné 0.0. 
                 Devolvé ÚNICAMENTE un objeto JSON puro."""
                 
-                # MODELO 1.5-PRO ACTIVO
+                # MODELO 1.5-PRO (Usamos el alias 'latest' para asegurar que siempre agarre el más inteligente)
                 res = cliente.models.generate_content(
-                    model='gemini-1.5-pro', 
+                    model='gemini-1.5-pro-latest', 
                     contents=[prompt] + material
                 )
                 
@@ -118,7 +115,7 @@ elif "Facturas de Proveedores" in opcion:
                 else:
                     mat = Image.open(archivo)
                 
-                res = cliente.models.generate_content(model='gemini-1.5-pro', contents=["Extraé datos de esta factura en JSON puro", mat])
+                res = cliente.models.generate_content(model='gemini-1.5-pro-latest', contents=["Extraé datos de esta factura en JSON puro", mat])
                 st.code(res.text)
             except Exception as e:
                 st.error(f"Error: {e}")
