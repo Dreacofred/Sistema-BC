@@ -45,6 +45,9 @@ st.markdown(f"""
 # ==========================================
 cliente = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
 
+# CONTADOR PARA REINICIAR UPLOADERS
+if 'contador_carga' not in st.session_state:
+    st.session_state.contador_carga = 0
 if 'resumen_ventas' not in st.session_state:
     st.session_state.resumen_ventas = []
 if 'datos_temp' not in st.session_state:
@@ -59,7 +62,7 @@ else:
 
 opcion = st.sidebar.radio("Seleccioná la tarea:", ["🚛 Ventas a Camiones", "📄 Facturas de Proveedores"])
 st.sidebar.divider()
-st.sidebar.info("Sistema v3.5 - Reporte con Totales")
+st.sidebar.info("Sistema v3.6 - Reset de Documentos")
 
 # ==========================================
 # 3. MÓDULO: VENTAS A CAMIONES
@@ -68,13 +71,18 @@ if opcion == "🚛 Ventas a Camiones":
     st.title("🚛 Registro de Carga de Camiones")
     
     col_files = st.columns(2)
+    # La clave (key) cambia cada vez que contador_carga aumenta, limpiando el botón
     with col_files[0]:
-        f_factura = st.file_uploader("1. Factura (Imagen o PDF)", type=["jpg", "png", "jpeg", "pdf"], key="u_factura")
+        f_factura = st.file_uploader("1. Factura (Imagen o PDF)", 
+                                     type=["jpg", "png", "jpeg", "pdf"], 
+                                     key=f"fact_{st.session_state.contador_carga}")
     with col_files[1]:
-        f_orden = st.file_uploader("2. Vale de Carga (Imagen)", type=["jpg", "png", "jpeg"], key="u_orden")
+        f_orden = st.file_uploader("2. Vale de Carga (Imagen)", 
+                                   type=["jpg", "png", "jpeg"], 
+                                   key=f"ord_{st.session_state.contador_carga}")
 
     if f_factura and f_orden and st.button("🔍 ANALIZAR AMBOS DOCUMENTOS"):
-        with st.spinner("Procesando documentos y cruzando datos..."):
+        with st.spinner("Procesando documentos..."):
             try:
                 img_factura = Image.open(f_factura) if not f_factura.name.lower().endswith('.pdf') else f_factura
                 img_orden = Image.open(f_orden)
@@ -83,7 +91,7 @@ if opcion == "🚛 Ventas a Camiones":
                 Analizá estos dos documentos y extraé un JSON único:
                 1. DEL VALE: 'fecha', 'entidad_pagadora', 'chofer', 'orden_litros' (nro en recuadro ORDEN a la derecha de litros), 'efectivo' (monto), 'orden_efectivo' (nro en recuadro ORDEN a la derecha de efectivo).
                 2. DE LA FACTURA: 'razon_social', 'litros_factura', 'importe', 'nro_factura'.
-                Devolvé ÚNICAMENTE el objeto JSON puro.
+                Devolvé ÚNICAMENTE el JSON.
                 """
                 
                 res = cliente.models.generate_content(model='gemini-2.5-pro', contents=[prompt, img_factura, img_orden])
@@ -92,52 +100,55 @@ if opcion == "🚛 Ventas a Camiones":
                 st.session_state.datos_temp = json.loads(raw_text[start:end])
                 
             except Exception as e:
-                st.error(f"Error en el procesamiento: {e}")
+                st.error(f"Error: {e}")
 
-    # Formulario de validación
     if st.session_state.datos_temp:
-        with st.form("validador_v4"):
+        with st.form("validador_v6"):
             st.subheader("📝 Confirmar Información")
             
             c1, c2, c3 = st.columns([1, 1, 2])
             fecha = c1.text_input("Fecha", str(st.session_state.datos_temp.get('fecha', '')))
             chofer = c2.text_input("Chofer", str(st.session_state.datos_temp.get('chofer', '')))
-            cliente_rs = c3.text_input("Cliente (Razón Social)", str(st.session_state.datos_temp.get('razon_social', '')))
+            cliente_rs = c3.text_input("Cliente", str(st.session_state.datos_temp.get('razon_social', '')))
             
             c4, c5, c6 = st.columns(3)
-            # Conversión segura a float
-            def to_f(v): 
+            def to_f(v):
                 try: return float(v)
                 except: return 0.0
 
-            litros = c4.number_input("Litros (Factura)", value=to_f(st.session_state.datos_temp.get('litros_factura', 0.0)))
+            litros = c4.number_input("Litros", value=to_f(st.session_state.datos_temp.get('litros_factura', 0.0)), format="%.4f")
             importe = c5.number_input("Importe", value=to_f(st.session_state.datos_temp.get('importe', 0.0)))
             factura_nro = c6.text_input("Factura", str(st.session_state.datos_temp.get('nro_factura', '')))
             
             entidad = st.text_input("Entidad pagadora", str(st.session_state.datos_temp.get('entidad_pagadora', '')))
             
-            with st.expander("Números de Orden y Efectivo", expanded=True):
+            with st.expander("Control de Orden y Efectivo", expanded=True):
                 ca1, ca2, ca3 = st.columns(3)
+                
+                def clean_order(v):
+                    val = str(v).strip()
+                    return int(val) if val.isdigit() else val
+
                 o_litros = ca1.text_input("Orden de Litros", str(st.session_state.datos_temp.get('orden_litros', '')))
                 v_efectivo = ca2.number_input("Efectivo", value=to_f(st.session_state.datos_temp.get('efectivo', 0.0)))
                 o_efectivo = ca3.text_input("Orden de Efectivo", str(st.session_state.datos_temp.get('orden_efectivo', '')))
 
             if st.form_submit_button("✅ GUARDAR EN PLANILLA"):
-                # Función interna para convertir a número si es posible
-                def clean_order(v):
-                    val = str(v).strip()
-                    return int(val) if val.isdigit() else val
-
                 registro = {
                     "Fecha": fecha, "Chofer": chofer, "Cliente": cliente_rs,
                     "Litros": litros, "Importe": importe, "Factura": factura_nro,
                     "Entidad pagadora": entidad, 
                     "Orden Litros": clean_order(o_litros) if o_litros != "None" else "",
                     "Efectivo": v_efectivo, 
-                    "Orden Efectivo": clean_order(o_efectivo) if o_efectivo != "None" else ""
+                    "Orden Efectivo": o_efectivo if o_efectivo != "None" else ""
                 }
                 st.session_state.resumen_ventas.append(registro)
                 st.session_state.datos_temp = None
+                
+                # ESTA ES LA CLAVE: Cambiar el contador limpia los uploaders
+                st.session_state.contador_carga += 1
+                
+                st.success("¡Venta guardada! Los botones de subida se han reiniciado.")
                 st.rerun()
 
     if st.session_state.resumen_ventas:
@@ -151,57 +162,45 @@ if opcion == "🚛 Ventas a Camiones":
         
         col_btn1, col_btn2 = st.columns(2)
         
-        # ==========================================
-        # EXPORTACIÓN A EXCEL CON TOTALES Y FORMATO $
-        # ==========================================
         buffer = io.BytesIO()
         with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
             df.to_excel(writer, index=False, sheet_name='Ventas_Camiones')
             worksheet = writer.sheets['Ventas_Camiones']
             last_row = len(df) + 1
             
-            # Estilos
-            color_rojo = PatternFill(start_color="C8102E", end_color="C8102E", fill_type="solid")
-            color_totales = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
+            rojo_fill = PatternFill(start_color="C8102E", end_color="C8102E", fill_type="solid")
+            tot_fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
             font_blanca = Font(color="FFFFFF", bold=True)
-            font_negra_bold = Font(bold=True)
+            font_bold = Font(bold=True)
             borde = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
             
-            # Formatos de número (Excel)
             fmt_moneda = '"$"#,##0.00'
-            fmt_litros = '#,##0.0000'  # <--- Aquí agregamos los 4 decimales
+            fmt_litros = '#,##0.0000'
 
-            # 1. Encabezados
             for cell in worksheet[1]:
-                cell.fill, cell.font, cell.border, cell.alignment = color_rojo, font_blanca, borde, Alignment(horizontal="center")
+                cell.fill, cell.font, cell.border, cell.alignment = rojo_fill, font_blanca, borde, Alignment(horizontal="center")
 
-            # 2. Datos y Bordes
             for row in worksheet.iter_rows(min_row=2, max_row=last_row):
                 for cell in row:
                     cell.border = borde
-                    # Formato $ a Importe (E) y Efectivo (I)
                     if cell.column_letter in ['E', 'I']:
                         cell.number_format = fmt_moneda
-                    # Formato a Litros (D) con 4 decimales
                     if cell.column_letter == 'D':
                         cell.number_format = fmt_litros
-                    # Formato NÚMERO a Orden Litros (H) y Orden Efectivo (J)
                     if cell.column_letter in ['H', 'J']:
                         cell.number_format = '0'
 
-            # 3. FILA DE TOTALES
+            # Fila de Totales
             row_tot = last_row + 1
-            worksheet.cell(row=row_tot, column=3, value="TOTALES:").font = font_negra_bold
+            worksheet.cell(row=row_tot, column=3, value="TOTALES:").font = font_bold
             worksheet.cell(row=row_tot, column=3).alignment = Alignment(horizontal="right")
 
-            # Columnas a sumar: D(4), E(5), I(9)
-            for col_num, col_let in [(4, 'D'), (5, 'E'), (9, 'I')]:
-                c = worksheet.cell(row=row_tot, column=col_num)
+            for col_idx, col_let in [(4, 'D'), (5, 'E'), (9, 'I')]:
+                c = worksheet.cell(row=row_tot, column=col_idx)
                 c.value = f"=SUM({col_let}2:{col_let}{last_row})"
-                c.font, c.fill, c.border = font_negra_bold, color_totales, borde
+                c.font, c.fill, c.border = font_bold, tot_fill, borde
                 c.number_format = fmt_moneda if col_let in ['E', 'I'] else fmt_litros
 
-            # 4. Ajustar Ancho
             for i, col in enumerate(df.columns):
                 column_len = max(df[col].astype(str).map(len).max(), len(col)) + 4
                 worksheet.column_dimensions[get_column_letter(i + 1)].width = column_len
