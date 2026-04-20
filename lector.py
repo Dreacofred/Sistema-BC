@@ -48,14 +48,22 @@ st.markdown(f"""
             color: black;
             transform: scale(1.05);
         }}
-        /* Botones de Subir Archivo (Upload) */
+        
+        /* --- CORRECCIÓN DEL BOTÓN UPLOAD --- */
+        /* Primero le damos el fondo rojo y la forma */
         [data-testid="stFileUploader"] button {{
             background-color: {COLOR_ROJO} !important;
-            color: white !important;
-            font-weight: bold !important;
             border-radius: 20px !important;
             border: none !important;
         }}
+        /* Ahora forzamos que el texto y el ícono sean blancos y en negrita */
+        [data-testid="stFileUploader"] button,
+        [data-testid="stFileUploader"] button * {{
+            color: white !important;
+            fill: white !important;
+            font-weight: bold !important;
+        }}
+        
         /* Fondo de la barra lateral */
         [data-testid="stSidebar"] {{
             background-color: white;
