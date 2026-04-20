@@ -135,4 +135,85 @@ if opcion == "🚛 Ventas a Camiones":
             importe = c5.number_input("Importe", value=importe_val)
             factura_nro = c6.text_input("Factura", str(st.session_state.datos_temp.get('nro_factura', '')))
             
-            entidad = st.text_input("Entidad pagadora", str(st.session_state.datos_temp.get('entidad_pag
+            entidad = st.text_input("Entidad pagadora", str(st.session_state.datos_temp.get('entidad_pagadora', '')))
+            
+            # Fila 3: Datos de la Orden y Efectivo
+            with st.expander("Datos adicionales del Papel de Carga", expanded=True):
+                ca1, ca2, ca3 = st.columns(3)
+                
+                try: efectivo_val = float(st.session_state.datos_temp.get('efectivo', 0.0))
+                except: efectivo_val = 0.0
+
+                o_litros = ca1.text_input("Orden de Litros", str(st.session_state.datos_temp.get('orden_litros', '')))
+                v_efectivo = ca2.number_input("Efectivo", value=efectivo_val)
+                o_efectivo = ca3.text_input("Orden de Efectivo", str(st.session_state.datos_temp.get('orden_efectivo', '')))
+
+            if st.form_submit_button("✅ GUARDAR EN PLANILLA"):
+                registro = {
+                    "Fecha": fecha,
+                    "Chofer": chofer,
+                    "Cliente": cliente_rs,
+                    "Litros": litros,
+                    "Importe": importe,
+                    "Factura": factura_nro,
+                    "Entidad pagadora": entidad,
+                    "Orden Litros": o_litros,
+                    "Efectivo": v_efectivo,
+                    "Orden Efectivo": o_efectivo
+                }
+                st.session_state.resumen_ventas.append(registro)
+                st.session_state.datos_temp = None
+                st.rerun()
+
+    # Mostrar Planilla y Botones de acción
+    if st.session_state.resumen_ventas:
+        st.divider()
+        df = pd.DataFrame(st.session_state.resumen_ventas)
+        
+        # Forzar el orden estricto de las columnas
+        orden_columnas = [
+            "Fecha", "Chofer", "Cliente", "Litros", "Importe", 
+            "Factura", "Entidad pagadora", "Orden Litros", "Efectivo", "Orden Efectivo"
+        ]
+        df = df[orden_columnas]
+        
+        st.subheader(f"📋 Planilla de Control ({len(df)} registros)")
+        st.dataframe(df, use_container_width=True)
+        
+        col_btn1, col_btn2 = st.columns(2)
+        csv = df.to_csv(index=False).encode('utf-8')
+        col_btn1.download_button("📥 Descargar Planilla CSV", data=csv, file_name="ventas_estacion.csv", use_container_width=True)
+        
+        if col_btn2.button("🗑️ Limpiar Planilla", use_container_width=True):
+            st.session_state.resumen_ventas = []
+            st.rerun()
+
+# ==========================================
+# 4. MÓDULO: FACTURAS DE PROVEEDORES
+# ==========================================
+elif opcion == "📄 Facturas de Proveedores":
+    st.title("📄 Gestión de Proveedores")
+    archivo_prov = st.file_uploader("Subir Factura de Proveedor (PDF o Imagen)", type=["pdf", "png", "jpg", "jpeg"])
+    
+    if archivo_prov and st.button("🚀 PROCESAR FACTURA"):
+        with st.spinner("Extrayendo datos de facturación..."):
+            try:
+                if archivo_prov.name.lower().endswith('.pdf'):
+                    reader = PdfReader(archivo_prov)
+                    # Leer primeras dos páginas por si es un PDF largo
+                    text_pdf = "\n".join([page.extract_text() for page in reader.pages[:2]])
+                    input_prov = [f"Texto extraído de la factura: {text_pdf}"]
+                else:
+                    input_prov = [Image.open(archivo_prov)]
+                
+                prompt_prov = "Extraé CUIT, Razón Social, Fecha, Neto Gravado, IVA y Total en formato JSON puro."
+                
+                res_prov = cliente.models.generate_content(
+                    model='gemini-2.5-pro',
+                    contents=input_prov + [prompt_prov]
+                )
+                
+                res_text = res_prov.text.strip().replace('```json', '').replace('```', '')
+                st.json(res_text[res_text.find('{'):res_text.rfind('}')+1])
+            except Exception as e:
+                st.error(f"Error en la lectura: {e}")
