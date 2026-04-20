@@ -94,7 +94,7 @@ st.sidebar.markdown("<br><br><br><br>", unsafe_allow_html=True)
 st.sidebar.info("Combustibles diseñados para rendir. Calidad garantizada.")
 
 # ==========================================
-# 3. LÓGICA DEL SISTEMA (USANDO 1.5 FLASH)
+# 3. LÓGICA DEL SISTEMA
 # ==========================================
 cliente = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
 
@@ -103,6 +103,7 @@ if 'resumen_ventas' not in st.session_state:
 
 if "Ventas a Camiones" in opcion:
     st.title("🚛 Registro de Resumen de Carga")
+    st.write("Herramienta exclusiva para la administración de BC Combustibles.")
     
     col1, col2 = st.columns(2)
     with col1:
@@ -118,60 +119,4 @@ if "Ventas a Camiones" in opcion:
                     cosas_para_ia = [img_factura] 
 
                     if f_orden:
-                        img_orden = Image.open(f_orden)
-                        cosas_para_ia.append(img_orden)
-                        instruccion = "Sos un experto administrativo. Extraé los datos de la factura y la orden. Si el efectivo está tachado poné 0.0. Devolvé un JSON con: fecha, chofer, cliente, litros, importe_total, efectivo, nro_factura, nro_orden."
-                    else:
-                        instruccion = "Analizá solo esta factura. Devolvé un JSON con fecha, cliente, litros, importe_total y nro_factura. En chofer y nro_orden poné 'Sin orden' y efectivo 0.0."
-
-                    cosas_para_ia.insert(0, instruccion)
-
-                    # CAMBIO CLAVE: USAMOS 2.5 FLASH PARA EVITAR EL BLOQUEO
-                    res = cliente.models.generate_content(
-                        model='gemini-2.5-flash', 
-                        contents=cosas_para_ia
-                    )
-                    
-                    limpio = res.text.replace("```json", "").replace("```", "").strip()
-                    datos = json.loads(limpio)
-                    
-                    st.session_state.resumen_ventas.append(datos)
-                    st.success("¡Venta agregada!")
-                
-                except Exception as e:
-                    st.error(f"Error: {e}")
-
-    if st.session_state.resumen_ventas:
-        st.divider()
-        df = pd.DataFrame(st.session_state.resumen_ventas)
-        st.dataframe(df, use_container_width=True)
-
-        col_a, col_b = st.columns(2)
-        with col_a:
-            csv = df.to_csv(index=False).encode('utf-8')
-            st.download_button("📥 Descargar Excel (CSV)", data=csv, file_name="resumen_carga.csv", mime="text/csv")
-        with col_b:
-            if st.button("🗑️ Borrar todo"):
-                st.session_state.resumen_ventas = []
-                st.rerun()
-
-elif "Facturas de Proveedores" in opcion:
-    st.title("📄 Carga de Facturas de Proveedores")
-    archivo_subido = st.file_uploader("Subir archivo", type=["pdf", "png", "jpg", "jpeg"], key="prov")
-
-    if archivo_subido and st.button("🚀 Extraer Datos"):
-        with st.spinner("Analizando..."):
-            try:
-                if archivo_subido.name.lower().endswith('.pdf'):
-                    lector = PdfReader(archivo_subido)
-                    material = lector.pages[0].extract_text()
-                else:
-                    material = Image.open(archivo_subido)
-
-                orden = "Extraé los datos de esta factura de proveedor en formato JSON."
-                
-                # CAMBIO CLAVE: USAMOS 2.5 FLASH
-                respuesta = cliente.models.generate_content(model='gemini-2.5-flash', contents=[orden, material])
-                st.code(respuesta.text.replace("```json", "").replace("```", "").strip(), language="json")
-            except Exception as e:
-                st.error(f"Error: {e}")
+                        img_orden = Image.open(
