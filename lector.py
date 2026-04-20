@@ -5,6 +5,7 @@ from PIL import Image
 import pandas as pd
 import json
 import os
+import io  # <-- Librería agregada para manejar el archivo Excel en memoria
 
 # ==========================================
 # 1. IDENTIDAD CORPORATIVA BC COMBUSTIBLES
@@ -54,7 +55,7 @@ else:
 
 opcion = st.sidebar.radio("Seleccioná la tarea:", ["🚛 Ventas a Camiones", "📄 Facturas de Proveedores"])
 st.sidebar.divider()
-st.sidebar.info("Sistema v3.2 - Control de Cargas")
+st.sidebar.info("Sistema v3.3 - Exportación a Excel")
 
 # ==========================================
 # 3. MÓDULO: VENTAS A CAMIONES
@@ -74,7 +75,6 @@ if opcion == "🚛 Ventas a Camiones":
                 img_factura = Image.open(f_factura) if not f_factura.name.lower().endswith('.pdf') else f_factura
                 img_orden = Image.open(f_orden)
                 
-                # Prompt refinado para capturar el Número de Orden de litros sin capturar el valor de litros
                 prompt = """
                 Analizá estos dos documentos de una estación de servicio y extraé un JSON único con estas reglas:
                 
@@ -174,8 +174,28 @@ if opcion == "🚛 Ventas a Camiones":
         st.dataframe(df, use_container_width=True)
         
         col_btn1, col_btn2 = st.columns(2)
-        csv = df.to_csv(index=False).encode('utf-8')
-        col_btn1.download_button("📥 Descargar Planilla CSV", data=csv, file_name="ventas_bc.csv", use_container_width=True)
+        
+        # ==========================================
+        # CÓDIGO NUEVO PARA GENERAR EXCEL REAL
+        # ==========================================
+        buffer = io.BytesIO()
+        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False, sheet_name='Ventas_Camiones')
+            
+            # Auto-ajustar el ancho de las columnas
+            worksheet = writer.sheets['Ventas_Camiones']
+            for i, col in enumerate(df.columns):
+                # Calcula el ancho basándose en el contenido más largo de la columna
+                column_len = max(df[col].astype(str).map(len).max(), len(col)) + 2
+                worksheet.column_dimensions[chr(65 + i)].width = column_len
+        
+        col_btn1.download_button(
+            label="📥 Descargar Planilla Excel", 
+            data=buffer.getvalue(), 
+            file_name="ventas_bc.xlsx", 
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
+        )
         
         if col_btn2.button("🗑️ Limpiar Planilla", use_container_width=True):
             st.session_state.resumen_ventas = []
