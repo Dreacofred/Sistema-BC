@@ -119,4 +119,80 @@ if "Ventas a Camiones" in opcion:
                     cosas_para_ia = [img_factura] 
 
                     if f_orden:
-                        img_orden = Image.open(
+                        img_orden = Image.open(f_orden) # Aseguramos que el paréntesis esté cerrado
+                        cosas_para_ia.append(img_orden)
+                        instruccion = """
+                        Sos un experto administrativo contable. Extraé los datos de las imágenes. 
+                        Si el efectivo está tachado poné 0.0.
+                        IMPORTANTE: Tu respuesta debe ser ÚNICA y EXCLUSIVAMENTE un objeto JSON válido. NO agregues saludos, NO uses formato markdown (```json), NO agregues explicaciones.
+                        Formato exacto requerido:
+                        {"fecha": "...", "chofer": "...", "cliente": "...", "litros": 0.0, "importe_total": 0.0, "efectivo": 0.0, "nro_factura": "...", "nro_orden": "..."}
+                        """
+                    else:
+                        instruccion = """
+                        Analizá solo esta factura. En chofer y nro_orden poné 'Sin orden' y efectivo 0.0.
+                        IMPORTANTE: Tu respuesta debe ser ÚNICA y EXCLUSIVAMENTE un objeto JSON válido. NO agregues saludos, NO uses formato markdown (```json), NO agregues explicaciones.
+                        Formato exacto requerido:
+                        {"fecha": "...", "chofer": "Sin orden", "cliente": "...", "litros": 0.0, "importe_total": 0.0, "efectivo": 0.0, "nro_factura": "...", "nro_orden": "Sin orden"}
+                        """
+
+                    cosas_para_ia.insert(0, instruccion)
+
+                    res = cliente.models.generate_content(
+                        model='gemini-2.5-flash', 
+                        contents=cosas_para_ia
+                    )
+                    
+                    limpio = res.text.replace("```json", "").replace("```", "").strip()
+                    datos = json.loads(limpio)
+                    
+                    st.session_state.resumen_ventas.append(datos)
+                    st.success("¡Venta agregada!")
+                
+                except Exception as e:
+                    st.error(f"Error al leer los datos. Detalle: {e}")
+
+    if st.session_state.resumen_ventas:
+        st.divider()
+        st.subheader("📋 Resumen Acumulado del Día")
+        df = pd.DataFrame(st.session_state.resumen_ventas)
+        st.dataframe(df, use_container_width=True)
+
+        col_a, col_b = st.columns(2)
+        with col_a:
+            csv = df.to_csv(index=False).encode('utf-8')
+            st.download_button("📥 Descargar Excel (CSV)", data=csv, file_name="resumen_carga.csv", mime="text/csv")
+        with col_b:
+            if st.button("🗑️ Borrar todo"):
+                st.session_state.resumen_ventas = []
+                st.rerun()
+
+elif "Facturas de Proveedores" in opcion:
+    st.title("📄 Carga de Facturas de Proveedores")
+    st.write("Subí el PDF o la foto de la factura para extraer los datos.")
+    
+    archivo_subido = st.file_uploader("Arrastrá archivo aquí", type=["pdf", "png", "jpg", "jpeg"], key="prov")
+
+    if archivo_subido and st.button("🚀 Extraer Datos Proveedor"):
+        with st.spinner("Analizando..."):
+            try:
+                if archivo_subido.name.lower().endswith('.pdf'):
+                    lector = PdfReader(archivo_subido)
+                    material = lector.pages[0].extract_text()
+                else:
+                    material = Image.open(archivo_subido) # Aseguramos que el paréntesis esté cerrado
+
+                orden = """
+                Analizá esta factura de proveedor de Argentina. 
+                IMPORTANTE: Tu respuesta debe ser ÚNICA y EXCLUSIVAMENTE un objeto JSON válido. NO agregues saludos, NO uses formato markdown (```json).
+                Formato exacto requerido:
+                {"proveedor_nombre": "...", "proveedor_cuit": "...", "numero_comprobante": "...", "fecha_emision": "...", "importe_total": 0.0, "articulos": [{"descripcion": "...", "cantidad": 0, "precio_unitario": 0.0}]}
+                """
+                
+                respuesta = cliente.models.generate_content(model='gemini-2.5-flash', contents=[orden, material])
+                st.success("¡Datos extraídos!")
+                
+                texto_limpio = respuesta.text.replace("```json", "").replace("```", "").strip()
+                st.code(texto_limpio, language="json")
+            except Exception as e:
+                st.error(f"Error al procesar el archivo: {e}")
