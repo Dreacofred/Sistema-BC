@@ -1,67 +1,96 @@
 import streamlit as st
 from google import genai
 from pypdf import PdfReader
-from PIL import Image  # <-- LA NUEVA HERRAMIENTA PARA FOTOS
+from PIL import Image
 
-# --- CONFIGURACIÓN VISUAL DE LA PÁGINA ---
-st.set_page_config(page_title="Lector de Facturas", layout="centered")
-st.title("📄 Lector Inteligente de Facturas AFIP")
-st.write("Subí la factura en PDF o una FOTO clara para extraer los datos.")
+# --- CONFIGURACIÓN DE LA PÁGINA ---
+st.set_page_config(page_title="Sistema BC Combustibles", layout="wide")
 
-# --- INTERFAZ: AHORA ACEPTA FOTOS ---
-archivo_subido = st.file_uploader("Arrastrá tu PDF o Foto acá", type=["pdf", "png", "jpg", "jpeg"])
+# --- BARRA LATERAL PARA NAVEGACIÓN ---
+st.sidebar.title("Menú Principal")
+opcion = st.sidebar.radio(
+    "Seleccioná una tarea:",
+    ["Facturas de Proveedores", "Ventas a Camiones (Órdenes)"]
+)
 
-if archivo_subido is not None:
-    if st.button("🚀 Extraer Datos", use_container_width=True):
-        
-        with st.spinner("Analizando con Inteligencia Artificial... (puede demorar unos segundos)"):
-            try:
-                # --- LA CAJA FUERTE ---
-                cliente = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
+# Inicializamos el cliente de IA
+cliente = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
 
-                # --- EL DESVÍO INTELIGENTE: ¿Es PDF o Foto? ---
-                if archivo_subido.name.lower().endswith('.pdf'):
-                    lector = PdfReader(archivo_subido)
-                    material_para_ia = lector.pages[0].extract_text()
-                else:
-                    # ES UNA FOTO: La abrimos para que la IA la "vea"
-                    material_para_ia = Image.open(archivo_subido)
+# ==========================================
+# SECCIÓN 1: FACTURAS DE PROVEEDORES (Lo que ya tenías)
+# ==========================================
+if opcion == "Facturas de Proveedores":
+    st.title("📄 Carga de Facturas de Proveedores")
+    st.write("Subí el PDF o la foto de la factura para extraer los datos para Regente.")
+    
+    archivo_subido = st.file_uploader("Arrastrá archivo aquí", type=["pdf", "png", "jpg", "jpeg"], key="prov")
 
-                orden = """
-                Sos un administrador contable experto de Argentina. Analizá esta factura de AFIP.
+    if archivo_subido and st.button("🚀 Extraer Datos Proveedor"):
+        with st.spinner("Analizando..."):
+            if archivo_subido.name.lower().endswith('.pdf'):
+                lector = PdfReader(archivo_subido)
+                material = lector.pages[0].extract_text()
+            else:
+                material = Image.open(archivo_subido)
 
-                REGLAS:
-                1. El "Proveedor" es el emisor.
-                2. El "Cliente" es BC COMBUSTIBLES S.A.
-                3. NO uses el CUIT 30707837213 para el proveedor.
+            orden = "Analizá esta factura de proveedor de Argentina. Devolveme un JSON con proveedor_nombre, proveedor_cuit, numero_comprobante, fecha_emision, importe_total y articulos."
+            
+            respuesta = cliente.models.generate_content(model='gemini-2.0-flash', contents=[orden, material])
+            st.success("¡Datos extraídos!")
+            st.code(respuesta.text, language="json")
 
-                ⚠️ INSTRUCCIÓN CRÍTICA:
-                Devolveme el resultado EXCLUSIVAMENTE en formato informático JSON, usando exactamente esta estructura:
-                {
-                  "proveedor_nombre": "...",
-                  "proveedor_cuit": "...",
-                  "numero_comprobante": "...",
-                  "fecha_emision": "...",
-                  "importe_total": 0.0,
-                  "articulos": [
+# ==========================================
+# SECCIÓN 2: VENTAS A CAMIONES (Lo nuevo para Nancy)
+# ==========================================
+elif opcion == "Ventas a Camiones (Órdenes)":
+    st.title("🚛 Registro de Ventas a Camiones")
+    st.write("Subí la **Foto de la Factura** y la **Foto de la Orden Manual** para unificar los datos.")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        foto_factura = st.file_uploader("1. Foto de la Factura", type=["png", "jpg", "jpeg"], key="f_fact")
+    with col2:
+        foto_orden = st.file_uploader("2. Foto de la Orden Manual", type=["png", "jpg", "jpeg"], key="f_ord")
+
+    if foto_factura and foto_orden:
+        if st.button("🔗 Unificar y Procesar Venta", use_container_width=True):
+            with st.spinner("Leyendo ambas imágenes y cruzando datos..."):
+                try:
+                    img_factura = Image.open(foto_factura)
+                    img_orden = Image.open(foto_orden)
+
+                    instruccion_unificada = """
+                    Sos un administrativo contable de una estación de servicio. 
+                    Te paso dos imágenes: una es la factura del surtidor y la otra es una orden escrita a mano por el playero.
+                    
+                    TU TAREA:
+                    1. Extraer de la FACTURA: Número de factura, Fecha, Razón Social del cliente y el Total.
+                    2. Extraer de la ORDEN MANUAL: Nombre del Chofer, Número de Orden, Litros cargados y cualquier observación.
+                    3. Cruzar los datos: Verificá que los litros de la orden coincidan con los de la factura.
+                    4. Calculá el precio por litro (Total Factura / Litros).
+
+                    Devolveme un JSON con esta estructura:
                     {
-                      "nombre_producto": "...",
-                      "cantidad": 0,
-                      "precio_unitario": 0.0,
-                      "subtotal": 0.0
+                      "fecha": "...",
+                      "chofer": "...",
+                      "cliente_razon_social": "...",
+                      "litros": 0.0,
+                      "importe_total": 0.0,
+                      "precio_por_litro": 0.0,
+                      "nro_factura": "...",
+                      "nro_orden": "...",
+                      "alerta": "Solo si hay una diferencia entre la orden y la factura"
                     }
-                  ]
-                }
-                """
+                    """
 
-                # Le mandamos a la IA la orden Y el material (texto del pdf o la foto cruda)
-                respuesta = cliente.models.generate_content(
-                    model='gemini-2.5-flash',
-                    contents=[orden, material_para_ia]
-                )
+                    # Le mandamos las DOS imágenes a la IA juntas
+                    respuesta = cliente.models.generate_content(
+                        model='gemini-2.0-flash',
+                        contents=[instruccion_unificada, img_factura, img_orden]
+                    )
 
-                st.success("¡Datos extraídos y empaquetados con éxito!")
-                st.code(respuesta.text, language="json")
-
-            except Exception as e:
-                st.error(f"Ocurrió un error: {e}")
+                    st.success("¡Datos unificados con éxito!")
+                    st.code(respuesta.text, language="json")
+                
+                except Exception as e:
+                    st.error(f"Error al procesar: {e}")
