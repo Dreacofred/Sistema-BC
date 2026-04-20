@@ -61,7 +61,7 @@ else:
 
 opcion = st.sidebar.radio("Seleccioná la tarea:", ["🚛 Ventas a Camiones", "📄 Facturas de Proveedores"])
 st.sidebar.divider()
-st.sidebar.info("Sistema v3.7 - Cámara + Reset")
+st.sidebar.info("Sistema v3.8 - Interfaz Limpia")
 
 # ==========================================
 # 3. MÓDULO: VENTAS A CAMIONES
@@ -69,20 +69,24 @@ st.sidebar.info("Sistema v3.7 - Cámara + Reset")
 if opcion == "🚛 Ventas a Camiones":
     st.title("🚛 Registro de Carga de Camiones")
     
-    # --- ENTRADA DE DATOS (CÁMARA Y ARCHIVOS) ---
-    st.subheader("📸 Paso 1: Capturar o Subir Documentos")
+    # --- ENTRADA DE DATOS MEJORADA (DESPLEGABLE) ---
+    st.subheader("📸 Paso 1: Cargar Documentos")
     
-    col_cam, col_file = st.columns(2)
+    col_f, col_o = st.columns(2)
     
-    with col_cam:
-        st.markdown("**Usar Cámara**")
-        cam_f = st.camera_input("Foto Factura", key=f"cam_f_{st.session_state.contador_carga}")
-        cam_o = st.camera_input("Foto Vale de Carga", key=f"cam_o_{st.session_state.contador_carga}")
-        
-    with col_file:
-        st.markdown("**O subir archivos guardados**")
-        up_f = st.file_uploader("Archivo Factura (PDF/JPG)", type=["pdf","jpg","png","jpeg"], key=f"up_f_{st.session_state.contador_carga}")
-        up_o = st.file_uploader("Archivo Vale (JPG/PNG)", type=["jpg","png","jpeg"], key=f"up_o_{st.session_state.contador_carga}")
+    # --- COLUMNA FACTURA ---
+    with col_f:
+        st.markdown("### 📄 Factura")
+        with st.expander("📷 Abrir Cámara para Factura"):
+            cam_f = st.camera_input("Capturar", key=f"cam_f_{st.session_state.contador_carga}")
+        up_f = st.file_uploader("O subir archivo", type=["pdf","jpg","png","jpeg"], key=f"up_f_{st.session_state.contador_carga}")
+
+    # --- COLUMNA VALE ---
+    with col_o:
+        st.markdown("### 🎫 Vale de Carga")
+        with st.expander("📷 Abrir Cámara para Vale"):
+            cam_o = st.camera_input("Capturar", key=f"cam_o_{st.session_state.contador_carga}")
+        up_o = st.file_uploader("O subir archivo", type=["jpg","png","jpeg"], key=f"up_o_{st.session_state.contador_carga}")
 
     # Prioridad: Cámara > Archivo
     doc_f = cam_f if cam_f else up_f
@@ -91,7 +95,6 @@ if opcion == "🚛 Ventas a Camiones":
     if doc_f and doc_o and st.button("🔍 ANALIZAR DOCUMENTOS"):
         with st.spinner("Analizando con Inteligencia Artificial..."):
             try:
-                # Preparar factura (manejo de PDF o Imagen)
                 if hasattr(doc_f, 'name') and doc_f.name.lower().endswith('.pdf'):
                     reader = PdfReader(doc_f)
                     text_pdf = "\n".join([p.extract_text() for p in reader.pages[:1]])
@@ -118,7 +121,7 @@ if opcion == "🚛 Ventas a Camiones":
 
     # --- FORMULARIO DE VALIDACIÓN ---
     if st.session_state.datos_temp:
-        with st.form("validador_v7"):
+        with st.form("validador_v8"):
             st.subheader("📝 Paso 2: Confirmar Información")
             
             c1, c2, c3 = st.columns([1, 1, 2])
@@ -158,7 +161,6 @@ if opcion == "🚛 Ventas a Camiones":
                 }
                 st.session_state.resumen_ventas.append(registro)
                 st.session_state.datos_temp = None
-                # Incrementamos contador para limpiar cámara y archivos
                 st.session_state.contador_carga += 1
                 st.rerun()
 
@@ -180,7 +182,6 @@ if opcion == "🚛 Ventas a Camiones":
             ws = writer.sheets['Ventas']
             last_r = len(df) + 1
             
-            # Estilos Excel
             fill_header = PatternFill(start_color="C8102E", end_color="C8102E", fill_type="solid")
             fill_tot = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
             f_white = Font(color="FFFFFF", bold=True)
@@ -197,7 +198,6 @@ if opcion == "🚛 Ventas a Camiones":
                     if cell.column_letter == 'D': cell.number_format = '#,##0.0000'
                     if cell.column_letter in ['H', 'J']: cell.number_format = '0'
 
-            # Totales
             row_t = last_r + 1
             ws.cell(row=row_t, column=3, value="TOTALES:").font = f_bold
             for c_idx, c_let in [(4, 'D'), (5, 'E'), (9, 'I')]:
