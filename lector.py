@@ -1,5 +1,5 @@
 import streamlit as st
-import google.generativeai as genai # Cambiamos la forma de importar
+from google import genai
 from pypdf import PdfReader
 from PIL import Image
 import pandas as pd
@@ -36,10 +36,10 @@ else: st.sidebar.markdown(f"<h1 style='text-align: center; color: {COLOR_ROJO};'
 opcion = st.sidebar.radio("Seleccioná tarea:", ["🚛 Ventas a Camiones", "📄 Facturas de Proveedores"])
 
 # ==========================================
-# 3. CONEXIÓN A GOOGLE (MÉTODO ESTABLE)
+# 3. LÓGICA CON MODELO CORREGIDO
 # ==========================================
-genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-model = genai.GenerativeModel('gemini-1.5-pro')
+# Usamos la librería 'genai' que es la que tenés instalada
+cliente = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
 
 if 'resumen_ventas' not in st.session_state:
     st.session_state.resumen_ventas = []
@@ -58,7 +58,12 @@ if "Ventas a Camiones" in opcion:
                 
                 prompt = "Extraé datos en JSON puro: fecha, chofer, cliente, litros, importe_total, efectivo, nro_factura, nro_orden. Si el efectivo está tachado poné 0.0."
                 
-                res = model.generate_content([prompt] + material)
+                # ACA ESTÁ EL CAMBIO: El nombre correcto para esta librería es sin el 'models/'
+                res = cliente.models.generate_content(
+                    model='gemini-1.5-pro', 
+                    contents=[prompt] + material
+                )
+                
                 texto = res.text.replace("```json", "").replace("```", "").strip()
                 st.session_state.resumen_ventas.append(json.loads(texto))
                 st.success("¡Venta agregada!")
@@ -81,8 +86,12 @@ elif "Facturas de Proveedores" in opcion:
     if archivo and st.button("🚀 Extraer"):
         with st.spinner("Analizando..."):
             try:
-                mat = Image.open(archivo) if not archivo.name.endswith('.pdf') else PdfReader(archivo).pages[0].extract_text()
-                res = model.generate_content(["Extraé datos de esta factura en JSON puro", mat])
+                if archivo.name.lower().endswith('.pdf'):
+                    mat = PdfReader(archivo).pages[0].extract_text()
+                else:
+                    mat = Image.open(archivo)
+                
+                res = cliente.models.generate_content(model='gemini-1.5-pro', contents=["Extraé datos de esta factura en JSON puro", mat])
                 st.code(res.text)
             except Exception as e:
                 st.error(f"Error: {e}")
