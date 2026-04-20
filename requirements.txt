@@ -1,4 +1,6 @@
 streamlit
-pypdf
 google-genai
-pillow
+pypdf
+Pillow
+pandas
+openpyxl
