@@ -5,7 +5,11 @@ from PIL import Image
 import pandas as pd
 import json
 import os
-import io  # <-- Librería agregada para manejar el archivo Excel en memoria
+import io
+
+# Nuevas herramientas importadas para pintar y darle formato al Excel
+from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
+from openpyxl.utils import get_column_letter
 
 # ==========================================
 # 1. IDENTIDAD CORPORATIVA BC COMBUSTIBLES
@@ -55,7 +59,7 @@ else:
 
 opcion = st.sidebar.radio("Seleccioná la tarea:", ["🚛 Ventas a Camiones", "📄 Facturas de Proveedores"])
 st.sidebar.divider()
-st.sidebar.info("Sistema v3.3 - Exportación a Excel")
+st.sidebar.info("Sistema v3.4 - Exportación Excel Pro")
 
 # ==========================================
 # 3. MÓDULO: VENTAS A CAMIONES
@@ -131,7 +135,6 @@ if opcion == "🚛 Ventas a Camiones":
             
             entidad = st.text_input("Entidad pagadora", str(st.session_state.datos_temp.get('entidad_pagadora', '')))
             
-            # Datos de Control (Orden y Efectivo)
             with st.expander("Números de Orden y Efectivo", expanded=True):
                 ca1, ca2, ca3 = st.columns(3)
                 
@@ -163,7 +166,6 @@ if opcion == "🚛 Ventas a Camiones":
         st.divider()
         df = pd.DataFrame(st.session_state.resumen_ventas)
         
-        # Orden de columnas definitivo
         orden_columnas = [
             "Fecha", "Chofer", "Cliente", "Litros", "Importe", 
             "Factura", "Entidad pagadora", "Orden Litros", "Efectivo", "Orden Efectivo"
@@ -176,18 +178,41 @@ if opcion == "🚛 Ventas a Camiones":
         col_btn1, col_btn2 = st.columns(2)
         
         # ==========================================
-        # CÓDIGO NUEVO PARA GENERAR EXCEL REAL
+        # EXPORTACIÓN A EXCEL CON FORMATO PROFESIONAL
         # ==========================================
         buffer = io.BytesIO()
         with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
             df.to_excel(writer, index=False, sheet_name='Ventas_Camiones')
-            
-            # Auto-ajustar el ancho de las columnas
             worksheet = writer.sheets['Ventas_Camiones']
+            
+            # 1. Definir Estilos
+            # Color rojo de BC sin el '#' (requerido por openpyxl)
+            color_fondo_encabezado = PatternFill(start_color="C8102E", end_color="C8102E", fill_type="solid")
+            letras_blancas_negrita = Font(color="FFFFFF", bold=True)
+            borde_fino = Border(
+                left=Side(style='thin'), right=Side(style='thin'),
+                top=Side(style='thin'), bottom=Side(style='thin')
+            )
+            centrado = Alignment(horizontal="center", vertical="center")
+            
+            # 2. Pintar y darle formato a la primera fila (Encabezados)
+            for col_num, cell in enumerate(worksheet[1], 1):
+                cell.fill = color_fondo_encabezado
+                cell.font = letras_blancas_negrita
+                cell.alignment = centrado
+                cell.border = borde_fino
+                
+            # 3. Poner bordes a todas las demás celdas con datos
+            for row in worksheet.iter_rows(min_row=2, max_row=worksheet.max_row, min_col=1, max_col=worksheet.max_column):
+                for cell in row:
+                    cell.border = borde_fino
+            
+            # 4. Auto-ajustar el ancho de las columnas
             for i, col in enumerate(df.columns):
-                # Calcula el ancho basándose en el contenido más largo de la columna
+                # Calcula el ancho basándose en el contenido más largo
                 column_len = max(df[col].astype(str).map(len).max(), len(col)) + 2
-                worksheet.column_dimensions[chr(65 + i)].width = column_len
+                col_letter = get_column_letter(i + 1)
+                worksheet.column_dimensions[col_letter].width = column_len
         
         col_btn1.download_button(
             label="📥 Descargar Planilla Excel", 
