@@ -123,13 +123,18 @@ if opcion == "🚛 Ventas a Camiones":
                 o_efectivo = ca3.text_input("Orden de Efectivo", str(st.session_state.datos_temp.get('orden_efectivo', '')))
 
             if st.form_submit_button("✅ GUARDAR EN PLANILLA"):
+                # Función interna para convertir a número si es posible
+                def clean_order(v):
+                    val = str(v).strip()
+                    return int(val) if val.isdigit() else val
+
                 registro = {
                     "Fecha": fecha, "Chofer": chofer, "Cliente": cliente_rs,
                     "Litros": litros, "Importe": importe, "Factura": factura_nro,
                     "Entidad pagadora": entidad, 
-                    "Orden Litros": o_litros if o_litros != "None" else "",
+                    "Orden Litros": clean_order(o_litros) if o_litros != "None" else "",
                     "Efectivo": v_efectivo, 
-                    "Orden Efectivo": o_efectivo if o_efectivo != "None" else ""
+                    "Orden Efectivo": clean_order(o_efectivo) if o_efectivo != "None" else ""
                 }
                 st.session_state.resumen_ventas.append(registro)
                 st.session_state.datos_temp = None
@@ -164,7 +169,7 @@ if opcion == "🚛 Ventas a Camiones":
             
             # Formatos de número (Excel)
             fmt_moneda = '"$"#,##0.00'
-            fmt_litros = '#,##0.00'
+            fmt_litros = '#,##0.0000'  # <--- Aquí agregamos los 4 decimales
 
             # 1. Encabezados
             for cell in worksheet[1]:
@@ -174,12 +179,15 @@ if opcion == "🚛 Ventas a Camiones":
             for row in worksheet.iter_rows(min_row=2, max_row=last_row):
                 for cell in row:
                     cell.border = borde
-                    # Aplicar formato $ a columnas Importe (E) y Efectivo (I)
+                    # Formato $ a Importe (E) y Efectivo (I)
                     if cell.column_letter in ['E', 'I']:
                         cell.number_format = fmt_moneda
-                    # Formato a Litros (D)
+                    # Formato a Litros (D) con 4 decimales
                     if cell.column_letter == 'D':
                         cell.number_format = fmt_litros
+                    # Formato NÚMERO a Orden Litros (H) y Orden Efectivo (J)
+                    if cell.column_letter in ['H', 'J']:
+                        cell.number_format = '0'
 
             # 3. FILA DE TOTALES
             row_tot = last_row + 1
