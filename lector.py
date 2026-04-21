@@ -6,7 +6,7 @@ import pandas as pd
 import json
 import os
 import io
-from datetime import datetime # Para obtener la fecha actual
+from datetime import datetime
 
 # Herramientas de diseño para el Excel
 from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
@@ -38,6 +38,20 @@ st.markdown(f"""
         }}
         [data-testid="stSidebar"] {{ background-color: #f8f9fa; border-right: 1px solid #e0e0e0; }}
         .stDataFrame {{ border: 1px solid #e0e0e0; border-radius: 8px; }}
+        
+        /* --- NUEVO: DESTACAR EL RECUADRO DEL CLIENTE --- */
+        [data-testid="stSidebar"] .stTextInput div[data-baseweb="input"] {{
+            border: 2px solid {COLOR_ROJO} !important;
+            border-radius: 8px !important;
+            box-shadow: 0px 4px 10px rgba(200, 16, 46, 0.25) !important;
+            background-color: #ffffff !important;
+        }}
+        [data-testid="stSidebar"] .stTextInput label p {{
+            color: {COLOR_ROJO} !important;
+            font-size: 1.15em !important;
+            font-weight: 800 !important;
+            margin-bottom: 5px !important;
+        }}
     </style>
 """, unsafe_allow_html=True)
 
@@ -63,56 +77,50 @@ else:
 opcion = st.sidebar.radio("Seleccioná la tarea:", ["🚛 Ventas a Camiones", "📄 Facturas de Proveedores"])
 st.sidebar.divider()
 
-# Nuevo campo para identificar el resumen
+# Campo del cliente super destacado
 st.sidebar.subheader("📌 Configuración del Reporte")
-cliente_reporte = st.sidebar.text_input("Nombre del Cliente para el Excel:", placeholder="Ej: Transportes Lopez")
+cliente_reporte = st.sidebar.text_input("NOMBRE DEL CLIENTE AQUÍ:", placeholder="Ej: Transportes Lopez")
 
-st.sidebar.info("Sistema v3.9 - Nombramiento Dinámico")
+st.sidebar.info("Sistema v4.0 - Foto Única + UI")
 
 # ==========================================
-# 3. MÓDULO: VENTAS A CAMIONES
+# 3. MÓDULO: VENTAS A CAMIONES (FOTO ÚNICA)
 # ==========================================
 if opcion == "🚛 Ventas a Camiones":
     st.title("🚛 Registro de Carga de Camiones")
     
-    st.subheader("📸 Paso 1: Cargar Documentos")
-    col_f, col_o = st.columns(2)
+    st.subheader("📸 Paso 1: Capturar Documentos")
+    st.success("💡 **Tip:** Colocá la Factura y el Vale juntos en el escritorio (sin superponerlos) y sacá UNA sola foto.")
     
-    with col_f:
-        st.markdown("### 📄 Factura")
-        with st.expander("📷 Abrir Cámara para Factura"):
-            cam_f = st.camera_input("Capturar", key=f"cam_f_{st.session_state.contador_carga}")
-        up_f = st.file_uploader("O subir archivo", type=["pdf","jpg","png","jpeg"], key=f"up_f_{st.session_state.contador_carga}")
+    with st.expander("📷 ABRIR CÁMARA", expanded=True):
+        cam_doc = st.camera_input("Capturar ambos documentos", key=f"cam_{st.session_state.contador_carga}")
+    
+    up_doc = st.file_uploader("📁 O subir imagen guardada", type=["jpg","png","jpeg","pdf"], key=f"up_{st.session_state.contador_carga}")
 
-    with col_o:
-        st.markdown("### 🎫 Vale de Carga")
-        with st.expander("📷 Abrir Cámara para Vale"):
-            cam_o = st.camera_input("Capturar", key=f"cam_o_{st.session_state.contador_carga}")
-        up_o = st.file_uploader("O subir archivo", type=["jpg","png","jpeg"], key=f"up_o_{st.session_state.contador_carga}")
+    doc_input = cam_doc if cam_doc else up_doc
 
-    doc_f = cam_f if cam_f else up_f
-    doc_o = cam_o if cam_o else up_o
-
-    if doc_f and doc_o and st.button("🔍 ANALIZAR DOCUMENTOS"):
-        with st.spinner("Analizando con Inteligencia Artificial..."):
+    if doc_input and st.button("🔍 ANALIZAR DOCUMENTOS"):
+        with st.spinner("Leyendo factura y vale en simultáneo..."):
             try:
-                if hasattr(doc_f, 'name') and doc_f.name.lower().endswith('.pdf'):
-                    reader = PdfReader(doc_f)
+                if hasattr(doc_input, 'name') and doc_input.name.lower().endswith('.pdf'):
+                    reader = PdfReader(doc_input)
                     text_pdf = "\n".join([p.extract_text() for p in reader.pages[:1]])
-                    input_f = f"Texto de Factura: {text_pdf}"
+                    input_data = f"Texto: {text_pdf}"
                 else:
-                    input_f = Image.open(doc_f)
+                    input_data = Image.open(doc_input)
                 
-                input_o = Image.open(doc_o)
-                
+                # --- NUEVO PROMPT PARA FOTO ÚNICA ---
                 prompt = """
-                Analizá estos dos documentos y extraé un JSON único:
-                1. DEL VALE: 'fecha', 'entidad_pagadora', 'chofer', 'orden_litros', 'efectivo', 'orden_efectivo'.
+                Analizá esta única imagen que contiene DOS documentos apoyados en una mesa (una factura y un vale de carga). 
+                Diferencialos por su formato y extraé un JSON único con estas reglas:
+                
+                1. DEL VALE DE CARGA: 'fecha', 'entidad_pagadora', 'chofer', 'orden_litros' (nro en recuadro ORDEN), 'efectivo', 'orden_efectivo'.
                 2. DE LA FACTURA: 'razon_social', 'litros_factura', 'importe', 'nro_factura'.
+                
                 Devolvé ÚNICAMENTE el JSON puro.
                 """
                 
-                res = cliente.models.generate_content(model='gemini-2.5-pro', contents=[prompt, input_f, input_o])
+                res = cliente.models.generate_content(model='gemini-2.5-pro', contents=[prompt, input_data])
                 raw_text = res.text.strip().replace('```json', '').replace('```', '')
                 start, end = raw_text.find('{'), raw_text.rfind('}') + 1
                 st.session_state.datos_temp = json.loads(raw_text[start:end])
@@ -120,13 +128,14 @@ if opcion == "🚛 Ventas a Camiones":
             except Exception as e:
                 st.error(f"Error: {e}")
 
+    # --- FORMULARIO DE VALIDACIÓN ---
     if st.session_state.datos_temp:
-        with st.form("validador_v9"):
+        with st.form("validador_v10"):
             st.subheader("📝 Paso 2: Confirmar Información")
             c1, c2, c3 = st.columns([1, 1, 2])
             fecha = c1.text_input("Fecha", str(st.session_state.datos_temp.get('fecha', '')))
             chofer = c2.text_input("Chofer", str(st.session_state.datos_temp.get('chofer', '')))
-            cliente_rs = c3.text_input("Cliente", str(st.session_state.datos_temp.get('razon_social', '')))
+            cliente_rs = c3.text_input("Cliente de Factura", str(st.session_state.datos_temp.get('razon_social', '')))
             
             c4, c5, c6 = st.columns(3)
             def to_f(v):
@@ -163,6 +172,7 @@ if opcion == "🚛 Ventas a Camiones":
                 st.session_state.contador_carga += 1
                 st.rerun()
 
+    # --- TABLA Y EXPORTACIÓN ---
     if st.session_state.resumen_ventas:
         st.divider()
         df = pd.DataFrame(st.session_state.resumen_ventas)
@@ -208,9 +218,7 @@ if opcion == "🚛 Ventas a Camiones":
                 w = max(df[col].astype(str).map(len).max(), len(col)) + 4
                 ws.column_dimensions[get_column_letter(i + 1)].width = w
         
-        # --- LÓGICA DE NOMBRE DINÁMICO ---
         fecha_hoy = datetime.now().strftime("%d-%m-%Y")
-        # Si el usuario no puso nombre, usamos 'Resumen' por defecto
         nombre_limpio = cliente_reporte.strip() if cliente_reporte.strip() else "Resumen"
         nombre_archivo = f"{nombre_limpio}_{fecha_hoy}.xlsx"
 
