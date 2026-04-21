@@ -81,7 +81,7 @@ st.sidebar.divider()
 st.sidebar.subheader("📌 Configuración del Reporte")
 cliente_reporte = st.sidebar.text_input("NOMBRE DEL CLIENTE AQUÍ:", placeholder="Ej: Transportes Lopez")
 
-st.sidebar.info("Sistema v4.5 - Interfaz Minimalista")
+st.sidebar.info("Sistema v4.6 - Lectura de importes precisa")
 
 # ==========================================
 # 3. MÓDULO: VENTAS A CAMIONES
@@ -118,8 +118,8 @@ if opcion == "🚛 Ventas a Camiones":
                 
                 prompt = """
                 Analizá estos dos documentos de una estación de servicio y extraé un JSON único con máxima precisión:
-                1. DEL VALE: 'fecha', 'entidad_pagadora', 'chofer', 'orden_litros', 'efectivo', 'orden_efectivo'.
-                2. DE LA FACTURA: 'razon_social', 'litros_factura', 'importe', 'nro_factura'.
+                1. DEL VALE: 'fecha', 'entidad_pagadora', 'chofer', 'numero_orden_autorizacion' (Buscá el recuadro ORDEN, NO pongas la cantidad de litros acá, solo el Nro de orden), 'efectivo', 'orden_efectivo'.
+                2. DE LA FACTURA: 'razon_social', 'litros_factura' (usá punto para decimales, sin separador de miles), 'importe' (usá punto para decimales, sin separador de miles), 'nro_factura'.
                 Devolvé ÚNICAMENTE el JSON puro.
                 """
                 
@@ -133,7 +133,7 @@ if opcion == "🚛 Ventas a Camiones":
 
     # --- FORMULARIO DE VALIDACIÓN ---
     if st.session_state.datos_temp:
-        with st.form("validador_v45"):
+        with st.form("validador_v46"):
             st.subheader("📝 Paso 2: Confirmar Información")
             c1, c2, c3 = st.columns([1, 1, 2])
             fecha = c1.text_input("Fecha", str(st.session_state.datos_temp.get('fecha', '')))
@@ -141,8 +141,15 @@ if opcion == "🚛 Ventas a Camiones":
             cliente_rs = c3.text_input("Cliente de Factura", str(st.session_state.datos_temp.get('razon_social', '')))
             
             c4, c5, c6 = st.columns(3)
+            
+            # NUEVA LÓGICA DE NÚMEROS: Inteligente y a prueba de errores
             def to_f(v):
-                try: return float(str(v).replace('.', '').replace(',', '.')) if v else 0.0
+                try: 
+                    v_str = str(v).strip()
+                    if ',' in v_str and '.' in v_str:
+                        v_str = v_str.replace('.', '')
+                    v_str = v_str.replace(',', '.')
+                    return float(v_str) if v_str else 0.0
                 except: return 0.0
 
             litros = c4.number_input("Litros", value=to_f(st.session_state.datos_temp.get('litros_factura', 0.0)), format="%.4f")
@@ -152,7 +159,7 @@ if opcion == "🚛 Ventas a Camiones":
             
             with st.expander("Órdenes y Efectivo", expanded=True):
                 ca1, ca2, ca3 = st.columns(3)
-                o_litros = ca1.text_input("Orden Litros", str(st.session_state.datos_temp.get('orden_litros', '')))
+                o_litros = ca1.text_input("Orden Litros", str(st.session_state.datos_temp.get('numero_orden_autorizacion', '')))
                 v_efectivo = ca2.number_input("Efectivo", value=to_f(st.session_state.datos_temp.get('efectivo', 0.0)))
                 o_efectivo = ca3.text_input("Orden Efectivo", str(st.session_state.datos_temp.get('orden_efectivo', '')))
 
