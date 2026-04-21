@@ -81,7 +81,7 @@ st.sidebar.divider()
 st.sidebar.subheader("📌 Configuración del Reporte")
 cliente_reporte = st.sidebar.text_input("NOMBRE DEL CLIENTE AQUÍ:", placeholder="Ej: Transportes Lopez")
 
-st.sidebar.info("Sistema v4.6 - Lectura de importes precisa")
+st.sidebar.info("Sistema v4.7 - Carga Opcional Habilitada")
 
 # ==========================================
 # 3. MÓDULO: VENTAS A CAMIONES
@@ -90,7 +90,7 @@ if opcion == "🚛 Ventas a Camiones":
     st.title("🚛 Registro de Carga de Camiones")
     
     st.subheader("📸 Paso 1: Cargar Documentos")
-    st.info("💡 Desde el celular, tocá los botones de abajo para sacar la foto con tu cámara nativa.")
+    st.info("💡 Desde el celular, tocá los botones de abajo para sacar la foto con tu cámara nativa. Podés cargar solo un documento si el otro no lo tenés.")
     
     col_f, col_o = st.columns(2)
     
@@ -102,28 +102,38 @@ if opcion == "🚛 Ventas a Camiones":
         st.markdown("### 🎫 Vale de Carga")
         doc_o = st.file_uploader("Subir o Sacar Foto de Vale", type=["jpg","png","jpeg"], key=f"up_o_{st.session_state.contador_carga}")
 
-    if doc_f and doc_o and st.button("🔍 ANALIZAR DOCUMENTOS"):
+    # AHORA PIDE QUE AL MENOS UNO DE LOS DOS ESTÉ CARGADO
+    if (doc_f or doc_o) and st.button("🔍 ANALIZAR DOCUMENTOS"):
         with st.spinner("Analizando con Inteligencia Artificial..."):
             try:
-                # Procesar Factura (soporta PDF o imagen)
-                if hasattr(doc_f, 'name') and doc_f.name.lower().endswith('.pdf'):
-                    reader = PdfReader(doc_f)
-                    text_pdf = "\n".join([p.extract_text() for p in reader.pages[:1]])
-                    input_f = f"Texto de Factura: {text_pdf}"
-                else:
-                    input_f = Image.open(doc_f)
-                
-                # Procesar Vale
-                input_o = Image.open(doc_o)
+                # Preparamos lo que le vamos a mandar a la IA dinámicamente
+                contenido_ia = []
                 
                 prompt = """
-                Analizá estos dos documentos de una estación de servicio y extraé un JSON único con máxima precisión:
-                1. DEL VALE: 'fecha', 'entidad_pagadora', 'chofer', 'numero_orden_autorizacion' (Buscá el recuadro ORDEN, NO pongas la cantidad de litros acá, solo el Nro de orden), 'efectivo', 'orden_efectivo'.
-                2. DE LA FACTURA: 'razon_social', 'litros_factura' (usá punto para decimales, sin separador de miles), 'importe' (usá punto para decimales, sin separador de miles), 'nro_factura'.
+                Analizá los documentos adjuntos de una estación de servicio (puede ser una factura, un vale, o ambos). Extraé un JSON único con máxima precisión.
+                Si un dato no está presente porque falta el documento, devolvé el valor en blanco ("" o 0.0 según corresponda).
+                
+                1. SI HAY VALE: 'fecha', 'entidad_pagadora', 'chofer', 'numero_orden_autorizacion' (Buscá el recuadro ORDEN, NO pongas la cantidad de litros acá, solo el Nro de orden), 'efectivo', 'orden_efectivo'.
+                2. SI HAY FACTURA: 'razon_social', 'litros_factura' (usá punto para decimales, sin separador de miles), 'importe' (usá punto para decimales, sin separador de miles), 'nro_factura'.
+                
                 Devolvé ÚNICAMENTE el JSON puro.
                 """
+                contenido_ia.append(prompt)
+
+                # Si subiste factura, la agregamos
+                if doc_f:
+                    if hasattr(doc_f, 'name') and doc_f.name.lower().endswith('.pdf'):
+                        reader = PdfReader(doc_f)
+                        text_pdf = "\n".join([p.extract_text() for p in reader.pages[:1]])
+                        contenido_ia.append(f"Texto de Factura: {text_pdf}")
+                    else:
+                        contenido_ia.append(Image.open(doc_f))
                 
-                res = cliente.models.generate_content(model='gemini-2.5-pro', contents=[prompt, input_f, input_o])
+                # Si subiste vale, lo agregamos
+                if doc_o:
+                    contenido_ia.append(Image.open(doc_o))
+                
+                res = cliente.models.generate_content(model='gemini-2.5-pro', contents=contenido_ia)
                 raw_text = res.text.strip().replace('```json', '').replace('```', '')
                 start, end = raw_text.find('{'), raw_text.rfind('}') + 1
                 st.session_state.datos_temp = json.loads(raw_text[start:end])
@@ -133,7 +143,7 @@ if opcion == "🚛 Ventas a Camiones":
 
     # --- FORMULARIO DE VALIDACIÓN ---
     if st.session_state.datos_temp:
-        with st.form("validador_v46"):
+        with st.form("validador_v47"):
             st.subheader("📝 Paso 2: Confirmar Información")
             c1, c2, c3 = st.columns([1, 1, 2])
             fecha = c1.text_input("Fecha", str(st.session_state.datos_temp.get('fecha', '')))
@@ -141,8 +151,6 @@ if opcion == "🚛 Ventas a Camiones":
             cliente_rs = c3.text_input("Cliente de Factura", str(st.session_state.datos_temp.get('razon_social', '')))
             
             c4, c5, c6 = st.columns(3)
-            
-            # NUEVA LÓGICA DE NÚMEROS: Inteligente y a prueba de errores
             def to_f(v):
                 try: 
                     v_str = str(v).strip()
