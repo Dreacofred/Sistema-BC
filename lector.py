@@ -6,7 +6,6 @@ import pandas as pd
 import json
 import os
 import io
-from datetime import datetime
 
 # Herramientas de diseño para el Excel
 from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
@@ -38,20 +37,6 @@ st.markdown(f"""
         }}
         [data-testid="stSidebar"] {{ background-color: #f8f9fa; border-right: 1px solid #e0e0e0; }}
         .stDataFrame {{ border: 1px solid #e0e0e0; border-radius: 8px; }}
-        
-        /* --- DESTACAR EL RECUADRO DEL CLIENTE --- */
-        [data-testid="stSidebar"] .stTextInput div[data-baseweb="input"] {{
-            border: 2px solid {COLOR_ROJO} !important;
-            border-radius: 8px !important;
-            box-shadow: 0px 4px 10px rgba(200, 16, 46, 0.25) !important;
-            background-color: #ffffff !important;
-        }}
-        [data-testid="stSidebar"] .stTextInput label p {{
-            color: {COLOR_ROJO} !important;
-            font-size: 1.15em !important;
-            font-weight: 800 !important;
-            margin-bottom: 5px !important;
-        }}
     </style>
 """, unsafe_allow_html=True)
 
@@ -76,12 +61,7 @@ else:
 
 opcion = st.sidebar.radio("Seleccioná la tarea:", ["🚛 Ventas a Camiones", "📄 Facturas de Proveedores"])
 st.sidebar.divider()
-
-# Campo del cliente super destacado
-st.sidebar.subheader("📌 Configuración del Reporte")
-cliente_reporte = st.sidebar.text_input("NOMBRE DEL CLIENTE AQUÍ:", placeholder="Ej: Transportes Lopez")
-
-st.sidebar.info("Sistema v4.1 - Prompt Guiado")
+st.sidebar.info("Sistema v3.8 - Interfaz Limpia")
 
 # ==========================================
 # 3. MÓDULO: VENTAS A CAMIONES
@@ -89,55 +69,50 @@ st.sidebar.info("Sistema v4.1 - Prompt Guiado")
 if opcion == "🚛 Ventas a Camiones":
     st.title("🚛 Registro de Carga de Camiones")
     
-    st.subheader("📸 Paso 1: Capturar Documentos")
-    st.success("💡 **Tip:** Colocá la Factura y el Vale juntos en el escritorio (sin superponerlos) y sacá UNA sola foto.")
+    # --- ENTRADA DE DATOS MEJORADA (DESPLEGABLE) ---
+    st.subheader("📸 Paso 1: Cargar Documentos")
     
-    with st.expander("📷 ABRIR CÁMARA", expanded=True):
-        cam_doc = st.camera_input("Capturar ambos documentos", key=f"cam_{st.session_state.contador_carga}")
+    col_f, col_o = st.columns(2)
     
-    up_doc = st.file_uploader("📁 O subir imagen guardada", type=["jpg","png","jpeg","pdf"], key=f"up_{st.session_state.contador_carga}")
+    # --- COLUMNA FACTURA ---
+    with col_f:
+        st.markdown("### 📄 Factura")
+        with st.expander("📷 Abrir Cámara para Factura"):
+            cam_f = st.camera_input("Capturar", key=f"cam_f_{st.session_state.contador_carga}")
+        up_f = st.file_uploader("O subir archivo", type=["pdf","jpg","png","jpeg"], key=f"up_f_{st.session_state.contador_carga}")
 
-    doc_input = cam_doc if cam_doc else up_doc
+    # --- COLUMNA VALE ---
+    with col_o:
+        st.markdown("### 🎫 Vale de Carga")
+        with st.expander("📷 Abrir Cámara para Vale"):
+            cam_o = st.camera_input("Capturar", key=f"cam_o_{st.session_state.contador_carga}")
+        up_o = st.file_uploader("O subir archivo", type=["jpg","png","jpeg"], key=f"up_o_{st.session_state.contador_carga}")
 
-    if doc_input and st.button("🔍 ANALIZAR DOCUMENTOS"):
-        with st.spinner("Leyendo factura y vale en simultáneo..."):
+    # Prioridad: Cámara > Archivo
+    doc_f = cam_f if cam_f else up_f
+    doc_o = cam_o if cam_o else up_o
+
+    if doc_f and doc_o and st.button("🔍 ANALIZAR DOCUMENTOS"):
+        with st.spinner("Analizando con Inteligencia Artificial..."):
             try:
-                if hasattr(doc_input, 'name') and doc_input.name.lower().endswith('.pdf'):
-                    reader = PdfReader(doc_input)
+                if hasattr(doc_f, 'name') and doc_f.name.lower().endswith('.pdf'):
+                    reader = PdfReader(doc_f)
                     text_pdf = "\n".join([p.extract_text() for p in reader.pages[:1]])
-                    input_data = f"Texto: {text_pdf}"
+                    input_f = f"Texto de Factura: {text_pdf}"
                 else:
-                    input_data = Image.open(doc_input)
+                    input_f = Image.open(doc_f)
                 
-                # ==========================================
-                # NUEVO PROMPT GUIADO (Mucho más preciso)
-                # ==========================================
+                input_o = Image.open(doc_o)
+                
                 prompt = """
-                Analizá esta imagen que contiene dos documentos distintos apoyados en una mesa: una factura impresa a la izquierda y un vale de carga escrito a mano a la derecha. 
-
-                PASO 1: Localiza mentalmente el documento de la izquierda (el ticket/factura impresa).
-                En este documento, busca y extrae los siguientes campos. Asegurate de interpretar los números usando coma como separador decimal:
-                - 'razon_social' (Nombre del cliente/empresa que está en medio del ticket, bajo el CUIT)
-                - 'litros_factura' (El número que aparece junto a "GASOIL G2 500", ej: "426.032")
-                - 'importe' (El "TOTAL" al final del ticket, ej: "999045,04")
-                - 'nro_factura' (El número bajo "Nro.", ej: "0024-00019171")
-
-                PASO 2: Localiza mentalmente el documento de la derecha (el vale escrito a mano, pero en imprenta).
-                Identifica el texto dentro de los recuadros dibujados y extrae:
-                - 'fecha' (El texto en el recuadro "FECHA" arriba a la derecha, ej: "16/04/26")
-                - 'chofer' (El texto en el recuadro "CHOFER", ej: "ALTAMIRANO SERGIO")
-                - 'entidad_pagadora' (El texto en el recuadro "ENTIDAD PAGADORA", ej: "TRANSP. HIJOS DE MARI")
-                - 'orden_litros' (El texto en el recuadro "ORDEN" que está justo a la derecha del recuadro "LITROS". ¡No extraigas la cantidad de litros manuscrita del vale, solo la orden!)
-                - 'efectivo' (El número en el recuadro "EFECTIVO". Si está vacío, pon 0.0)
-                - 'orden_efectivo' (El texto en el recuadro "ORDEN" que está justo a la derecha del recuadro "EFECTIVO")
-
-                PASO 3: Unifica todos los datos extraídos en un único objeto JSON plano. Si no encuentras un dato, pon "NOT_FOUND" como valor.
-
-                Devolvé ÚNICAMENTE el JSON puro, sin markdown ni texto extra.
+                Analizá estos dos documentos y extraé un JSON único:
+                1. DEL VALE: 'fecha', 'entidad_pagadora', 'chofer', 'orden_litros', 'efectivo', 'orden_efectivo'.
+                2. DE LA FACTURA: 'razon_social', 'litros_factura', 'importe', 'nro_factura'.
+                Devolvé ÚNICAMENTE el JSON puro.
                 """
                 
-                res = cliente.models.generate_content(model='gemini-2.5-pro', contents=[prompt, input_data])
-                raw_text = res.text.strip().replace('```json', '').replace('```', '')
+                res = cliente.models.generate_content(model='gemini-2.5-pro', contents=[prompt, input_f, input_o])
+                raw_text = res.text.strip().replace('json', '').replace('', '')
                 start, end = raw_text.find('{'), raw_text.rfind('}') + 1
                 st.session_state.datos_temp = json.loads(raw_text[start:end])
                 
@@ -146,45 +121,34 @@ if opcion == "🚛 Ventas a Camiones":
 
     # --- FORMULARIO DE VALIDACIÓN ---
     if st.session_state.datos_temp:
-        with st.form("validador_v10"):
+        with st.form("validador_v8"):
             st.subheader("📝 Paso 2: Confirmar Información")
-            c1, c2, c3 = st.columns([1, 1, 2])
             
-            # Helper para limpiar "NOT_FOUND" y mostrar blanco
-            def get_v(field):
-                val = st.session_state.datos_temp.get(field, '')
-                return '' if val == 'NOT_FOUND' else str(val)
-
-            fecha = c1.text_input("Fecha", get_v('fecha'))
-            chofer = c2.text_input("Chofer", get_v('chofer'))
-            cliente_rs = c3.text_input("Cliente de Factura", get_v('razon_social'))
+            c1, c2, c3 = st.columns([1, 1, 2])
+            fecha = c1.text_input("Fecha", str(st.session_state.datos_temp.get('fecha', '')))
+            chofer = c2.text_input("Chofer", str(st.session_state.datos_temp.get('chofer', '')))
+            cliente_rs = c3.text_input("Cliente", str(st.session_state.datos_temp.get('razon_social', '')))
             
             c4, c5, c6 = st.columns(3)
-            def to_f(field):
-                val = st.session_state.datos_temp.get(field, 0.0)
-                if val == 'NOT_FOUND': return 0.0
-                try: 
-                    # Manejar formatos como 426.032 o 999045,04
-                    val_str = str(val).replace('.', '').replace(',', '.')
-                    return float(val_str)
+            def to_f(v):
+                try: return float(v)
                 except: return 0.0
 
-            litros = c4.number_input("Litros", value=to_f('litros_factura'), format="%.4f")
-            importe = c5.number_input("Importe", value=to_f('importe'))
-            factura_nro = c6.text_input("Factura Nº", get_v('nro_factura'))
+            litros = c4.number_input("Litros", value=to_f(st.session_state.datos_temp.get('litros_factura', 0.0)), format="%.4f")
+            importe = c5.number_input("Importe", value=to_f(st.session_state.datos_temp.get('importe', 0.0)))
+            factura_nro = c6.text_input("Factura Nº", str(st.session_state.datos_temp.get('nro_factura', '')))
             
-            entidad = st.text_input("Entidad pagadora", get_v('entidad_pagadora'))
+            entidad = st.text_input("Entidad pagadora", str(st.session_state.datos_temp.get('entidad_pagadora', '')))
             
             with st.expander("Control de Órdenes y Efectivo", expanded=True):
                 ca1, ca2, ca3 = st.columns(3)
                 def clean_order(v):
                     val = str(v).strip()
-                    if val == 'NOT_FOUND': return ''
                     return int(val) if val.isdigit() else val
 
-                o_litros = ca1.text_input("Orden Litros", get_v('orden_litros'))
-                v_efectivo = ca2.number_input("Efectivo", value=to_f('efectivo'))
-                o_efectivo = ca3.text_input("Orden Efectivo", get_v('orden_efectivo'))
+                o_litros = ca1.text_input("Orden Litros", str(st.session_state.datos_temp.get('orden_litros', '')))
+                v_efectivo = ca2.number_input("Efectivo", value=to_f(st.session_state.datos_temp.get('efectivo', 0.0)))
+                o_efectivo = ca3.text_input("Orden Efectivo", str(st.session_state.datos_temp.get('orden_efectivo', '')))
 
             if st.form_submit_button("✅ GUARDAR EN PLANILLA"):
                 registro = {
@@ -246,18 +210,7 @@ if opcion == "🚛 Ventas a Camiones":
                 w = max(df[col].astype(str).map(len).max(), len(col)) + 4
                 ws.column_dimensions[get_column_letter(i + 1)].width = w
         
-        fecha_hoy = datetime.now().strftime("%d-%m-%Y")
-        nombre_limpio = cliente_reporte.strip() if cliente_reporte.strip() else "Resumen"
-        nombre_archivo = f"{nombre_limpio}_{fecha_hoy}.xlsx"
-
-        col_ex1.download_button(
-            label=f"📥 Descargar Excel: {nombre_archivo}", 
-            data=buffer.getvalue(), 
-            file_name=nombre_archivo, 
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True
-        )
-        
+        col_ex1.download_button("📥 Descargar Excel Pro", buffer.getvalue(), "ventas_bc.xlsx", use_container_width=True)
         if col_ex2.button("🗑️ Vaciar Todo", use_container_width=True):
             st.session_state.resumen_ventas = []
             st.rerun()
@@ -266,7 +219,6 @@ if opcion == "🚛 Ventas a Camiones":
 # 4. MÓDULO: PROVEEDORES
 # ==========================================
 elif opcion == "📄 Facturas de Proveedores":
-    # Mantenemos este módulo igual
     st.title("📄 Gestión de Proveedores")
     archivo_prov = st.file_uploader("Subir Factura", type=["pdf", "png", "jpg", "jpeg"])
     if archivo_prov and st.button("🚀 PROCESAR"):
@@ -283,7 +235,7 @@ elif opcion == "📄 Facturas de Proveedores":
                     model='gemini-2.5-pro',
                     contents=input_data + ["Extraé CUIT, Razón Social, Fecha, Neto, IVA y Total en JSON."]
                 )
-                raw = res.text.strip().replace('```json', '').replace('```', '')
+                raw = res.text.strip().replace('json', '').replace('', '')
                 st.json(raw[raw.find('{'):raw.rfind('}')+1])
             except Exception as e:
                 st.error(f"Error: {e}")
