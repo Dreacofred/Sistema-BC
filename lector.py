@@ -6,6 +6,7 @@ import pandas as pd
 import json
 import os
 import io
+from datetime import datetime # Para obtener la fecha actual
 
 # Herramientas de diseño para el Excel
 from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
@@ -61,7 +62,12 @@ else:
 
 opcion = st.sidebar.radio("Seleccioná la tarea:", ["🚛 Ventas a Camiones", "📄 Facturas de Proveedores"])
 st.sidebar.divider()
-st.sidebar.info("Sistema v3.8 - Interfaz Limpia")
+
+# Nuevo campo para identificar el resumen
+st.sidebar.subheader("📌 Configuración del Reporte")
+cliente_reporte = st.sidebar.text_input("Nombre del Cliente para el Excel:", placeholder="Ej: Transportes Lopez")
+
+st.sidebar.info("Sistema v3.9 - Nombramiento Dinámico")
 
 # ==========================================
 # 3. MÓDULO: VENTAS A CAMIONES
@@ -69,26 +75,21 @@ st.sidebar.info("Sistema v3.8 - Interfaz Limpia")
 if opcion == "🚛 Ventas a Camiones":
     st.title("🚛 Registro de Carga de Camiones")
     
-    # --- ENTRADA DE DATOS MEJORADA (DESPLEGABLE) ---
     st.subheader("📸 Paso 1: Cargar Documentos")
-    
     col_f, col_o = st.columns(2)
     
-    # --- COLUMNA FACTURA ---
     with col_f:
         st.markdown("### 📄 Factura")
         with st.expander("📷 Abrir Cámara para Factura"):
             cam_f = st.camera_input("Capturar", key=f"cam_f_{st.session_state.contador_carga}")
         up_f = st.file_uploader("O subir archivo", type=["pdf","jpg","png","jpeg"], key=f"up_f_{st.session_state.contador_carga}")
 
-    # --- COLUMNA VALE ---
     with col_o:
         st.markdown("### 🎫 Vale de Carga")
         with st.expander("📷 Abrir Cámara para Vale"):
             cam_o = st.camera_input("Capturar", key=f"cam_o_{st.session_state.contador_carga}")
         up_o = st.file_uploader("O subir archivo", type=["jpg","png","jpeg"], key=f"up_o_{st.session_state.contador_carga}")
 
-    # Prioridad: Cámara > Archivo
     doc_f = cam_f if cam_f else up_f
     doc_o = cam_o if cam_o else up_o
 
@@ -119,11 +120,9 @@ if opcion == "🚛 Ventas a Camiones":
             except Exception as e:
                 st.error(f"Error: {e}")
 
-    # --- FORMULARIO DE VALIDACIÓN ---
     if st.session_state.datos_temp:
-        with st.form("validador_v8"):
+        with st.form("validador_v9"):
             st.subheader("📝 Paso 2: Confirmar Información")
-            
             c1, c2, c3 = st.columns([1, 1, 2])
             fecha = c1.text_input("Fecha", str(st.session_state.datos_temp.get('fecha', '')))
             chofer = c2.text_input("Chofer", str(st.session_state.datos_temp.get('chofer', '')))
@@ -164,7 +163,6 @@ if opcion == "🚛 Ventas a Camiones":
                 st.session_state.contador_carga += 1
                 st.rerun()
 
-    # --- TABLA Y EXPORTACIÓN ---
     if st.session_state.resumen_ventas:
         st.divider()
         df = pd.DataFrame(st.session_state.resumen_ventas)
@@ -210,7 +208,20 @@ if opcion == "🚛 Ventas a Camiones":
                 w = max(df[col].astype(str).map(len).max(), len(col)) + 4
                 ws.column_dimensions[get_column_letter(i + 1)].width = w
         
-        col_ex1.download_button("📥 Descargar Excel Pro", buffer.getvalue(), "ventas_bc.xlsx", use_container_width=True)
+        # --- LÓGICA DE NOMBRE DINÁMICO ---
+        fecha_hoy = datetime.now().strftime("%d-%m-%Y")
+        # Si el usuario no puso nombre, usamos 'Resumen' por defecto
+        nombre_limpio = cliente_reporte.strip() if cliente_reporte.strip() else "Resumen"
+        nombre_archivo = f"{nombre_limpio}_{fecha_hoy}.xlsx"
+
+        col_ex1.download_button(
+            label=f"📥 Descargar Excel: {nombre_archivo}", 
+            data=buffer.getvalue(), 
+            file_name=nombre_archivo, 
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
+        )
+        
         if col_ex2.button("🗑️ Vaciar Todo", use_container_width=True):
             st.session_state.resumen_ventas = []
             st.rerun()
