@@ -6,6 +6,7 @@ import pandas as pd
 import json
 import os
 import io
+from datetime import datetime
 
 # Herramientas de diseño para el Excel
 from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
@@ -37,6 +38,20 @@ st.markdown(f"""
         }}
         [data-testid="stSidebar"] {{ background-color: #f8f9fa; border-right: 1px solid #e0e0e0; }}
         .stDataFrame {{ border: 1px solid #e0e0e0; border-radius: 8px; }}
+        
+        /* --- RECUADRO ROJO DESTACADO PARA EL CLIENTE --- */
+        [data-testid="stSidebar"] .stTextInput div[data-baseweb="input"] {{
+            border: 2px solid {COLOR_ROJO} !important;
+            border-radius: 8px !important;
+            box-shadow: 0px 4px 10px rgba(200, 16, 46, 0.25) !important;
+            background-color: #ffffff !important;
+        }}
+        [data-testid="stSidebar"] .stTextInput label p {{
+            color: {COLOR_ROJO} !important;
+            font-size: 1.15em !important;
+            font-weight: 800 !important;
+            margin-bottom: 5px !important;
+        }}
     </style>
 """, unsafe_allow_html=True)
 
@@ -61,7 +76,12 @@ else:
 
 opcion = st.sidebar.radio("Seleccioná la tarea:", ["🚛 Ventas a Camiones", "📄 Facturas de Proveedores"])
 st.sidebar.divider()
-st.sidebar.info("Sistema v3.8 - Interfaz Limpia")
+
+# Campo del cliente super destacado en el menú lateral
+st.sidebar.subheader("📌 Configuración del Reporte")
+cliente_reporte = st.sidebar.text_input("NOMBRE DEL CLIENTE AQUÍ:", placeholder="Ej: Transportes Lopez")
+
+st.sidebar.info("Sistema v4.4 - Fotos Separadas + UI Pro")
 
 # ==========================================
 # 3. MÓDULO: VENTAS A CAMIONES
@@ -69,7 +89,6 @@ st.sidebar.info("Sistema v3.8 - Interfaz Limpia")
 if opcion == "🚛 Ventas a Camiones":
     st.title("🚛 Registro de Carga de Camiones")
     
-    # --- ENTRADA DE DATOS MEJORADA (DESPLEGABLE) ---
     st.subheader("📸 Paso 1: Cargar Documentos")
     
     col_f, col_o = st.columns(2)
@@ -88,7 +107,6 @@ if opcion == "🚛 Ventas a Camiones":
             cam_o = st.camera_input("Capturar", key=f"cam_o_{st.session_state.contador_carga}")
         up_o = st.file_uploader("O subir archivo", type=["jpg","png","jpeg"], key=f"up_o_{st.session_state.contador_carga}")
 
-    # Prioridad: Cámara > Archivo
     doc_f = cam_f if cam_f else up_f
     doc_o = cam_o if cam_o else up_o
 
@@ -105,14 +123,14 @@ if opcion == "🚛 Ventas a Camiones":
                 input_o = Image.open(doc_o)
                 
                 prompt = """
-                Analizá estos dos documentos y extraé un JSON único:
+                Analizá estos dos documentos de una estación de servicio y extraé un JSON único con máxima precisión:
                 1. DEL VALE: 'fecha', 'entidad_pagadora', 'chofer', 'orden_litros', 'efectivo', 'orden_efectivo'.
                 2. DE LA FACTURA: 'razon_social', 'litros_factura', 'importe', 'nro_factura'.
                 Devolvé ÚNICAMENTE el JSON puro.
                 """
                 
                 res = cliente.models.generate_content(model='gemini-2.5-pro', contents=[prompt, input_f, input_o])
-                raw_text = res.text.strip().replace('json', '').replace('', '')
+                raw_text = res.text.strip().replace('```json', '').replace('```', '')
                 start, end = raw_text.find('{'), raw_text.rfind('}') + 1
                 st.session_state.datos_temp = json.loads(raw_text[start:end])
                 
@@ -121,17 +139,18 @@ if opcion == "🚛 Ventas a Camiones":
 
     # --- FORMULARIO DE VALIDACIÓN ---
     if st.session_state.datos_temp:
-        with st.form("validador_v8"):
+        with st.form("validador_v44"):
             st.subheader("📝 Paso 2: Confirmar Información")
             
             c1, c2, c3 = st.columns([1, 1, 2])
             fecha = c1.text_input("Fecha", str(st.session_state.datos_temp.get('fecha', '')))
             chofer = c2.text_input("Chofer", str(st.session_state.datos_temp.get('chofer', '')))
-            cliente_rs = c3.text_input("Cliente", str(st.session_state.datos_temp.get('razon_social', '')))
+            cliente_rs = c3.text_input("Cliente de Factura", str(st.session_state.datos_temp.get('razon_social', '')))
             
             c4, c5, c6 = st.columns(3)
+            # Manejo robusto de números por si vienen con comas
             def to_f(v):
-                try: return float(v)
+                try: return float(str(v).replace('.', '').replace(',', '.')) if v else 0.0
                 except: return 0.0
 
             litros = c4.number_input("Litros", value=to_f(st.session_state.datos_temp.get('litros_factura', 0.0)), format="%.4f")
@@ -210,7 +229,19 @@ if opcion == "🚛 Ventas a Camiones":
                 w = max(df[col].astype(str).map(len).max(), len(col)) + 4
                 ws.column_dimensions[get_column_letter(i + 1)].width = w
         
-        col_ex1.download_button("📥 Descargar Excel Pro", buffer.getvalue(), "ventas_bc.xlsx", use_container_width=True)
+        # --- LÓGICA DE NOMBRE DINÁMICO ---
+        fecha_hoy = datetime.now().strftime("%d-%m-%Y")
+        nombre_limpio = cliente_reporte.strip() if cliente_reporte.strip() else "Resumen"
+        nombre_archivo = f"{nombre_limpio}_{fecha_hoy}.xlsx"
+        
+        col_ex1.download_button(
+            label=f"📥 Descargar Excel: {nombre_archivo}", 
+            data=buffer.getvalue(), 
+            file_name=nombre_archivo, 
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
+        )
+        
         if col_ex2.button("🗑️ Vaciar Todo", use_container_width=True):
             st.session_state.resumen_ventas = []
             st.rerun()
@@ -235,7 +266,7 @@ elif opcion == "📄 Facturas de Proveedores":
                     model='gemini-2.5-pro',
                     contents=input_data + ["Extraé CUIT, Razón Social, Fecha, Neto, IVA y Total en JSON."]
                 )
-                raw = res.text.strip().replace('json', '').replace('', '')
+                raw = res.text.strip().replace('```json', '').replace('```', '')
                 st.json(raw[raw.find('{'):raw.rfind('}')+1])
             except Exception as e:
                 st.error(f"Error: {e}")
