@@ -157,15 +157,26 @@ if opcion == "🚛 Ventas a Camiones":
             # Lógica de Clientes (Código -> Razón Social)
             codigo_ia = str(st.session_state.datos_temp.get('codigo_cliente', '')).strip()
             nombre_ia = str(st.session_state.datos_temp.get('razon_social', '')).strip()
-            nombre_sugerido = BASE_CLIENTES.get(codigo_ia, nombre_ia)
+            
+            es_nuevo = False
+            if codigo_ia and codigo_ia in BASE_CLIENTES:
+                nombre_sugerido = BASE_CLIENTES[codigo_ia]
+            else:
+                nombre_sugerido = nombre_ia
+                if codigo_ia:
+                    es_nuevo = True
 
-            # --- 🟢 2. LÓGICA DIFUSA PARA ENTIDAD PAGADORA 🟢 ---
+            # --- 🟢 LÓGICA DIFUSA PARA ENTIDAD PAGADORA 🟢 ---
             entidad_ia = str(st.session_state.datos_temp.get('entidad_pagadora', '')).strip().upper()
             entidad_final = entidad_ia
             if entidad_ia:
                 coincidencias = difflib.get_close_matches(entidad_ia, ENTIDADES_OFICIALES, n=1, cutoff=0.5)
                 if coincidencias:
                     entidad_final = coincidencias[0]
+
+            # EL CARTEL DE AVISO
+            if es_nuevo:
+                st.info("✨ ¡Atención! Código nuevo o no reconocido. Revisá que el Cód. Cli. sea correcto.")
 
             c1, c2, c3, c4 = st.columns([1.5, 2, 1, 3])
             fecha = c1.text_input("Fecha", str(st.session_state.datos_temp.get('fecha', '')))
@@ -198,6 +209,7 @@ if opcion == "🚛 Ventas a Camiones":
             if st.form_submit_button("✅ GUARDAR EN PLANILLA"):
                 cod_l = codigo_final.strip()
                 nom_l = cliente_rs.strip()
+                # Guarda el cliente nuevo en la base si corresponde
                 if cod_l and (cod_l not in BASE_CLIENTES or BASE_CLIENTES[cod_l] != nom_l):
                     guardar_nuevo_cliente(cod_l, nom_l)
 
