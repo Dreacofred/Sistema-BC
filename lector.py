@@ -113,10 +113,19 @@ if opcion == "🚛 Ventas a Camiones":
                 Analizá los documentos adjuntos de una estación de servicio (puede ser una factura, un vale, o ambos). Extraé un JSON único con máxima precisión.
                 Si un dato no está presente porque falta el documento, devolvé el valor en blanco ("" o 0.0 según corresponda).
                 
-                1. SI HAY VALE: 'fecha', 'entidad_pagadora', 'chofer', 'numero_orden_autorizacion' (Buscá el recuadro ORDEN, NO pongas la cantidad de litros acá, solo el Nro de orden), 'efectivo', 'orden_efectivo'.
-                2. SI HAY FACTURA: 'razon_social', 'litros_factura' (usá punto para decimales, sin separador de miles), 'importe' (usá punto para decimales, sin separador de miles), 'nro_factura'.
+                --- MAPA EXACTO PARA LA FACTURA (Ticket impreso) ---
+                Tus coordenadas de búsqueda son ESTRICTAMENTE estas:
+                - 'nro_factura': Buscá la palabra "Nro." justo debajo de la línea que indica el tipo de comprobante (ej: "Cod. 006 - FACTURA B"). El formato siempre es XXXX-XXXXXXXX. Extraé ese número completo.
+                - 'razon_social': Ignorá el encabezado. Buscá el SEGUNDO "CUIT:" que aparece a mitad del ticket. La línea que está *exactamente debajo* de ese CUIT es el cliente (ej: "4494 MUNICIPALIDAD DE RECREO"). Extraé ese texto completo.
+                - 'litros_factura': Buscá la línea punteada que está debajo de "Cant./Precio Unit.". Justo debajo hay una línea con una multiplicación que usa la letra "x" (ej: "116,005 x 2460"). El número que está a la izquierda de la "x" es la cantidad exacta de litros.
+                - 'importe': Hacia el final del ticket, buscá la palabra "TOTAL" (sola, en mayúsculas). En esa misma línea, bien a la derecha, está el monto a pagar.
                 
-                Devolvé ÚNICAMENTE el JSON puro.
+                --- REGLAS PARA EL VALE (Manuscrito) ---
+                - 'fecha', 'entidad_pagadora', 'chofer'.
+                - 'numero_orden_autorizacion': Buscá la casilla que dice "ORDEN" y extraé solo ese número manuscrito.
+                - 'efectivo', 'orden_efectivo'.
+                
+                Devolvé ÚNICAMENTE el JSON puro. Usa punto para los decimales sin separador de miles.
                 """
                 contenido_ia.append(prompt)
 
