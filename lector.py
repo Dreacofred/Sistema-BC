@@ -101,7 +101,7 @@ else:
 opcion = st.sidebar.radio("Seleccioná la tarea:", ["🚛 Ventas a Camiones", "📄 Facturas de Proveedores"])
 st.sidebar.divider()
 cliente_reporte = st.sidebar.text_input("NOMBRE DEL CLIENTE AQUÍ:", placeholder="Ej: Transportes Lopez")
-st.sidebar.info(f"Sistema v6.0 - Escaneo Unificado\nClientes guardados: {len(BASE_CLIENTES)}")
+st.sidebar.info(f"Sistema v6.1 - Detector de Vales\nClientes guardados: {len(BASE_CLIENTES)}")
 
 # ==========================================
 # 3. MÓDULO: VENTAS A CAMIONES
@@ -109,7 +109,6 @@ st.sidebar.info(f"Sistema v6.0 - Escaneo Unificado\nClientes guardados: {len(BAS
 if opcion == "🚛 Ventas a Camiones":
     st.title("🚛 Registro de Carga de Camiones")
     
-    # --- INTERFAZ SIMPLIFICADA A UN SOLO BOTÓN ---
     st.subheader("📸 Paso 1: Escanear Documentación")
     st.info("💡 Sacale una foto a la factura, al vale, o a los dos documentos juntos en la misma imagen.")
     
@@ -119,24 +118,25 @@ if opcion == "🚛 Ventas a Camiones":
         with st.spinner("Analizando con Inteligencia Artificial..."):
             try:
                 contenido_ia = []
-                # PROMPT AJUSTADO PARA FOTO ÚNICA
+                # PROMPT BLINDADO
                 prompt = """
-                Analizá la imagen adjunta. Puede contener una factura, un vale de carga, o AMBOS documentos en la misma foto. Extraé un JSON único con máxima precisión.
+                Analizá la imagen adjunta. Puede contener una factura, un vale de carga, o AMBOS. Extraé un JSON único con máxima precisión.
                 
                 --- MAPA EXACTO PARA LA FACTURA ---
                 - 'nro_factura': Buscá "Nro." debajo del tipo de comprobante.
                 - 'codigo_cliente': El número al principio de la línea del cliente (debajo del 2do CUIT).
                 - 'razon_social': El resto de esa línea sin el código numérico inicial.
-                - 'litros_factura': Número a la izquierda de la 'x' matemática (ej: 116,005 x 2460).
+                - 'litros_factura': Número a la izquierda de la 'x' matemática.
                 - 'importe': Valor a la derecha de la palabra "TOTAL".
                 
                 --- REGLAS PARA EL VALE ---
-                - 'fecha', 'entidad_pagadora', 'chofer'.
+                - 'fecha', 'chofer'.
+                - 'entidad_pagadora': Extraé EXACTAMENTE lo que esté escrito, por más incompleto o abreviado que parezca. NUNCA lo dejes vacío si detectás que hay un vale de carga en la imagen.
                 - 'numero_orden_autorizacion': Número en la casilla 'ORDEN' superior. Si está tachado con una línea, dejalo en blanco.
-                - 'efectivo': ATENCIÓN: Si los casilleros tienen una raya horizontal (tachado), están vacíos, o están pisados por la firma, devolvé estrictamente 0.0. No intentes leer garabatos.
-                - 'orden_efectivo': Número en la casilla 'ORDEN' inferior. Si tiene una raya de tachado, dejalo en blanco.
+                - 'efectivo': Si los casilleros tienen una raya horizontal (tachado), están vacíos, o están pisados por la firma, devolvé estrictamente 0.0. No leas garabatos.
+                - 'orden_efectivo': Número en la casilla 'ORDEN' inferior. Si tiene una raya, dejalo en blanco.
                 
-                Devolvé ÚNICAMENTE el JSON puro. Usa punto para decimales, sin separador de miles.
+                Devolvé ÚNICAMENTE el JSON puro. Usa punto para decimales.
                 """
                 contenido_ia.append(prompt)
                 
@@ -155,43 +155,15 @@ if opcion == "🚛 Ventas a Camiones":
             except Exception as e:
                 st.error(f"Error: {e}")
 
-    # --- FORMULARIO DE VALIDACIÓN (INTACTO) ---
+    # --- FORMULARIO DE VALIDACIÓN ---
     if st.session_state.datos_temp:
-        with st.form("validador_v60"):
+        with st.form("validador_v61"):
             st.subheader("📝 Paso 2: Confirmar Información")
             
             def limpiar_texto(v):
                 s = str(v).strip()
                 return "" if s.lower() in ["none", "null", ""] else s
 
-            codigo_ia = limpiar_texto(st.session_state.datos_temp.get('codigo_cliente', ''))
-            nombre_ia = limpiar_texto(st.session_state.datos_temp.get('razon_social', ''))
-            
-            es_nuevo = False
-            if codigo_ia and codigo_ia in BASE_CLIENTES:
-                nombre_sugerido = BASE_CLIENTES[codigo_ia]
-            else:
-                nombre_sugerido = nombre_ia
-                if codigo_ia:
-                    es_nuevo = True
-
-            entidad_ia = limpiar_texto(st.session_state.datos_temp.get('entidad_pagadora', '')).upper()
-            entidad_final = entidad_ia
-            if entidad_ia:
-                coincidencias = difflib.get_close_matches(entidad_ia, ENTIDADES_OFICIALES, n=1, cutoff=0.5)
-                if coincidencias:
-                    entidad_final = coincidencias[0]
-
-            if es_nuevo:
-                st.info("✨ ¡Atención! Código nuevo o no reconocido. Revisá que el Cód. Cli. sea correcto.")
-
-            c1, c2, c3, c4 = st.columns([1.5, 2, 1, 3])
-            fecha = c1.text_input("Fecha", limpiar_texto(st.session_state.datos_temp.get('fecha', '')))
-            chofer = c2.text_input("Chofer", limpiar_texto(st.session_state.datos_temp.get('chofer', '')))
-            codigo_final = c3.text_input("Cód. Cli.", codigo_ia)
-            cliente_rs = c4.text_input("Cliente de Factura", nombre_sugerido)
-            
-            c5, c6, c7 = st.columns(3)
             def to_f(v):
                 try: 
                     v_str = str(v).strip()
@@ -200,6 +172,52 @@ if opcion == "🚛 Ventas a Camiones":
                     return float(v_str) if v_str else 0.0
                 except: return 0.0
 
+            # Extracción de variables limpias
+            codigo_ia = limpiar_texto(st.session_state.datos_temp.get('codigo_cliente', ''))
+            nombre_ia = limpiar_texto(st.session_state.datos_temp.get('razon_social', ''))
+            v_fecha = limpiar_texto(st.session_state.datos_temp.get('fecha', ''))
+            v_chofer = limpiar_texto(st.session_state.datos_temp.get('chofer', ''))
+            v_o_litros = limpiar_texto(st.session_state.datos_temp.get('numero_orden_autorizacion', ''))
+            v_efectivo = to_f(st.session_state.datos_temp.get('efectivo', 0.0))
+            v_o_efectivo = limpiar_texto(st.session_state.datos_temp.get('orden_efectivo', ''))
+            
+            # 1. Lógica de Clientes
+            es_nuevo = False
+            if codigo_ia and codigo_ia in BASE_CLIENTES:
+                nombre_sugerido = BASE_CLIENTES[codigo_ia]
+            else:
+                nombre_sugerido = nombre_ia
+                if codigo_ia:
+                    es_nuevo = True
+
+            # 2. Lógica Difusa para Entidad Pagadora (Bajé la exigencia a 40%)
+            entidad_ia = limpiar_texto(st.session_state.datos_temp.get('entidad_pagadora', '')).upper()
+            entidad_final = entidad_ia
+            if entidad_ia:
+                coincidencias = difflib.get_close_matches(entidad_ia, ENTIDADES_OFICIALES, n=1, cutoff=0.4)
+                if coincidencias:
+                    entidad_final = coincidencias[0]
+
+            # 🟢 DETECTOR DE VALES INTELIGENTE 🟢
+            # Si el chofer, la orden o el efectivo existen, quiere decir que hay un vale.
+            hay_vale = bool(v_chofer or v_o_litros or v_o_efectivo or v_efectivo > 0)
+
+            # CARTELES DE AVISO
+            if es_nuevo:
+                st.info("✨ ¡Atención! Código nuevo o no reconocido. Revisá que el Cód. Cli. sea correcto.")
+            
+            # Si hay vale pero la entidad quedó en blanco, le avisa al playero
+            if hay_vale and not entidad_final:
+                st.warning("⚠️ ¡Atención! Se detectó un Vale, pero la letra de la Entidad Pagadora era ilegible o faltaba. Por favor, completala a mano.")
+
+            # Interfaz
+            c1, c2, c3, c4 = st.columns([1.5, 2, 1, 3])
+            fecha = c1.text_input("Fecha", v_fecha)
+            chofer = c2.text_input("Chofer", v_chofer)
+            codigo_final = c3.text_input("Cód. Cli.", codigo_ia)
+            cliente_rs = c4.text_input("Cliente de Factura", nombre_sugerido)
+            
+            c5, c6, c7 = st.columns(3)
             litros = c5.number_input("Litros", value=to_f(st.session_state.datos_temp.get('litros_factura', 0.0)), format="%.4f")
             importe = c6.number_input("Importe", value=to_f(st.session_state.datos_temp.get('importe', 0.0)))
             factura_nro = c7.text_input("Factura Nº", limpiar_texto(st.session_state.datos_temp.get('nro_factura', '')))
@@ -208,9 +226,9 @@ if opcion == "🚛 Ventas a Camiones":
             
             with st.expander("Órdenes y Efectivo", expanded=True):
                 ca1, ca2, ca3 = st.columns(3)
-                o_litros = ca1.text_input("Orden Litros", limpiar_texto(st.session_state.datos_temp.get('numero_orden_autorizacion', '')))
-                v_efectivo = ca2.number_input("Efectivo", value=to_f(st.session_state.datos_temp.get('efectivo', 0.0)))
-                o_efectivo = ca3.text_input("Orden Efectivo", limpiar_texto(st.session_state.datos_temp.get('orden_efectivo', '')))
+                o_litros = ca1.text_input("Orden Litros", v_o_litros)
+                val_efectivo = ca2.number_input("Efectivo", value=v_efectivo)
+                o_efectivo = ca3.text_input("Orden Efectivo", v_o_efectivo)
 
             if st.form_submit_button("✅ GUARDAR EN PLANILLA"):
                 cod_l = codigo_final.strip()
@@ -229,14 +247,14 @@ if opcion == "🚛 Ventas a Camiones":
                     "Fecha": fecha, "Chofer": chofer, "Cliente": f"{cod_l} {nom_l}".strip() if cod_l else nom_l,
                     "Litros": litros, "Importe": importe, "Factura": factura_nro,
                     "Entidad pagadora": entidad, "Orden Litros": convertir_a_numero(o_litros),
-                    "Efectivo": v_efectivo, "Orden Efectivo": convertir_a_numero(o_efectivo)
+                    "Efectivo": val_efectivo, "Orden Efectivo": convertir_a_numero(o_efectivo)
                 }
                 st.session_state.resumen_ventas.append(registro)
                 st.session_state.datos_temp = None
                 st.session_state.contador_carga += 1
                 st.rerun()
 
-    # --- TABLA Y EXPORTACIÓN (INTACTA) ---
+    # --- TABLA Y EXPORTACIÓN ---
     if st.session_state.resumen_ventas:
         st.divider()
         df = pd.DataFrame(st.session_state.resumen_ventas)
