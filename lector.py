@@ -6,7 +6,7 @@ import pandas as pd
 import json
 import os
 import io
-import difflib  # <--- 1. El motor de comparación
+import difflib
 from datetime import datetime
 
 # Herramientas de diseño para el Excel
@@ -20,18 +20,12 @@ COLOR_ROJO = "#C8102E"
 ARCHIVO_DB = "clientes_db.json"
 
 # 🟢 CONFIGURACIÓN: AGREGÁ TUS ENTIDADES ACÁ 🟢
-# Escribilas exactamente como querés que salgan en el Excel
 ENTIDADES_OFICIALES = [
     "TRANSP HIJOS DE MARIANO FRANCOVIG SH",
-    "RUIZ MARCELO HUGO",
-    "RUIZ JULIAN ZACARIAS",
+    "MUNICIPALIDAD DE RECREO",
     "CAMPO PRECISION",
-    "TOURNER Y TOURNER",
-    "TRANS TRUK",
-    "SOSA VIOLETA MARINA",
-    "PADUAN MARTIN",
-    "CARBONELL MARIANO",
-    "CARBONELL BERNARDO",
+    "TRANSPORTE LOPEZ SRL",
+    "MUNICIPALIDAD DE SANTA FE"
 ]
 
 # Funciones de Memoria de Clientes
@@ -70,6 +64,19 @@ st.markdown(f"""
         }}
         [data-testid="stSidebar"] {{ background-color: #f8f9fa; border-right: 1px solid #e0e0e0; }}
         .stDataFrame {{ border: 1px solid #e0e0e0; border-radius: 8px; }}
+        
+        [data-testid="stSidebar"] .stTextInput div[data-baseweb="input"] {{
+            border: 2px solid {COLOR_ROJO} !important;
+            border-radius: 8px !important;
+            box-shadow: 0px 4px 10px rgba(200, 16, 46, 0.25) !important;
+            background-color: #ffffff !important;
+        }}
+        [data-testid="stSidebar"] .stTextInput label p {{
+            color: {COLOR_ROJO} !important;
+            font-size: 1.15em !important;
+            font-weight: 800 !important;
+            margin-bottom: 5px !important;
+        }}
     </style>
 """, unsafe_allow_html=True)
 
@@ -95,7 +102,7 @@ else:
 opcion = st.sidebar.radio("Seleccioná la tarea:", ["🚛 Ventas a Camiones", "📄 Facturas de Proveedores"])
 st.sidebar.divider()
 cliente_reporte = st.sidebar.text_input("NOMBRE DEL CLIENTE AQUÍ:", placeholder="Ej: Transportes Lopez")
-st.sidebar.info(f"Sistema v5.0 - Inteligencia Mejorada\nClientes guardados: {len(BASE_CLIENTES)}")
+st.sidebar.info(f"Sistema v5.1 - Sistema Completo\nClientes guardados: {len(BASE_CLIENTES)}")
 
 # ==========================================
 # 3. MÓDULO: VENTAS A CAMIONES
@@ -107,10 +114,10 @@ if opcion == "🚛 Ventas a Camiones":
     col_f, col_o = st.columns(2)
     with col_f:
         st.markdown("### 📄 Factura")
-        doc_f = st.file_uploader("Subir Foto", type=["pdf","jpg","png","jpeg"], key=f"up_f_{st.session_state.contador_carga}")
+        doc_f = st.file_uploader("Subir Foto Factura", type=["pdf","jpg","png","jpeg"], key=f"up_f_{st.session_state.contador_carga}")
     with col_o:
         st.markdown("### 🎫 Vale de Carga")
-        doc_o = st.file_uploader("Subir Foto", type=["jpg","png","jpeg"], key=f"up_o_{st.session_state.contador_carga}")
+        doc_o = st.file_uploader("Subir Foto Vale", type=["jpg","png","jpeg"], key=f"up_o_{st.session_state.contador_carga}")
 
     if (doc_f or doc_o) and st.button("🔍 ANALIZAR DOCUMENTOS"):
         with st.spinner("Analizando con Inteligencia Artificial..."):
@@ -120,17 +127,18 @@ if opcion == "🚛 Ventas a Camiones":
                 Analizá los documentos adjuntos. Extraé un JSON único con máxima precisión.
                 --- MAPA EXACTO PARA LA FACTURA ---
                 - 'nro_factura': Buscá "Nro." debajo del tipo de comprobante.
-                - 'codigo_cliente': El número al principio de la línea del cliente.
-                - 'razon_social': El resto de esa línea sin el código.
-                - 'litros_factura': Número a la izquierda de la 'x' (ej: 116,005 x 2460).
+                - 'codigo_cliente': El número al principio de la línea del cliente (debajo del 2do CUIT).
+                - 'razon_social': El resto de esa línea sin el código numérico inicial.
+                - 'litros_factura': Número a la izquierda de la 'x' matemática (ej: 116,005 x 2460).
                 - 'importe': Valor a la derecha de la palabra "TOTAL".
                 --- REGLAS PARA EL VALE ---
                 - 'fecha', 'entidad_pagadora', 'chofer'.
                 - 'numero_orden_autorizacion': Número en la casilla 'ORDEN'.
                 - 'efectivo', 'orden_efectivo'.
-                Devolvé ÚNICAMENTE el JSON puro.
+                Devolvé ÚNICAMENTE el JSON puro. Usa punto para decimales, sin separador de miles.
                 """
                 contenido_ia.append(prompt)
+                
                 if doc_f:
                     if hasattr(doc_f, 'name') and doc_f.name.lower().endswith('.pdf'):
                         reader = PdfReader(doc_f)
@@ -151,10 +159,10 @@ if opcion == "🚛 Ventas a Camiones":
 
     # --- FORMULARIO DE VALIDACIÓN ---
     if st.session_state.datos_temp:
-        with st.form("validador_v50"):
+        with st.form("validador_v51"):
             st.subheader("📝 Paso 2: Confirmar Información")
             
-            # Lógica de Clientes (Código -> Razón Social)
+            # 1. Lógica de Clientes (Código -> Razón Social)
             codigo_ia = str(st.session_state.datos_temp.get('codigo_cliente', '')).strip()
             nombre_ia = str(st.session_state.datos_temp.get('razon_social', '')).strip()
             
@@ -166,7 +174,7 @@ if opcion == "🚛 Ventas a Camiones":
                 if codigo_ia:
                     es_nuevo = True
 
-            # --- 🟢 LÓGICA DIFUSA PARA ENTIDAD PAGADORA 🟢 ---
+            # 2. Lógica Difusa para Entidad Pagadora
             entidad_ia = str(st.session_state.datos_temp.get('entidad_pagadora', '')).strip().upper()
             entidad_final = entidad_ia
             if entidad_ia:
@@ -174,7 +182,7 @@ if opcion == "🚛 Ventas a Camiones":
                 if coincidencias:
                     entidad_final = coincidencias[0]
 
-            # EL CARTEL DE AVISO
+            # El Cartel de Aviso visual para el playero
             if es_nuevo:
                 st.info("✨ ¡Atención! Código nuevo o no reconocido. Revisá que el Cód. Cli. sea correcto.")
 
@@ -197,7 +205,6 @@ if opcion == "🚛 Ventas a Camiones":
             importe = c6.number_input("Importe", value=to_f(st.session_state.datos_temp.get('importe', 0.0)))
             factura_nro = c7.text_input("Factura Nº", str(st.session_state.datos_temp.get('nro_factura', '')))
             
-            # El campo de Entidad Pagadora ya aparece corregido gracias a difflib
             entidad = st.text_input("Entidad pagadora", entidad_final)
             
             with st.expander("Órdenes y Efectivo", expanded=True):
@@ -209,7 +216,8 @@ if opcion == "🚛 Ventas a Camiones":
             if st.form_submit_button("✅ GUARDAR EN PLANILLA"):
                 cod_l = codigo_final.strip()
                 nom_l = cliente_rs.strip()
-                # Guarda el cliente nuevo en la base si corresponde
+                
+                # Guarda o actualiza la memoria del sistema
                 if cod_l and (cod_l not in BASE_CLIENTES or BASE_CLIENTES[cod_l] != nom_l):
                     guardar_nuevo_cliente(cod_l, nom_l)
 
@@ -230,30 +238,66 @@ if opcion == "🚛 Ventas a Camiones":
         df = pd.DataFrame(st.session_state.resumen_ventas)
         cols = ["Fecha", "Chofer", "Cliente", "Litros", "Importe", "Factura", "Entidad pagadora", "Orden Litros", "Efectivo", "Orden Efectivo"]
         df = df[cols]
+        
         st.subheader(f"📋 Planilla Acumulada ({len(df)} registros)")
         st.dataframe(df, use_container_width=True)
+        
+        col_ex1, col_ex2 = st.columns(2)
         
         buffer = io.BytesIO()
         with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
             df.to_excel(writer, index=False, sheet_name='Ventas')
             ws = writer.sheets['Ventas']
-            for row in ws.iter_rows(min_row=1, max_row=len(df)+1):
+            last_r = len(df) + 1
+            
+            # --- RECUPERADO: TODO EL DISEÑO Y FORMATO DEL EXCEL ---
+            fill_header = PatternFill(start_color="C8102E", end_color="C8102E", fill_type="solid")
+            f_white = Font(color="FFFFFF", bold=True)
+            border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+            
+            # Cabeceras rojas
+            for cell in ws[1]:
+                cell.fill, cell.font, cell.border, cell.alignment = fill_header, f_white, border, Alignment(horizontal="center")
+            
+            # Formatos de números y bordes
+            for row in ws.iter_rows(min_row=2, max_row=last_r):
                 for cell in row:
-                    cell.border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+                    cell.border = border
+                    # Importe (E) y Efectivo (I)
+                    if cell.column_letter in ['E', 'I']: cell.number_format = '"$"#,##0.00'
+                    # Litros (D)
+                    if cell.column_letter == 'D': cell.number_format = '#,##0.0000'
+
+            # Fila de TOTALES automáticos
+            row_t = last_r + 1
+            ws.cell(row=row_t, column=3, value="TOTALES:").font = Font(bold=True)
+            for c_idx, c_let in [(4, 'D'), (5, 'E'), (9, 'I')]:
+                cell_t = ws.cell(row=row_t, column=c_idx)
+                cell_t.value = f"=SUM({c_let}2:{c_let}{last_r})"
+                cell_t.font, cell_t.number_format = Font(bold=True), ('"$"#,##0.00' if c_let != 'D' else '#,##0.0000')
+
+            # Ancho de columnas ajustado
+            for i, col in enumerate(df.columns):
+                ws.column_dimensions[get_column_letter(i + 1)].width = max(df[col].astype(str).map(len).max(), len(col)) + 4
         
-        st.download_button(
-            label=f"📥 Descargar Excel", 
+        fecha_hoy = datetime.now().strftime("%d-%m-%Y")
+        nombre_limpio = cliente_reporte.strip() if cliente_reporte.strip() else "Resumen"
+        nombre_archivo = f"{nombre_limpio}_{fecha_hoy}.xlsx"
+        
+        col_ex1.download_button(
+            label=f"📥 Descargar Excel: {nombre_archivo}", 
             data=buffer.getvalue(), 
-            file_name=f"{cliente_reporte.strip() or 'Resumen'}_{datetime.now().strftime('%d-%m-%Y')}.xlsx", 
+            file_name=nombre_archivo, 
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True
         )
-        if st.button("🗑️ Vaciar Todo", use_container_width=True):
+        
+        if col_ex2.button("🗑️ Vaciar Todo", use_container_width=True):
             st.session_state.resumen_ventas = []
             st.rerun()
 
 # ==========================================
-# 4. MÓDULO: PROVEEDORES (Igual que antes)
+# 4. MÓDULO: PROVEEDORES
 # ==========================================
 elif opcion == "📄 Facturas de Proveedores":
     st.title("📄 Gestión de Proveedores")
@@ -263,7 +307,7 @@ elif opcion == "📄 Facturas de Proveedores":
             try:
                 res = cliente.models.generate_content(
                     model='gemini-2.5-pro',
-                    contents=[Image.open(archivo_prov) if not archivo_prov.name.endswith('.pdf') else archivo_prov, "Extraé datos en JSON."]
+                    contents=[Image.open(archivo_prov) if not archivo_prov.name.endswith('.pdf') else archivo_prov, "Extraé CUIT, Razón Social, Fecha, Neto, IVA y Total en JSON."]
                 )
                 st.json(res.text.strip().replace('```json', '').replace('```', ''))
             except Exception as e:
