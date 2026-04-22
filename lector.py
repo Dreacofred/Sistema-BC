@@ -133,8 +133,9 @@ if opcion == "🚛 Ventas a Camiones":
                 - 'importe': Valor a la derecha de la palabra "TOTAL".
                 --- REGLAS PARA EL VALE ---
                 - 'fecha', 'entidad_pagadora', 'chofer'.
-                - 'numero_orden_autorizacion': Número en la casilla 'ORDEN'.
-                - 'efectivo', 'orden_efectivo'.
+                - 'numero_orden_autorizacion': Número en la casilla 'ORDEN' superior. Si está tachado con una línea, dejalo en blanco.
+                - 'efectivo': ATENCIÓN: Si los casilleros tienen una raya horizontal (tachado), están vacíos, o están pisados por la firma, devolvé estrictamente 0.0. No intentes leer garabatos.
+                - 'orden_efectivo': Número en la casilla 'ORDEN' inferior. Si tiene una raya de tachado, dejalo en blanco.
                 Devolvé ÚNICAMENTE el JSON puro. Usa punto para decimales, sin separador de miles.
                 """
                 contenido_ia.append(prompt)
