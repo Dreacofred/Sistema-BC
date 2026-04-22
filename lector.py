@@ -13,9 +13,25 @@ from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
 # ==========================================
-# 1. IDENTIDAD CORPORATIVA BC COMBUSTIBLES
+# 1. MEMORIA AUTO-GESTIONABLE DE CLIENTES
 # ==========================================
 COLOR_ROJO = "#C8102E"
+ARCHIVO_DB = "clientes_db.json"
+
+# Funciones para que el sistema "aprenda" y recuerde clientes
+def cargar_base_clientes():
+    if os.path.exists(ARCHIVO_DB):
+        with open(ARCHIVO_DB, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    return {}
+
+def guardar_nuevo_cliente(codigo, nombre):
+    db = cargar_base_clientes()
+    db[codigo] = nombre
+    with open(ARCHIVO_DB, 'w', encoding='utf-8') as f:
+        json.dump(db, f, indent=4, ensure_ascii=False)
+
+BASE_CLIENTES = cargar_base_clientes()
 
 st.set_page_config(
     page_title="BC Combustibles - Gestión Pro",
@@ -39,7 +55,6 @@ st.markdown(f"""
         [data-testid="stSidebar"] {{ background-color: #f8f9fa; border-right: 1px solid #e0e0e0; }}
         .stDataFrame {{ border: 1px solid #e0e0e0; border-radius: 8px; }}
         
-        /* RECUADRO ROJO DESTACADO PARA EL CLIENTE EN EL SIDEBAR */
         [data-testid="stSidebar"] .stTextInput div[data-baseweb="input"] {{
             border: 2px solid {COLOR_ROJO} !important;
             border-radius: 8px !important;
@@ -77,11 +92,11 @@ else:
 opcion = st.sidebar.radio("Seleccioná la tarea:", ["🚛 Ventas a Camiones", "📄 Facturas de Proveedores"])
 st.sidebar.divider()
 
-# Campo del cliente destacado para organizar los archivos de las 4 estaciones
 st.sidebar.subheader("📌 Configuración del Reporte")
 cliente_reporte = st.sidebar.text_input("NOMBRE DEL CLIENTE AQUÍ:", placeholder="Ej: Transportes Lopez")
 
-st.sidebar.info("Sistema v4.7 - Carga Opcional Habilitada")
+# Mostramos cuántos clientes ya se aprendió el sistema
+st.sidebar.info(f"Sistema v4.9 - Memoria Inteligente\nClientes guardados: {len(BASE_CLIENTES)}")
 
 # ==========================================
 # 3. MÓDULO: VENTAS A CAMIONES
@@ -90,46 +105,39 @@ if opcion == "🚛 Ventas a Camiones":
     st.title("🚛 Registro de Carga de Camiones")
     
     st.subheader("📸 Paso 1: Cargar Documentos")
-    st.info("💡 Desde el celular, tocá los botones de abajo para sacar la foto con tu cámara nativa. Podés cargar solo un documento si el otro no lo tenés.")
     
     col_f, col_o = st.columns(2)
-    
     with col_f:
         st.markdown("### 📄 Factura")
-        doc_f = st.file_uploader("Subir o Sacar Foto de Factura", type=["pdf","jpg","png","jpeg"], key=f"up_f_{st.session_state.contador_carga}")
-
+        doc_f = st.file_uploader("Subir Foto de Factura", type=["pdf","jpg","png","jpeg"], key=f"up_f_{st.session_state.contador_carga}")
     with col_o:
         st.markdown("### 🎫 Vale de Carga")
-        doc_o = st.file_uploader("Subir o Sacar Foto de Vale", type=["jpg","png","jpeg"], key=f"up_o_{st.session_state.contador_carga}")
+        doc_o = st.file_uploader("Subir Foto de Vale", type=["jpg","png","jpeg"], key=f"up_o_{st.session_state.contador_carga}")
 
-    # AHORA PIDE QUE AL MENOS UNO DE LOS DOS ESTÉ CARGADO
     if (doc_f or doc_o) and st.button("🔍 ANALIZAR DOCUMENTOS"):
         with st.spinner("Analizando con Inteligencia Artificial..."):
             try:
-                # Preparamos lo que le vamos a mandar a la IA dinámicamente
                 contenido_ia = []
-                
                 prompt = """
-                Analizá los documentos adjuntos de una estación de servicio (puede ser una factura, un vale, o ambos). Extraé un JSON único con máxima precisión.
-                Si un dato no está presente porque falta el documento, devolvé el valor en blanco ("" o 0.0 según corresponda).
+                Analizá los documentos adjuntos de una estación de servicio. Extraé un JSON único con máxima precisión.
+                Si un dato no está presente, devolvé el valor en blanco ("" o 0.0 según corresponda).
                 
-                --- MAPA EXACTO PARA LA FACTURA (Ticket impreso) ---
-                Tus coordenadas de búsqueda son ESTRICTAMENTE estas:
-                - 'nro_factura': Buscá la palabra "Nro." justo debajo de la línea que indica el tipo de comprobante (ej: "Cod. 006 - FACTURA B"). El formato siempre es XXXX-XXXXXXXX. Extraé ese número completo.
-                - 'razon_social': Ignorá el encabezado. Buscá el SEGUNDO "CUIT:" que aparece a mitad del ticket. La línea que está *exactamente debajo* de ese CUIT es el cliente (ej: "4494 MUNICIPALIDAD DE RECREO"). Extraé ese texto completo.
-                - 'litros_factura': Buscá la línea punteada que está debajo de "Cant./Precio Unit.". Justo debajo hay una línea con una multiplicación que usa la letra "x" (ej: "116,005 x 2460"). El número que está a la izquierda de la "x" es la cantidad exacta de litros.
-                - 'importe': Hacia el final del ticket, buscá la palabra "TOTAL" (sola, en mayúsculas). En esa misma línea, bien a la derecha, está el monto a pagar.
+                --- MAPA EXACTO PARA LA FACTURA ---
+                - 'nro_factura': Buscá "Nro." debajo del tipo de comprobante.
+                - 'codigo_cliente': Buscá la línea del cliente (debajo del SEGUNDO CUIT). Extraé SOLO el número que aparece al principio. Si no hay número, dejalo vacío.
+                - 'razon_social': El texto de esa misma línea, SIN el código numérico inicial.
+                - 'litros_factura': Buscá la multiplicación matemática (ej: 116,005 x 2460). El número a la izquierda de la "x".
+                - 'importe': La palabra "TOTAL". En esa línea a la derecha está el importe.
                 
-                --- REGLAS PARA EL VALE (Manuscrito) ---
+                --- REGLAS PARA EL VALE ---
                 - 'fecha', 'entidad_pagadora', 'chofer'.
-                - 'numero_orden_autorizacion': Buscá la casilla que dice "ORDEN" y extraé solo ese número manuscrito.
+                - 'numero_orden_autorizacion': Buscá la casilla "ORDEN" y extraé solo ese número.
                 - 'efectivo', 'orden_efectivo'.
                 
-                Devolvé ÚNICAMENTE el JSON puro. Usa punto para los decimales sin separador de miles.
+                Devolvé ÚNICAMENTE el JSON puro. Usa punto para decimales.
                 """
                 contenido_ia.append(prompt)
 
-                # Si subiste factura, la agregamos
                 if doc_f:
                     if hasattr(doc_f, 'name') and doc_f.name.lower().endswith('.pdf'):
                         reader = PdfReader(doc_f)
@@ -138,7 +146,6 @@ if opcion == "🚛 Ventas a Camiones":
                     else:
                         contenido_ia.append(Image.open(doc_f))
                 
-                # Si subiste vale, lo agregamos
                 if doc_o:
                     contenido_ia.append(Image.open(doc_o))
                 
@@ -152,14 +159,32 @@ if opcion == "🚛 Ventas a Camiones":
 
     # --- FORMULARIO DE VALIDACIÓN ---
     if st.session_state.datos_temp:
-        with st.form("validador_v47"):
+        with st.form("validador_v49"):
             st.subheader("📝 Paso 2: Confirmar Información")
-            c1, c2, c3 = st.columns([1, 1, 2])
+            
+            codigo_ia = str(st.session_state.datos_temp.get('codigo_cliente', '')).strip()
+            nombre_ia = str(st.session_state.datos_temp.get('razon_social', '')).strip()
+            
+            # Lógica de memoria
+            es_nuevo = False
+            if codigo_ia and codigo_ia in BASE_CLIENTES:
+                nombre_sugerido = BASE_CLIENTES[codigo_ia]
+            else:
+                nombre_sugerido = nombre_ia
+                if codigo_ia:
+                    es_nuevo = True
+
+            c1, c2, c3, c4 = st.columns([1.5, 2, 1, 3])
             fecha = c1.text_input("Fecha", str(st.session_state.datos_temp.get('fecha', '')))
             chofer = c2.text_input("Chofer", str(st.session_state.datos_temp.get('chofer', '')))
-            cliente_rs = c3.text_input("Cliente de Factura", str(st.session_state.datos_temp.get('razon_social', '')))
             
-            c4, c5, c6 = st.columns(3)
+            if es_nuevo:
+                st.info("✨ ¡Cliente nuevo detectado! Revisá que el nombre esté bien. Se guardará automáticamente.")
+            
+            codigo_final = c3.text_input("Cód. Cli.", codigo_ia)
+            cliente_rs = c4.text_input("Cliente de Factura", nombre_sugerido)
+            
+            c5, c6, c7 = st.columns(3)
             def to_f(v):
                 try: 
                     v_str = str(v).strip()
@@ -169,9 +194,9 @@ if opcion == "🚛 Ventas a Camiones":
                     return float(v_str) if v_str else 0.0
                 except: return 0.0
 
-            litros = c4.number_input("Litros", value=to_f(st.session_state.datos_temp.get('litros_factura', 0.0)), format="%.4f")
-            importe = c5.number_input("Importe", value=to_f(st.session_state.datos_temp.get('importe', 0.0)))
-            factura_nro = c6.text_input("Factura Nº", str(st.session_state.datos_temp.get('nro_factura', '')))
+            litros = c5.number_input("Litros", value=to_f(st.session_state.datos_temp.get('litros_factura', 0.0)), format="%.4f")
+            importe = c6.number_input("Importe", value=to_f(st.session_state.datos_temp.get('importe', 0.0)))
+            factura_nro = c7.text_input("Factura Nº", str(st.session_state.datos_temp.get('nro_factura', '')))
             entidad = st.text_input("Entidad pagadora", str(st.session_state.datos_temp.get('entidad_pagadora', '')))
             
             with st.expander("Órdenes y Efectivo", expanded=True):
@@ -181,8 +206,19 @@ if opcion == "🚛 Ventas a Camiones":
                 o_efectivo = ca3.text_input("Orden Efectivo", str(st.session_state.datos_temp.get('orden_efectivo', '')))
 
             if st.form_submit_button("✅ GUARDAR EN PLANILLA"):
+                
+                # Si el código tiene un valor y no estaba en la base (o si le cambiaron el nombre manualmente), lo aprendemos
+                codigo_limpio = codigo_final.strip()
+                nombre_limpio = cliente_rs.strip()
+                
+                if codigo_limpio:
+                    if codigo_limpio not in BASE_CLIENTES or BASE_CLIENTES[codigo_limpio] != nombre_limpio:
+                        guardar_nuevo_cliente(codigo_limpio, nombre_limpio)
+
+                nombre_excel = f"{codigo_limpio} {nombre_limpio}".strip() if codigo_limpio else nombre_limpio
+
                 registro = {
-                    "Fecha": fecha, "Chofer": chofer, "Cliente": cliente_rs,
+                    "Fecha": fecha, "Chofer": chofer, "Cliente": nombre_excel,
                     "Litros": litros, "Importe": importe, "Factura": factura_nro,
                     "Entidad pagadora": entidad, "Orden Litros": o_litros,
                     "Efectivo": v_efectivo, "Orden Efectivo": o_efectivo
