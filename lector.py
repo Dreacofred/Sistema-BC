@@ -28,7 +28,6 @@ ENTIDADES_OFICIALES = [
     "MUNICIPALIDAD DE SANTA FE"
 ]
 
-# Funciones de Memoria de Clientes
 def cargar_base_clientes():
     if os.path.exists(ARCHIVO_DB):
         with open(ARCHIVO_DB, 'r', encoding='utf-8') as f:
@@ -102,53 +101,51 @@ else:
 opcion = st.sidebar.radio("Seleccioná la tarea:", ["🚛 Ventas a Camiones", "📄 Facturas de Proveedores"])
 st.sidebar.divider()
 cliente_reporte = st.sidebar.text_input("NOMBRE DEL CLIENTE AQUÍ:", placeholder="Ej: Transportes Lopez")
-st.sidebar.info(f"Sistema v5.2 - Filtro de Números Limpios\nClientes guardados: {len(BASE_CLIENTES)}")
+st.sidebar.info(f"Sistema v6.0 - Escaneo Unificado\nClientes guardados: {len(BASE_CLIENTES)}")
 
 # ==========================================
 # 3. MÓDULO: VENTAS A CAMIONES
 # ==========================================
 if opcion == "🚛 Ventas a Camiones":
     st.title("🚛 Registro de Carga de Camiones")
-    st.subheader("📸 Paso 1: Cargar Documentos")
     
-    col_f, col_o = st.columns(2)
-    with col_f:
-        st.markdown("### 📄 Factura")
-        doc_f = st.file_uploader("Subir Foto Factura", type=["pdf","jpg","png","jpeg"], key=f"up_f_{st.session_state.contador_carga}")
-    with col_o:
-        st.markdown("### 🎫 Vale de Carga")
-        doc_o = st.file_uploader("Subir Foto Vale", type=["jpg","png","jpeg"], key=f"up_o_{st.session_state.contador_carga}")
+    # --- INTERFAZ SIMPLIFICADA A UN SOLO BOTÓN ---
+    st.subheader("📸 Paso 1: Escanear Documentación")
+    st.info("💡 Sacale una foto a la factura, al vale, o a los dos documentos juntos en la misma imagen.")
+    
+    doc_unico = st.file_uploader("Subir Fotografía", type=["pdf","jpg","png","jpeg"], key=f"up_unico_{st.session_state.contador_carga}")
 
-    if (doc_f or doc_o) and st.button("🔍 ANALIZAR DOCUMENTOS"):
+    if doc_unico and st.button("🔍 ANALIZAR DOCUMENTACIÓN"):
         with st.spinner("Analizando con Inteligencia Artificial..."):
             try:
                 contenido_ia = []
+                # PROMPT AJUSTADO PARA FOTO ÚNICA
                 prompt = """
-                Analizá los documentos adjuntos. Extraé un JSON único con máxima precisión.
+                Analizá la imagen adjunta. Puede contener una factura, un vale de carga, o AMBOS documentos en la misma foto. Extraé un JSON único con máxima precisión.
+                
                 --- MAPA EXACTO PARA LA FACTURA ---
                 - 'nro_factura': Buscá "Nro." debajo del tipo de comprobante.
                 - 'codigo_cliente': El número al principio de la línea del cliente (debajo del 2do CUIT).
                 - 'razon_social': El resto de esa línea sin el código numérico inicial.
                 - 'litros_factura': Número a la izquierda de la 'x' matemática (ej: 116,005 x 2460).
                 - 'importe': Valor a la derecha de la palabra "TOTAL".
+                
                 --- REGLAS PARA EL VALE ---
                 - 'fecha', 'entidad_pagadora', 'chofer'.
                 - 'numero_orden_autorizacion': Número en la casilla 'ORDEN' superior. Si está tachado con una línea, dejalo en blanco.
                 - 'efectivo': ATENCIÓN: Si los casilleros tienen una raya horizontal (tachado), están vacíos, o están pisados por la firma, devolvé estrictamente 0.0. No intentes leer garabatos.
                 - 'orden_efectivo': Número en la casilla 'ORDEN' inferior. Si tiene una raya de tachado, dejalo en blanco.
+                
                 Devolvé ÚNICAMENTE el JSON puro. Usa punto para decimales, sin separador de miles.
                 """
                 contenido_ia.append(prompt)
                 
-                if doc_f:
-                    if hasattr(doc_f, 'name') and doc_f.name.lower().endswith('.pdf'):
-                        reader = PdfReader(doc_f)
-                        text_pdf = "\n".join([p.extract_text() for p in reader.pages[:1]])
-                        contenido_ia.append(f"Texto de Factura: {text_pdf}")
-                    else:
-                        contenido_ia.append(Image.open(doc_f))
-                if doc_o:
-                    contenido_ia.append(Image.open(doc_o))
+                if hasattr(doc_unico, 'name') and doc_unico.name.lower().endswith('.pdf'):
+                    reader = PdfReader(doc_unico)
+                    text_pdf = "\n".join([p.extract_text() for p in reader.pages[:1]])
+                    contenido_ia.append(f"Texto del documento: {text_pdf}")
+                else:
+                    contenido_ia.append(Image.open(doc_unico))
                 
                 res = cliente.models.generate_content(model='gemini-2.5-pro', contents=contenido_ia)
                 raw_text = res.text.strip().replace('```json', '').replace('```', '')
@@ -158,17 +155,15 @@ if opcion == "🚛 Ventas a Camiones":
             except Exception as e:
                 st.error(f"Error: {e}")
 
-    # --- FORMULARIO DE VALIDACIÓN ---
+    # --- FORMULARIO DE VALIDACIÓN (INTACTO) ---
     if st.session_state.datos_temp:
-        with st.form("validador_v52"):
+        with st.form("validador_v60"):
             st.subheader("📝 Paso 2: Confirmar Información")
             
-            # 🟢 FILTRO ANTIMANCHAS: Borra los "None" de la pantalla 🟢
             def limpiar_texto(v):
                 s = str(v).strip()
                 return "" if s.lower() in ["none", "null", ""] else s
 
-            # 1. Lógica de Clientes
             codigo_ia = limpiar_texto(st.session_state.datos_temp.get('codigo_cliente', ''))
             nombre_ia = limpiar_texto(st.session_state.datos_temp.get('razon_social', ''))
             
@@ -180,7 +175,6 @@ if opcion == "🚛 Ventas a Camiones":
                 if codigo_ia:
                     es_nuevo = True
 
-            # 2. Lógica Difusa para Entidad Pagadora
             entidad_ia = limpiar_texto(st.session_state.datos_temp.get('entidad_pagadora', '')).upper()
             entidad_final = entidad_ia
             if entidad_ia:
@@ -225,12 +219,11 @@ if opcion == "🚛 Ventas a Camiones":
                 if cod_l and (cod_l not in BASE_CLIENTES or BASE_CLIENTES[cod_l] != nom_l):
                     guardar_nuevo_cliente(cod_l, nom_l)
 
-                # 🟢 CONVERTIR A NÚMERO PARA EXCEL 🟢
                 def convertir_a_numero(valor):
                     s = str(valor).strip()
                     if s == "": return ""
-                    if s.isdigit(): return int(s) # Si son todos números, lo fuerza a formato numérico
-                    return s # Si tiene alguna letra mezclada (ej: A-123), lo deja como texto por seguridad
+                    if s.isdigit(): return int(s)
+                    return s
 
                 registro = {
                     "Fecha": fecha, "Chofer": chofer, "Cliente": f"{cod_l} {nom_l}".strip() if cod_l else nom_l,
@@ -243,7 +236,7 @@ if opcion == "🚛 Ventas a Camiones":
                 st.session_state.contador_carga += 1
                 st.rerun()
 
-    # --- TABLA Y EXPORTACIÓN ---
+    # --- TABLA Y EXPORTACIÓN (INTACTA) ---
     if st.session_state.resumen_ventas:
         st.divider()
         df = pd.DataFrame(st.session_state.resumen_ventas)
