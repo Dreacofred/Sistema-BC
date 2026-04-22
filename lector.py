@@ -101,7 +101,7 @@ else:
 opcion = st.sidebar.radio("Seleccioná la tarea:", ["🚛 Ventas a Camiones", "📄 Facturas de Proveedores"])
 st.sidebar.divider()
 cliente_reporte = st.sidebar.text_input("NOMBRE DEL CLIENTE AQUÍ:", placeholder="Ej: Transportes Lopez")
-st.sidebar.info(f"Sistema v6.1 - Detector de Vales\nClientes guardados: {len(BASE_CLIENTES)}")
+st.sidebar.info(f"Sistema v6.3 - Fecha Fiscal\nClientes guardados: {len(BASE_CLIENTES)}")
 
 # ==========================================
 # 3. MÓDULO: VENTAS A CAMIONES
@@ -118,23 +118,24 @@ if opcion == "🚛 Ventas a Camiones":
         with st.spinner("Analizando con Inteligencia Artificial..."):
             try:
                 contenido_ia = []
-                # PROMPT BLINDADO
+                # 🟢 PROMPT CON MAPA DE FECHA AJUSTADO A LA FACTURA 🟢
                 prompt = """
                 Analizá la imagen adjunta. Puede contener una factura, un vale de carga, o AMBOS. Extraé un JSON único con máxima precisión.
                 
                 --- MAPA EXACTO PARA LA FACTURA ---
+                - 'fecha': Buscá la palabra "Hora:" en la parte superior. En esa misma línea, hacia la izquierda, vas a encontrar la "Fecha:" impresa. Extraé ESTA fecha y descartá cualquier fecha escrita a mano en el vale.
                 - 'nro_factura': Buscá "Nro." debajo del tipo de comprobante.
                 - 'codigo_cliente': El número al principio de la línea del cliente (debajo del 2do CUIT).
                 - 'razon_social': El resto de esa línea sin el código numérico inicial.
-                - 'litros_factura': Número a la izquierda de la 'x' matemática.
+                - 'litros_factura': Buscá la multiplicación (ej: 250 x 1899). Extraé ESTRICTAMENTE el número a la izquierda de la 'x' minúscula. Si dice 250, es 250. NO agregues dígitos de más.
                 - 'importe': Valor a la derecha de la palabra "TOTAL".
                 
                 --- REGLAS PARA EL VALE ---
-                - 'fecha', 'chofer'.
-                - 'entidad_pagadora': Extraé EXACTAMENTE lo que esté escrito, por más incompleto o abreviado que parezca. NUNCA lo dejes vacío si detectás que hay un vale de carga en la imagen.
+                - 'chofer': Nombre manuscrito.
+                - 'entidad_pagadora': Extraé EXACTAMENTE lo que esté escrito. NUNCA lo dejes vacío si detectás que hay un vale de carga.
                 - 'numero_orden_autorizacion': Número en la casilla 'ORDEN' superior. Si está tachado con una línea, dejalo en blanco.
-                - 'efectivo': Si los casilleros tienen una raya horizontal (tachado), están vacíos, o están pisados por la firma, devolvé estrictamente 0.0. No leas garabatos.
-                - 'orden_efectivo': Número en la casilla 'ORDEN' inferior. Si tiene una raya, dejalo en blanco.
+                - 'efectivo': Si los casilleros tienen una raya horizontal, están vacíos o pisados por firma, devolvé estrictamente 0.0.
+                - 'orden_efectivo': Número en la casilla 'ORDEN' inferior. Si tiene raya, dejalo en blanco.
                 
                 Devolvé ÚNICAMENTE el JSON puro. Usa punto para decimales.
                 """
@@ -157,7 +158,7 @@ if opcion == "🚛 Ventas a Camiones":
 
     # --- FORMULARIO DE VALIDACIÓN ---
     if st.session_state.datos_temp:
-        with st.form("validador_v61"):
+        with st.form("validador_v63"):
             st.subheader("📝 Paso 2: Confirmar Información")
             
             def limpiar_texto(v):
@@ -172,7 +173,6 @@ if opcion == "🚛 Ventas a Camiones":
                     return float(v_str) if v_str else 0.0
                 except: return 0.0
 
-            # Extracción de variables limpias
             codigo_ia = limpiar_texto(st.session_state.datos_temp.get('codigo_cliente', ''))
             nombre_ia = limpiar_texto(st.session_state.datos_temp.get('razon_social', ''))
             v_fecha = limpiar_texto(st.session_state.datos_temp.get('fecha', ''))
@@ -181,7 +181,6 @@ if opcion == "🚛 Ventas a Camiones":
             v_efectivo = to_f(st.session_state.datos_temp.get('efectivo', 0.0))
             v_o_efectivo = limpiar_texto(st.session_state.datos_temp.get('orden_efectivo', ''))
             
-            # 1. Lógica de Clientes
             es_nuevo = False
             if codigo_ia and codigo_ia in BASE_CLIENTES:
                 nombre_sugerido = BASE_CLIENTES[codigo_ia]
@@ -190,7 +189,6 @@ if opcion == "🚛 Ventas a Camiones":
                 if codigo_ia:
                     es_nuevo = True
 
-            # 2. Lógica Difusa para Entidad Pagadora (Bajé la exigencia a 40%)
             entidad_ia = limpiar_texto(st.session_state.datos_temp.get('entidad_pagadora', '')).upper()
             entidad_final = entidad_ia
             if entidad_ia:
@@ -198,19 +196,13 @@ if opcion == "🚛 Ventas a Camiones":
                 if coincidencias:
                     entidad_final = coincidencias[0]
 
-            # 🟢 DETECTOR DE VALES INTELIGENTE 🟢
-            # Si el chofer, la orden o el efectivo existen, quiere decir que hay un vale.
             hay_vale = bool(v_chofer or v_o_litros or v_o_efectivo or v_efectivo > 0)
 
-            # CARTELES DE AVISO
             if es_nuevo:
                 st.info("✨ ¡Atención! Código nuevo o no reconocido. Revisá que el Cód. Cli. sea correcto.")
-            
-            # Si hay vale pero la entidad quedó en blanco, le avisa al playero
             if hay_vale and not entidad_final:
                 st.warning("⚠️ ¡Atención! Se detectó un Vale, pero la letra de la Entidad Pagadora era ilegible o faltaba. Por favor, completala a mano.")
 
-            # Interfaz
             c1, c2, c3, c4 = st.columns([1.5, 2, 1, 3])
             fecha = c1.text_input("Fecha", v_fecha)
             chofer = c2.text_input("Chofer", v_chofer)
