@@ -102,7 +102,7 @@ else:
 opcion = st.sidebar.radio("Seleccioná la tarea:", ["🚛 Ventas a Camiones", "📄 Facturas de Proveedores"])
 st.sidebar.divider()
 cliente_reporte = st.sidebar.text_input("NOMBRE DEL CLIENTE AQUÍ:", placeholder="Ej: Transportes Lopez")
-st.sidebar.info(f"Sistema v5.1 - Sistema Completo\nClientes guardados: {len(BASE_CLIENTES)}")
+st.sidebar.info(f"Sistema v5.2 - Filtro de Números Limpios\nClientes guardados: {len(BASE_CLIENTES)}")
 
 # ==========================================
 # 3. MÓDULO: VENTAS A CAMIONES
@@ -160,12 +160,17 @@ if opcion == "🚛 Ventas a Camiones":
 
     # --- FORMULARIO DE VALIDACIÓN ---
     if st.session_state.datos_temp:
-        with st.form("validador_v51"):
+        with st.form("validador_v52"):
             st.subheader("📝 Paso 2: Confirmar Información")
             
-            # 1. Lógica de Clientes (Código -> Razón Social)
-            codigo_ia = str(st.session_state.datos_temp.get('codigo_cliente', '')).strip()
-            nombre_ia = str(st.session_state.datos_temp.get('razon_social', '')).strip()
+            # 🟢 FILTRO ANTIMANCHAS: Borra los "None" de la pantalla 🟢
+            def limpiar_texto(v):
+                s = str(v).strip()
+                return "" if s.lower() in ["none", "null", ""] else s
+
+            # 1. Lógica de Clientes
+            codigo_ia = limpiar_texto(st.session_state.datos_temp.get('codigo_cliente', ''))
+            nombre_ia = limpiar_texto(st.session_state.datos_temp.get('razon_social', ''))
             
             es_nuevo = False
             if codigo_ia and codigo_ia in BASE_CLIENTES:
@@ -176,20 +181,19 @@ if opcion == "🚛 Ventas a Camiones":
                     es_nuevo = True
 
             # 2. Lógica Difusa para Entidad Pagadora
-            entidad_ia = str(st.session_state.datos_temp.get('entidad_pagadora', '')).strip().upper()
+            entidad_ia = limpiar_texto(st.session_state.datos_temp.get('entidad_pagadora', '')).upper()
             entidad_final = entidad_ia
             if entidad_ia:
                 coincidencias = difflib.get_close_matches(entidad_ia, ENTIDADES_OFICIALES, n=1, cutoff=0.5)
                 if coincidencias:
                     entidad_final = coincidencias[0]
 
-            # El Cartel de Aviso visual para el playero
             if es_nuevo:
                 st.info("✨ ¡Atención! Código nuevo o no reconocido. Revisá que el Cód. Cli. sea correcto.")
 
             c1, c2, c3, c4 = st.columns([1.5, 2, 1, 3])
-            fecha = c1.text_input("Fecha", str(st.session_state.datos_temp.get('fecha', '')))
-            chofer = c2.text_input("Chofer", str(st.session_state.datos_temp.get('chofer', '')))
+            fecha = c1.text_input("Fecha", limpiar_texto(st.session_state.datos_temp.get('fecha', '')))
+            chofer = c2.text_input("Chofer", limpiar_texto(st.session_state.datos_temp.get('chofer', '')))
             codigo_final = c3.text_input("Cód. Cli.", codigo_ia)
             cliente_rs = c4.text_input("Cliente de Factura", nombre_sugerido)
             
@@ -204,29 +208,35 @@ if opcion == "🚛 Ventas a Camiones":
 
             litros = c5.number_input("Litros", value=to_f(st.session_state.datos_temp.get('litros_factura', 0.0)), format="%.4f")
             importe = c6.number_input("Importe", value=to_f(st.session_state.datos_temp.get('importe', 0.0)))
-            factura_nro = c7.text_input("Factura Nº", str(st.session_state.datos_temp.get('nro_factura', '')))
+            factura_nro = c7.text_input("Factura Nº", limpiar_texto(st.session_state.datos_temp.get('nro_factura', '')))
             
             entidad = st.text_input("Entidad pagadora", entidad_final)
             
             with st.expander("Órdenes y Efectivo", expanded=True):
                 ca1, ca2, ca3 = st.columns(3)
-                o_litros = ca1.text_input("Orden Litros", str(st.session_state.datos_temp.get('numero_orden_autorizacion', '')))
+                o_litros = ca1.text_input("Orden Litros", limpiar_texto(st.session_state.datos_temp.get('numero_orden_autorizacion', '')))
                 v_efectivo = ca2.number_input("Efectivo", value=to_f(st.session_state.datos_temp.get('efectivo', 0.0)))
-                o_efectivo = ca3.text_input("Orden Efectivo", str(st.session_state.datos_temp.get('orden_efectivo', '')))
+                o_efectivo = ca3.text_input("Orden Efectivo", limpiar_texto(st.session_state.datos_temp.get('orden_efectivo', '')))
 
             if st.form_submit_button("✅ GUARDAR EN PLANILLA"):
                 cod_l = codigo_final.strip()
                 nom_l = cliente_rs.strip()
                 
-                # Guarda o actualiza la memoria del sistema
                 if cod_l and (cod_l not in BASE_CLIENTES or BASE_CLIENTES[cod_l] != nom_l):
                     guardar_nuevo_cliente(cod_l, nom_l)
+
+                # 🟢 CONVERTIR A NÚMERO PARA EXCEL 🟢
+                def convertir_a_numero(valor):
+                    s = str(valor).strip()
+                    if s == "": return ""
+                    if s.isdigit(): return int(s) # Si son todos números, lo fuerza a formato numérico
+                    return s # Si tiene alguna letra mezclada (ej: A-123), lo deja como texto por seguridad
 
                 registro = {
                     "Fecha": fecha, "Chofer": chofer, "Cliente": f"{cod_l} {nom_l}".strip() if cod_l else nom_l,
                     "Litros": litros, "Importe": importe, "Factura": factura_nro,
-                    "Entidad pagadora": entidad, "Orden Litros": o_litros,
-                    "Efectivo": v_efectivo, "Orden Efectivo": o_efectivo
+                    "Entidad pagadora": entidad, "Orden Litros": convertir_a_numero(o_litros),
+                    "Efectivo": v_efectivo, "Orden Efectivo": convertir_a_numero(o_efectivo)
                 }
                 st.session_state.resumen_ventas.append(registro)
                 st.session_state.datos_temp = None
@@ -251,25 +261,19 @@ if opcion == "🚛 Ventas a Camiones":
             ws = writer.sheets['Ventas']
             last_r = len(df) + 1
             
-            # --- RECUPERADO: TODO EL DISEÑO Y FORMATO DEL EXCEL ---
             fill_header = PatternFill(start_color="C8102E", end_color="C8102E", fill_type="solid")
             f_white = Font(color="FFFFFF", bold=True)
             border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
             
-            # Cabeceras rojas
             for cell in ws[1]:
                 cell.fill, cell.font, cell.border, cell.alignment = fill_header, f_white, border, Alignment(horizontal="center")
             
-            # Formatos de números y bordes
             for row in ws.iter_rows(min_row=2, max_row=last_r):
                 for cell in row:
                     cell.border = border
-                    # Importe (E) y Efectivo (I)
                     if cell.column_letter in ['E', 'I']: cell.number_format = '"$"#,##0.00'
-                    # Litros (D)
                     if cell.column_letter == 'D': cell.number_format = '#,##0.0000'
 
-            # Fila de TOTALES automáticos
             row_t = last_r + 1
             ws.cell(row=row_t, column=3, value="TOTALES:").font = Font(bold=True)
             for c_idx, c_let in [(4, 'D'), (5, 'E'), (9, 'I')]:
@@ -277,7 +281,6 @@ if opcion == "🚛 Ventas a Camiones":
                 cell_t.value = f"=SUM({c_let}2:{c_let}{last_r})"
                 cell_t.font, cell_t.number_format = Font(bold=True), ('"$"#,##0.00' if c_let != 'D' else '#,##0.0000')
 
-            # Ancho de columnas ajustado
             for i, col in enumerate(df.columns):
                 ws.column_dimensions[get_column_letter(i + 1)].width = max(df[col].astype(str).map(len).max(), len(col)) + 4
         
