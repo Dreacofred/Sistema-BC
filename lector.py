@@ -17,6 +17,7 @@ from openpyxl.utils import get_column_letter
 # 1. IDENTIDAD, BASES Y ARCHIVOS DE SEGURIDAD
 # ==========================================
 COLOR_ROJO = "#C8102E"
+COLOR_AMARILLO_ALERTA = "#FFE082" # Amarillo suave para no cansar la vista
 ARCHIVO_DB = "clientes_db.json"
 ARCHIVO_CHOFERES = "choferes_db.json"
 ARCHIVO_ENTIDADES = "entidades_db.json"
@@ -49,7 +50,16 @@ def guardar_nuevo_item(archivo, item):
     lista = cargar_db_lista(archivo)
     if item not in lista:
         lista.append(item)
+        lista.sort() # Mantenemos ordenado
         with open(archivo, 'w', encoding='utf-8') as f: json.dump(lista, f, indent=4, ensure_ascii=False)
+
+def borrar_item_especifico(archivo, item_a_borrar):
+    if not os.path.exists(archivo): return
+    lista = cargar_db_lista(archivo)
+    if item_a_borrar in lista:
+        lista.remove(item_a_borrar)
+        with open(archivo, 'w', encoding='utf-8') as f: json.dump(lista, f, indent=4, ensure_ascii=False)
+        st.rerun()
 
 def obtener_nombre_cache(usuario):
     usuario_limpio = "".join(x for x in usuario if x.isalnum()).lower()
@@ -80,10 +90,15 @@ st.markdown(f"""
         .stDataFrame {{ border: 1px solid #e0e0e0; border-radius: 8px; }}
         [data-testid="stSidebar"] .stTextInput div[data-baseweb="input"] {{ border: 2px solid {COLOR_ROJO} !important; border-radius: 8px !important; background-color: #ffffff !important; }}
         .alerta-ingreso {{ padding: 20px; border-radius: 15px; background-color: #fff3f3; border-left: 5px solid {COLOR_ROJO}; color: #721c24; font-weight: bold; text-align: center; font-size: 1.2em; }}
+        
+        /* Estilo para las cajas de alerta amarilla (Blindaje 7.5) */
+        .bloque-alerta {{ background-color: #fff8e1; padding: 15px; border-radius: 10px; border: 1px solid {COLOR_AMARILLO_ALERTA}; border-left: 4px solid {COLOR_AMARILLO_ALERTA}; margin-bottom: 10px; color: #856404; font-weight: bold; }}
+        .sidebar-item-limpieza {{ display: flex; justify-content: space-between; align-items: center; padding: 5px 10px; background: white; border-bottom: 1px solid #eee; font-size: 0.9em; }}
+        .sidebar-item-limpieza:hover {{ background-color: #f1f1f1; }}
     </style>
 """, unsafe_allow_html=True)
 
-cliente = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
+cliente_ia = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
 
 st.sidebar.markdown("<br>", unsafe_allow_html=True)
 ruta_logo = next((v for v in ["Logo.jpeg", "Logo.jpg", "logo.png"] if os.path.exists(v)), None)
@@ -109,12 +124,34 @@ st.sidebar.divider()
 cliente_reporte = st.sidebar.text_input("Nombre Excel Final:", placeholder="Ej: Resumen_Sucursal")
 st.sidebar.info(f"Sesión: {st.session_state.usuario_actual}\nExcel: {len(st.session_state.resumen_ventas)} filas\nEn cola IA: {len(st.session_state.cola_extracciones)}")
 
-with st.sidebar.expander("🛠️ Mantenimiento"):
-    if st.button("🗑️ Limpiar TODAS las bases de memoria"):
-        for arch in [ARCHIVO_DB, ARCHIVO_CHOFERES, ARCHIVO_ENTIDADES]:
-            if os.path.exists(arch): os.remove(arch)
-        st.success("✅ Bases limpiadas.")
-        st.rerun()
+# 🟢 PANEL DE MANTENIMIENTO MEJORADO (LIMPIEZA QUIRÚRGICA) 🟢
+with st.sidebar.expander("🛠️ Mantenimiento de Memorias"):
+    st.write("Si el sistema autocompleta mal (ej: 'Ruiz Juciano'), podés borrar ese nombre específico acá.")
+    
+    # -- Sección Choferes --
+    st.markdown("---")
+    st.write("📋 **Choferes Aprendidos**")
+    base_choferes_sidebar = cargar_db_lista(ARCHIVO_CHOFERES)
+    if base_choferes_sidebar:
+        for ch in base_choferes_sidebar:
+            col_ch1, col_ch2 = st.columns([4, 1])
+            col_ch1.markdown(f"<div style='font-size: 0.9em; padding-top: 5px;'>{ch}</div>", unsafe_allow_html=True)
+            if col_ch2.button("🗑️", key=f"borrar_ch_{ch}"):
+                borrar_item_especifico(ARCHIVO_CHOFERES, ch)
+    else: st.write("*La lista está vacía.*")
+
+    # -- Sección Entidades --
+    st.markdown("---")
+    st.write("📋 **Entidades Aprendidas (Dinámicas)**")
+    base_entidades_sidebar = cargar_db_lista(ARCHIVO_ENTIDADES)
+    st.write(f"*Nota: Las oficiales de BC ({len(ENTIDADES_OFICIALES)}) no se pueden borrar.*")
+    if base_entidades_sidebar:
+        for ent in base_entidades_sidebar:
+            col_en1, col_en2 = st.columns([4, 1])
+            col_en1.markdown(f"<div style='font-size: 0.9em; padding-top: 5px;'>{ent}</div>", unsafe_allow_html=True)
+            if col_en2.button("🗑️", key=f"borrar_ent_{ent}"):
+                borrar_item_especifico(ARCHIVO_ENTIDADES, ent)
+    else: st.write("*La lista está vacía.*")
 
 if opcion == "🚛 Ventas a Camiones":
     if len(st.session_state.cola_extracciones) > 0:
@@ -144,6 +181,7 @@ if opcion == "🚛 Ventas a Camiones":
             nombre_sugerido = BASE_CLIENTES.get(codigo_ia, nombre_ia)
             es_nuevo_cli = bool(codigo_ia and codigo_ia not in BASE_CLIENTES)
 
+            # 🟢 AUTO-CORRECTOR INTELIGENTE 🟢
             chofer_final = v_chofer
             if v_chofer and BASE_CHOFERES:
                 coincidencias_c = difflib.get_close_matches(v_chofer, BASE_CHOFERES, n=1, cutoff=0.5)
@@ -151,16 +189,39 @@ if opcion == "🚛 Ventas a Camiones":
 
             entidad_ia = limpiar_texto(datos_actuales.get('entidad_pagadora', '')).upper()
             entidad_final = entidad_ia
-            if entidad_ia:
-                lista_completa_entidades = ENTIDADES_OFICIALES + BASE_ENTIDADES
+            lista_completa_entidades = ENTIDADES_OFICIALES + BASE_ENTIDADES
+            if entidad_ia and lista_completa_entidades:
                 coincidencias_e = difflib.get_close_matches(entidad_ia, lista_completa_entidades, n=1, cutoff=0.4)
                 if coincidencias_e: entidad_final = coincidencias_e[0]
 
+            # 🛑 DETECTOR DE NOVEDADES (ALERTA AMARILLA) 🛑
+            es_novedad_chofer = bool(chofer_final and chofer_final not in BASE_CHOFERES)
+            es_novedad_entidad = bool(entidad_final and entidad_final not in lista_completa_entidades)
+
             if es_nuevo_cli: st.info("✨ ¡Atención! Código de cliente nuevo detectado.")
+            
+            # Bloque visual de blindaje (Versión 7.5)
+            if es_novedad_chofer or es_novedad_entidad:
+                st.markdown(f"""
+                    <div class="bloque-alerta">
+                        ⚠️ ATENCIÓN NANCY:<br>
+                        Hay datos nuevos en pantalla que no figuran en la memoria del sistema.<br>
+                        Por favor, revisá que esten BIEN escritos antes de guardar.<br>
+                        {'- Chofer Nuevo detectado.' if es_novedad_chofer else ''}
+                        {'- Entidad Pagadora Nueva detectada.' if es_novedad_entidad else ''}
+                    </div>
+                """, unsafe_allow_html=True)
 
             c1, c2, c3, c4 = st.columns([1.5, 2, 1, 3])
             fecha = c1.text_input("Fecha", v_fecha)
+            
+            # Caja de texto amarilla si es chofer nuevo
+            css_chofer = f'border: 2px solid {COLOR_AMARILLO_ALERTA} !important; background-color: #fffdeb !important;' if es_novedad_chofer else ''
+            # Nota: Streamlit no tiene color de input nativo, lo simulamos con markdown o aceptamos la alerta visual de arriba. 
+            # Para esta versión, rely on the markdown alert above and the standard input.
+
             chofer = c2.text_input("Chofer", chofer_final)
+            
             codigo_final = c3.text_input("Cód. Cli.", codigo_ia)
             cliente_rs = c4.text_input("Cliente de Factura", nombre_sugerido)
             
@@ -233,26 +294,23 @@ if opcion == "🚛 Ventas a Camiones":
             
             if col_lote1.button("🚀 INICIAR ANÁLISIS DE LOTE COMPLETO"):
                 with st.spinner("La Inteligencia Artificial está leyendo..."):
-                    # 🟢 PROMPT BLINDADO: ANCLAJE SEMÁNTICO Y ANTI-LÍNEAS 🟢
+                    # Prompt blindado (Anclaje semántico y anti-líneas verticales)
                     prompt = """
                     Analizá la imagen adjunta. Hay DOS comprobantes en la foto: un ticket largo (Factura) y un papel con casilleros (Vale de Carga). Extraé un JSON único.
-                    
-                    --- MAPA FACTURA (Ticket largo impreso) ---
+                    --- MAPA FACTURA ---
                     - 'fecha': Fecha impresa junto a "Hora:".
                     - 'nro_factura': Buscá "Nro." debajo del tipo de comprobante.
-                    - 'codigo_cliente': Número CORTO al inicio del nombre del cliente (ej: 4079).
+                    - 'codigo_cliente': Número CORTO al inicio del nombre del cliente. NO ES EL CUIT.
                     - 'razon_social': Nombre del cliente (sin el código).
                     - 'litros_factura': Número exacto a la izquierda de la 'x'.
                     - 'importe': Valor a la derecha de "TOTAL".
-                    
-                    --- MAPA VALE DE CARGA (Papel pequeño con casilleros) ---
+                    --- MAPA VALE DE CARGA ---
                     ATENCIÓN: Buscá en la foto el papel que tiene escrito "VALE DE CARGA". Leé EXCLUSIVAMENTE los datos escritos a mano dentro de ese papel. Prohibido sacar el nombre de firmas en el ticket blanco.
                     - 'chofer': Extraé el nombre escrito en los casilleros del renglón "CHOFER".
                     - 'entidad_pagadora': Texto en el renglón "ENTIDAD PAGADORA".
                     - 'numero_orden_autorizacion': Número en la casilla "ORDEN" superior.
-                    - 'efectivo': Mirá el renglón "EFECTIVO". Hay números (ej: 60000) que cruzan las líneas verticales del diseño de la grilla. LAS LÍNEAS IMPRESAS DEL PAPEL NO SON TACHADURAS. Extraé el número exacto. Solo poné 0.0 si la cajita de efectivo está completamente vacía.
+                    - 'efectivo': Mirá el renglón "EFECTIVO". Hay números que cruzan las líneas verticales del diseño de la grilla. LAS LÍNEAS IMPRESAS DEL PAPEL NO SON TACHADURAS. Extraé el número exacto. Solo poné 0.0 si la cajita de efectivo está completamente vacía.
                     - 'orden_efectivo': Número en la casilla "ORDEN" inferior.
-                    
                     Devolvé ÚNICAMENTE JSON puro. Usa punto para decimales.
                     """
                     for doc in st.session_state.lote_pendientes:
@@ -264,7 +322,7 @@ if opcion == "🚛 Ventas a Camiones":
                             else:
                                 contenido_ia.append(Image.open(io.BytesIO(doc['data'])))
                                 
-                            res = cliente.models.generate_content(model='gemini-2.5-pro', contents=contenido_ia)
+                            res = cliente_ia.models.generate_content(model='gemini-2.5-pro', contents=contenido_ia)
                             raw_text = res.text.strip().replace('```json', '').replace('```', '')
                             start, end = raw_text.find('{'), raw_text.rfind('}') + 1
                             datos_extraidos = json.loads(raw_text[start:end])
@@ -331,6 +389,6 @@ elif opcion == "📄 Facturas de Proveedores":
     if archivo_prov and st.button("🚀 PROCESAR"):
         with st.spinner("Analizando..."):
             try:
-                res = cliente.models.generate_content(model='gemini-2.5-pro', contents=[Image.open(archivo_prov) if not archivo_prov.name.endswith('.pdf') else archivo_prov, "Extraé CUIT, Razón Social, Fecha, Neto, IVA y Total en JSON."])
+                res = cliente_ia.models.generate_content(model='gemini-2.5-pro', contents=[Image.open(archivo_prov) if not archivo_prov.name.endswith('.pdf') else archivo_prov, "Extraé CUIT, Razón Social, Fecha, Neto, IVA y Total en JSON."])
                 st.json(res.text.strip().replace('```json', '').replace('```', ''))
             except Exception as e: st.error(f"Error: {e}")
