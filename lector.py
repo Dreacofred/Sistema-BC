@@ -17,17 +17,19 @@ from openpyxl.utils import get_column_letter
 # 1. IDENTIDAD, BASES Y ARCHIVOS DE SEGURIDAD
 # ==========================================
 COLOR_ROJO = "#C8102E"
-COLOR_AMARILLO_ALERTA = "#FFE082" # Amarillo suave para no cansar la vista
+COLOR_AMARILLO_ALERTA = "#FFE082" 
 ARCHIVO_DB = "clientes_db.json"
 ARCHIVO_CHOFERES = "choferes_db.json"
-ARCHIVO_ENTIDADES = "entidades_db.json"
 
+# 🟢 TU LISTA BLINDADA DE ENTIDADES (El sistema solo usará esta) 🟢
 ENTIDADES_OFICIALES = [
     "TRANSP HIJOS DE MARIANO FRANCOVIG SH",
     "MUNICIPALIDAD DE RECREO",
     "CAMPO PRECISION",
     "TRANSPORTE LOPEZ SRL",
-    "MUNICIPALIDAD DE SANTA FE"
+    "MUNICIPALIDAD DE SANTA FE",
+    "RUIZ JULIAN",
+    "RUIZ MARCELO"
 ]
 
 def cargar_db_diccionario(archivo):
@@ -50,7 +52,7 @@ def guardar_nuevo_item(archivo, item):
     lista = cargar_db_lista(archivo)
     if item not in lista:
         lista.append(item)
-        lista.sort() # Mantenemos ordenado
+        lista.sort() 
         with open(archivo, 'w', encoding='utf-8') as f: json.dump(lista, f, indent=4, ensure_ascii=False)
 
 def borrar_item_especifico(archivo, item_a_borrar):
@@ -77,7 +79,6 @@ def recuperar_cache_ventas(usuario):
 
 BASE_CLIENTES = cargar_db_diccionario(ARCHIVO_DB)
 BASE_CHOFERES = cargar_db_lista(ARCHIVO_CHOFERES)
-BASE_ENTIDADES = cargar_db_lista(ARCHIVO_ENTIDADES)
 
 st.set_page_config(page_title="BC Combustibles - Gestión Pro", page_icon="⛽", layout="wide")
 
@@ -91,10 +92,7 @@ st.markdown(f"""
         [data-testid="stSidebar"] .stTextInput div[data-baseweb="input"] {{ border: 2px solid {COLOR_ROJO} !important; border-radius: 8px !important; background-color: #ffffff !important; }}
         .alerta-ingreso {{ padding: 20px; border-radius: 15px; background-color: #fff3f3; border-left: 5px solid {COLOR_ROJO}; color: #721c24; font-weight: bold; text-align: center; font-size: 1.2em; }}
         
-        /* Estilo para las cajas de alerta amarilla (Blindaje 7.5) */
         .bloque-alerta {{ background-color: #fff8e1; padding: 15px; border-radius: 10px; border: 1px solid {COLOR_AMARILLO_ALERTA}; border-left: 4px solid {COLOR_AMARILLO_ALERTA}; margin-bottom: 10px; color: #856404; font-weight: bold; }}
-        .sidebar-item-limpieza {{ display: flex; justify-content: space-between; align-items: center; padding: 5px 10px; background: white; border-bottom: 1px solid #eee; font-size: 0.9em; }}
-        .sidebar-item-limpieza:hover {{ background-color: #f1f1f1; }}
     </style>
 """, unsafe_allow_html=True)
 
@@ -124,11 +122,15 @@ st.sidebar.divider()
 cliente_reporte = st.sidebar.text_input("Nombre Excel Final:", placeholder="Ej: Resumen_Sucursal")
 st.sidebar.info(f"Sesión: {st.session_state.usuario_actual}\nExcel: {len(st.session_state.resumen_ventas)} filas\nEn cola IA: {len(st.session_state.cola_extracciones)}")
 
-# 🟢 PANEL DE MANTENIMIENTO MEJORADO (LIMPIEZA QUIRÚRGICA) 🟢
+# 🟢 PANEL DE MANTENIMIENTO MEJORADO 🟢
 with st.sidebar.expander("🛠️ Mantenimiento de Memorias"):
-    st.write("Si el sistema autocompleta mal (ej: 'Ruiz Juciano'), podés borrar ese nombre específico acá.")
-    
-    # -- Sección Choferes --
+    st.write("Si el sistema autocompleta mal un chofer, podés borrarlo acá.")
+    if st.button("🗑️ Limpiar TODAS las bases (Choferes y Clientes)"):
+        for arch in [ARCHIVO_DB, ARCHIVO_CHOFERES]:
+            if os.path.exists(arch): os.remove(arch)
+        st.success("✅ Bases limpiadas.")
+        st.rerun()
+
     st.markdown("---")
     st.write("📋 **Choferes Aprendidos**")
     base_choferes_sidebar = cargar_db_lista(ARCHIVO_CHOFERES)
@@ -138,19 +140,6 @@ with st.sidebar.expander("🛠️ Mantenimiento de Memorias"):
             col_ch1.markdown(f"<div style='font-size: 0.9em; padding-top: 5px;'>{ch}</div>", unsafe_allow_html=True)
             if col_ch2.button("🗑️", key=f"borrar_ch_{ch}"):
                 borrar_item_especifico(ARCHIVO_CHOFERES, ch)
-    else: st.write("*La lista está vacía.*")
-
-    # -- Sección Entidades --
-    st.markdown("---")
-    st.write("📋 **Entidades Aprendidas (Dinámicas)**")
-    base_entidades_sidebar = cargar_db_lista(ARCHIVO_ENTIDADES)
-    st.write(f"*Nota: Las oficiales de BC ({len(ENTIDADES_OFICIALES)}) no se pueden borrar.*")
-    if base_entidades_sidebar:
-        for ent in base_entidades_sidebar:
-            col_en1, col_en2 = st.columns([4, 1])
-            col_en1.markdown(f"<div style='font-size: 0.9em; padding-top: 5px;'>{ent}</div>", unsafe_allow_html=True)
-            if col_en2.button("🗑️", key=f"borrar_ent_{ent}"):
-                borrar_item_especifico(ARCHIVO_ENTIDADES, ent)
     else: st.write("*La lista está vacía.*")
 
 if opcion == "🚛 Ventas a Camiones":
@@ -181,47 +170,34 @@ if opcion == "🚛 Ventas a Camiones":
             nombre_sugerido = BASE_CLIENTES.get(codigo_ia, nombre_ia)
             es_nuevo_cli = bool(codigo_ia and codigo_ia not in BASE_CLIENTES)
 
-            # 🟢 AUTO-CORRECTOR INTELIGENTE 🟢
             chofer_final = v_chofer
             if v_chofer and BASE_CHOFERES:
                 coincidencias_c = difflib.get_close_matches(v_chofer, BASE_CHOFERES, n=1, cutoff=0.5)
                 if coincidencias_c: chofer_final = coincidencias_c[0]
 
+            # 🟢 LA ENTIDAD SE COMPARA SOLO CON TU LISTA DEL CÓDIGO 🟢
             entidad_ia = limpiar_texto(datos_actuales.get('entidad_pagadora', '')).upper()
             entidad_final = entidad_ia
-            lista_completa_entidades = ENTIDADES_OFICIALES + BASE_ENTIDADES
-            if entidad_ia and lista_completa_entidades:
-                coincidencias_e = difflib.get_close_matches(entidad_ia, lista_completa_entidades, n=1, cutoff=0.4)
+            if entidad_ia and ENTIDADES_OFICIALES:
+                coincidencias_e = difflib.get_close_matches(entidad_ia, ENTIDADES_OFICIALES, n=1, cutoff=0.4)
                 if coincidencias_e: entidad_final = coincidencias_e[0]
 
-            # 🛑 DETECTOR DE NOVEDADES (ALERTA AMARILLA) 🛑
             es_novedad_chofer = bool(chofer_final and chofer_final not in BASE_CHOFERES)
-            es_novedad_entidad = bool(entidad_final and entidad_final not in lista_completa_entidades)
 
             if es_nuevo_cli: st.info("✨ ¡Atención! Código de cliente nuevo detectado.")
             
-            # Bloque visual de blindaje (Versión 7.5)
-            if es_novedad_chofer or es_novedad_entidad:
+            if es_novedad_chofer:
                 st.markdown(f"""
                     <div class="bloque-alerta">
                         ⚠️ ATENCIÓN NANCY:<br>
-                        Hay datos nuevos en pantalla que no figuran en la memoria del sistema.<br>
-                        Por favor, revisá que esten BIEN escritos antes de guardar.<br>
-                        {'- Chofer Nuevo detectado.' if es_novedad_chofer else ''}
-                        {'- Entidad Pagadora Nueva detectada.' if es_novedad_entidad else ''}
+                        El chofer en pantalla no figura en la memoria del sistema.<br>
+                        Por favor, revisá que esté BIEN escrito antes de guardar.
                     </div>
                 """, unsafe_allow_html=True)
 
             c1, c2, c3, c4 = st.columns([1.5, 2, 1, 3])
             fecha = c1.text_input("Fecha", v_fecha)
-            
-            # Caja de texto amarilla si es chofer nuevo
-            css_chofer = f'border: 2px solid {COLOR_AMARILLO_ALERTA} !important; background-color: #fffdeb !important;' if es_novedad_chofer else ''
-            # Nota: Streamlit no tiene color de input nativo, lo simulamos con markdown o aceptamos la alerta visual de arriba. 
-            # Para esta versión, rely on the markdown alert above and the standard input.
-
             chofer = c2.text_input("Chofer", chofer_final)
-            
             codigo_final = c3.text_input("Cód. Cli.", codigo_ia)
             cliente_rs = c4.text_input("Cliente de Factura", nombre_sugerido)
             
@@ -249,8 +225,8 @@ if opcion == "🚛 Ventas a Camiones":
                 entidad_l = entidad.strip().upper()
 
                 if cod_l and (cod_l not in BASE_CLIENTES or BASE_CLIENTES[cod_l] != nom_l): guardar_nuevo_cliente(cod_l, nom_l)
+                # 🟢 ACÁ SE GUARDA EL CHOFER PERO YA NO LA ENTIDAD 🟢
                 if chofer_l: guardar_nuevo_item(ARCHIVO_CHOFERES, chofer_l)
-                if entidad_l and entidad_l not in ENTIDADES_OFICIALES: guardar_nuevo_item(ARCHIVO_ENTIDADES, entidad_l)
 
                 registro = {
                     "Fecha": fecha.strip(), "Chofer": chofer_l, "Cliente": f"{cod_l} {nom_l}".strip(),
@@ -294,7 +270,6 @@ if opcion == "🚛 Ventas a Camiones":
             
             if col_lote1.button("🚀 INICIAR ANÁLISIS DE LOTE COMPLETO"):
                 with st.spinner("La Inteligencia Artificial está leyendo..."):
-                    # Prompt blindado (Anclaje semántico y anti-líneas verticales)
                     prompt = """
                     Analizá la imagen adjunta. Hay DOS comprobantes en la foto: un ticket largo (Factura) y un papel con casilleros (Vale de Carga). Extraé un JSON único.
                     --- MAPA FACTURA ---
