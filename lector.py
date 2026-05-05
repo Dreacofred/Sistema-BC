@@ -103,7 +103,6 @@ if not usuario_app.strip():
     """, unsafe_allow_html=True)
     st.stop()
 
-# Inicializar memorias de lote (Batch)
 if 'lote_pendientes' not in st.session_state: st.session_state.lote_pendientes = []
 if 'cola_extracciones' not in st.session_state: st.session_state.cola_extracciones = []
 
@@ -195,11 +194,11 @@ if opcion == "🚛 Ventas a Camiones":
                 }
                 st.session_state.resumen_ventas.append(registro)
                 guardar_cache_ventas(st.session_state.resumen_ventas, st.session_state.usuario_actual)
-                st.session_state.cola_extracciones.pop(0) # Sacamos el ticket de la cola
+                st.session_state.cola_extracciones.pop(0) 
                 st.rerun()
             
             if btn_descartar:
-                st.session_state.cola_extracciones.pop(0) # Lo descartamos sin guardar
+                st.session_state.cola_extracciones.pop(0)
                 st.rerun()
 
     # --- MODO RECOLECCIÓN (CÁMARA / SUBIDA) ---
@@ -207,10 +206,19 @@ if opcion == "🚛 Ventas a Camiones":
         st.title(f"🚛 Registro de Cargas - {st.session_state.usuario_actual}")
         st.subheader("📸 Paso 1: Recolectar Documentos")
         
-        tab1, tab2 = st.tabs(["📸 Cámara en Vivo", "📁 Subir Archivos (PC)"])
+        tab1, tab2 = st.tabs(["📁 Subir Archivos (PC)", "📸 Cámara en Vivo"])
         
         with tab1:
-            st.info("💡 Consejo: Poné el papel, enfocá, dispará y tocá '➕ Sumar a la Pila'. Luego cerrá la foto con la crucecita para capturar el siguiente.")
+            st.info("💡 Método más rápido: Crea una carpeta, copiá ahí todas las fotos del celular, y seleccionalas todas juntas acá.")
+            fotos_disco = st.file_uploader("Seleccionar comprobantes", type=["pdf","jpg","png","jpeg"], accept_multiple_files=True)
+            if fotos_disco:
+                if st.button("➕ Sumar archivos a la Pila"):
+                    for f in fotos_disco:
+                        st.session_state.lote_pendientes.append({'nombre': f.name, 'data': f.getvalue(), 'tipo': f.type})
+                    st.success(f"✅ Se sumaron los archivos. Ya tenés {len(st.session_state.lote_pendientes)} comprobantes en la pila.")
+
+        with tab2:
+            st.info("💡 Cámara Web / Enlace Móvil: Capturá de a una.")
             foto_camara = st.camera_input("Enfocar documento")
             if foto_camara:
                 if st.button("➕ Sumar captura a la Pila"):
@@ -220,15 +228,6 @@ if opcion == "🚛 Ventas a Camiones":
                     })
                     st.success(f"✅ ¡Agregado! Ya tenés {len(st.session_state.lote_pendientes)} comprobantes en la pila.")
         
-        with tab2:
-            st.info("💡 Podés seleccionar varios archivos a la vez si los tenés en una carpeta.")
-            fotos_disco = st.file_uploader("Seleccionar comprobantes", type=["pdf","jpg","png","jpeg"], accept_multiple_files=True)
-            if fotos_disco:
-                if st.button("➕ Sumar archivos a la Pila"):
-                    for f in fotos_disco:
-                        st.session_state.lote_pendientes.append({'nombre': f.name, 'data': f.getvalue(), 'tipo': f.type})
-                    st.success(f"✅ Se sumaron los archivos. Ya tenés {len(st.session_state.lote_pendientes)} comprobantes en la pila.")
-
         st.divider()
         st.subheader("📦 Pila de Trabajo")
         if st.session_state.lote_pendientes:
@@ -236,12 +235,15 @@ if opcion == "🚛 Ventas a Camiones":
             col_lote1, col_lote2 = st.columns([3, 1])
             
             if col_lote1.button("🚀 INICIAR ANÁLISIS DE LOTE COMPLETO"):
-                with st.spinner("La Inteligencia Artificial está leyendo todos los documentos... (Esto puede demorar unos minutos, podés cebarte un mate 🧉)"):
+                with st.spinner("La Inteligencia Artificial está leyendo todos los documentos... (Esto puede demorar unos minutos 🧉)"):
+                    # 🟢 ACÁ ESTÁ EL LAZO CORTO ARREGLADO PARA EL CLIENTE 🟢
                     prompt = """
                     Analizá la imagen adjunta. Extraé un JSON único con máxima precisión.
                     --- MAPA FACTURA ---
                     - 'fecha': Buscá la palabra "Hora:". A la izquierda está la Fecha impresa. Usá esta.
-                    - 'nro_factura', 'codigo_cliente', 'razon_social'.
+                    - 'nro_factura': Buscá "Nro." debajo del tipo de comprobante.
+                    - 'codigo_cliente': ATENCIÓN, NO ES EL CUIT. Es el número identificador CORTO (ej: 4079, 181804) que está al principio de la línea del nombre del cliente, justo DEBAJO del renglón del CUIT.
+                    - 'razon_social': El nombre completo del cliente (ej: ORTIZ GUSTAVO JULIO). Excluín el código numérico inicial de este campo. Solo dejá el nombre.
                     - 'litros_factura': Número exacto a la izquierda de la 'x'. No inventes dígitos.
                     - 'importe': Valor a la derecha de "TOTAL".
                     --- MAPA VALE ---
@@ -270,8 +272,8 @@ if opcion == "🚛 Ventas a Camiones":
                         except Exception as e:
                             st.session_state.cola_extracciones.append({'_origen': f"⚠️ ERROR DE LECTURA en {doc['nombre']} (Completar manual)"})
                     
-                    st.session_state.lote_pendientes = [] # Vaciamos la pila inicial
-                    st.rerun() # Disparamos la Cinta Transportadora
+                    st.session_state.lote_pendientes = [] 
+                    st.rerun() 
             
             if col_lote2.button("🗑️ Vaciar Pila"):
                 st.session_state.lote_pendientes = []
