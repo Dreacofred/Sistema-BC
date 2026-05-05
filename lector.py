@@ -14,12 +14,13 @@ from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
 # ==========================================
-# 1. IDENTIDAD, BASES Y ENTIDADES OFICIALES
+# 1. IDENTIDAD, BASES Y ARCHIVOS DE SEGURIDAD
 # ==========================================
 COLOR_ROJO = "#C8102E"
 ARCHIVO_DB = "clientes_db.json"
+ARCHIVO_CACHE_VENTAS = "cache_ventas.json" # 🛡️ EL SEGURO DE VIDA DE NANCY
 
-# 🟢 CONFIGURACIÓN: AGREGÁ TUS ENTIDADES ACÁ 🟢
+# 🟢 CONFIGURACIÓN: ENTIDADES OFICIALES 🟢
 ENTIDADES_OFICIALES = [
     "TRANSP HIJOS DE MARIANO FRANCOVIG SH",
     "MUNICIPALIDAD DE RECREO",
@@ -28,6 +29,7 @@ ENTIDADES_OFICIALES = [
     "MUNICIPALIDAD DE SANTA FE"
 ]
 
+# --- FUNCIONES DE PERSISTENCIA ---
 def cargar_base_clientes():
     if os.path.exists(ARCHIVO_DB):
         with open(ARCHIVO_DB, 'r', encoding='utf-8') as f:
@@ -40,6 +42,16 @@ def guardar_nuevo_cliente(codigo, nombre):
     with open(ARCHIVO_DB, 'w', encoding='utf-8') as f:
         json.dump(db, f, indent=4, ensure_ascii=False)
 
+def guardar_cache_ventas(lista_ventas):
+    with open(ARCHIVO_CACHE_VENTAS, 'w', encoding='utf-8') as f:
+        json.dump(lista_ventas, f, indent=4, ensure_ascii=False)
+
+def recuperar_cache_ventas():
+    if os.path.exists(ARCHIVO_CACHE_VENTAS):
+        with open(ARCHIVO_CACHE_VENTAS, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    return []
+
 BASE_CLIENTES = cargar_base_clientes()
 
 st.set_page_config(
@@ -48,6 +60,7 @@ st.set_page_config(
     layout="wide"
 )
 
+# Estilos Visuales
 st.markdown(f"""
     <style>
         .stApp {{ background-color: white !important; }}
@@ -80,17 +93,18 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. CONFIGURACIÓN Y CLIENTE API
+# 2. CONFIGURACIÓN Y ESTADO DE SESIÓN
 # ==========================================
 cliente = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
 
+if 'resumen_ventas' not in st.session_state:
+    st.session_state.resumen_ventas = recuperar_cache_ventas()
 if 'contador_carga' not in st.session_state:
     st.session_state.contador_carga = 0
-if 'resumen_ventas' not in st.session_state:
-    st.session_state.resumen_ventas = []
 if 'datos_temp' not in st.session_state:
     st.session_state.datos_temp = None
 
+# Sidebar
 st.sidebar.markdown("<br>", unsafe_allow_html=True)
 ruta_logo = next((v for v in ["Logo.jpeg", "Logo.jpg", "logo.png"] if os.path.exists(v)), None)
 if ruta_logo:
@@ -101,7 +115,7 @@ else:
 opcion = st.sidebar.radio("Seleccioná la tarea:", ["🚛 Ventas a Camiones", "📄 Facturas de Proveedores"])
 st.sidebar.divider()
 cliente_reporte = st.sidebar.text_input("NOMBRE DEL CLIENTE AQUÍ:", placeholder="Ej: Transportes Lopez")
-st.sidebar.info(f"Sistema v6.3 - Fecha Fiscal\nClientes guardados: {len(BASE_CLIENTES)}")
+st.sidebar.info(f"Sistema v6.6 - Full + Efectivo Arreglado\nCargas en memoria: {len(st.session_state.resumen_ventas)}")
 
 # ==========================================
 # 3. MÓDULO: VENTAS A CAMIONES
@@ -110,7 +124,7 @@ if opcion == "🚛 Ventas a Camiones":
     st.title("🚛 Registro de Carga de Camiones")
     
     st.subheader("📸 Paso 1: Escanear Documentación")
-    st.info("💡 Sacale una foto a la factura, al vale, o a los dos documentos juntos en la misma imagen.")
+    st.info("💡 Subí la foto de la factura y el vale.")
     
     doc_unico = st.file_uploader("Subir Fotografía", type=["pdf","jpg","png","jpeg"], key=f"up_unico_{st.session_state.contador_carga}")
 
@@ -118,26 +132,23 @@ if opcion == "🚛 Ventas a Camiones":
         with st.spinner("Analizando con Inteligencia Artificial..."):
             try:
                 contenido_ia = []
-                # 🟢 PROMPT CON MAPA DE FECHA AJUSTADO A LA FACTURA 🟢
+                # 🟢 PROMPT CON LA INSTRUCCIÓN DE EFECTIVO MEJORADA 🟢
                 prompt = """
-                Analizá la imagen adjunta. Puede contener una factura, un vale de carga, o AMBOS. Extraé un JSON único con máxima precisión.
-                
+                Analizá la imagen adjunta. Extraé un JSON único con máxima precisión.
                 --- MAPA EXACTO PARA LA FACTURA ---
-                - 'fecha': Buscá la palabra "Hora:" en la parte superior. En esa misma línea, hacia la izquierda, vas a encontrar la "Fecha:" impresa. Extraé ESTA fecha y descartá cualquier fecha escrita a mano en el vale.
+                - 'fecha': Buscá la palabra "Hora:". A la izquierda está la Fecha impresa. Usá esta.
                 - 'nro_factura': Buscá "Nro." debajo del tipo de comprobante.
                 - 'codigo_cliente': El número al principio de la línea del cliente (debajo del 2do CUIT).
                 - 'razon_social': El resto de esa línea sin el código numérico inicial.
-                - 'litros_factura': Buscá la multiplicación (ej: 250 x 1899). Extraé ESTRICTAMENTE el número a la izquierda de la 'x' minúscula. Si dice 250, es 250. NO agregues dígitos de más.
-                - 'importe': Valor a la derecha de la palabra "TOTAL".
-                
+                - 'litros_factura': Número exacto a la izquierda de la 'x'. No inventes dígitos.
+                - 'importe': Valor a la derecha de "TOTAL".
                 --- REGLAS PARA EL VALE ---
                 - 'chofer': Nombre manuscrito.
                 - 'entidad_pagadora': Extraé EXACTAMENTE lo que esté escrito. NUNCA lo dejes vacío si detectás que hay un vale de carga.
                 - 'numero_orden_autorizacion': Número en la casilla 'ORDEN' superior. Si está tachado con una línea, dejalo en blanco.
-                - 'efectivo': Si los casilleros tienen una raya horizontal, están vacíos o pisados por firma, devolvé estrictamente 0.0.
+                - 'efectivo': Extraé el número manuscrito (ej: 60000). Ignorá las líneas impresas de los casilleros que crucen los números. SOLO devolvé 0.0 si el espacio está completamente vacío o si hay una raya de anulación evidente SIN ningún número.
                 - 'orden_efectivo': Número en la casilla 'ORDEN' inferior. Si tiene raya, dejalo en blanco.
-                
-                Devolvé ÚNICAMENTE el JSON puro. Usa punto para decimales.
+                Devolvé ÚNICAMENTE JSON puro. Usa punto para decimales.
                 """
                 contenido_ia.append(prompt)
                 
@@ -158,7 +169,7 @@ if opcion == "🚛 Ventas a Camiones":
 
     # --- FORMULARIO DE VALIDACIÓN ---
     if st.session_state.datos_temp:
-        with st.form("validador_v63"):
+        with st.form("validador_v66"):
             st.subheader("📝 Paso 2: Confirmar Información")
             
             def limpiar_texto(v):
@@ -242,6 +253,10 @@ if opcion == "🚛 Ventas a Camiones":
                     "Efectivo": val_efectivo, "Orden Efectivo": convertir_a_numero(o_efectivo)
                 }
                 st.session_state.resumen_ventas.append(registro)
+                
+                # 🛡️ ACÁ ESTÁ EL CAMBIO CLAVE: GUARDAMOS EN EL DISCO 🛡️
+                guardar_cache_ventas(st.session_state.resumen_ventas)
+                
                 st.session_state.datos_temp = None
                 st.session_state.contador_carga += 1
                 st.rerun()
@@ -277,6 +292,7 @@ if opcion == "🚛 Ventas a Camiones":
                     if cell.column_letter in ['E', 'I']: cell.number_format = '"$"#,##0.00'
                     if cell.column_letter == 'D': cell.number_format = '#,##0.0000'
 
+            # RECUPERAMOS LOS TOTALES MATEMÁTICOS DEL EXCEL
             row_t = last_r + 1
             ws.cell(row=row_t, column=3, value="TOTALES:").font = Font(bold=True)
             for c_idx, c_let in [(4, 'D'), (5, 'E'), (9, 'I')]:
@@ -301,6 +317,7 @@ if opcion == "🚛 Ventas a Camiones":
         
         if col_ex2.button("🗑️ Vaciar Todo", use_container_width=True):
             st.session_state.resumen_ventas = []
+            if os.path.exists(ARCHIVO_CACHE_VENTAS): os.remove(ARCHIVO_CACHE_VENTAS)
             st.rerun()
 
 # ==========================================
