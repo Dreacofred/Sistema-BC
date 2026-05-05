@@ -18,6 +18,8 @@ from openpyxl.utils import get_column_letter
 # ==========================================
 COLOR_ROJO = "#C8102E"
 ARCHIVO_DB = "clientes_db.json"
+ARCHIVO_CHOFERES = "choferes_db.json"
+ARCHIVO_ENTIDADES = "entidades_db.json"
 
 ENTIDADES_OFICIALES = [
     "TRANSP HIJOS DE MARIANO FRANCOVIG SH",
@@ -27,17 +29,27 @@ ENTIDADES_OFICIALES = [
     "MUNICIPALIDAD DE SANTA FE"
 ]
 
-def cargar_base_clientes():
-    if os.path.exists(ARCHIVO_DB):
-        with open(ARCHIVO_DB, 'r', encoding='utf-8') as f:
-            return json.load(f)
+def cargar_db_diccionario(archivo):
+    if os.path.exists(archivo):
+        with open(archivo, 'r', encoding='utf-8') as f: return json.load(f)
     return {}
 
+def cargar_db_lista(archivo):
+    if os.path.exists(archivo):
+        with open(archivo, 'r', encoding='utf-8') as f: return json.load(f)
+    return []
+
 def guardar_nuevo_cliente(codigo, nombre):
-    db = cargar_base_clientes()
+    db = cargar_db_diccionario(ARCHIVO_DB)
     db[codigo] = nombre
-    with open(ARCHIVO_DB, 'w', encoding='utf-8') as f:
-        json.dump(db, f, indent=4, ensure_ascii=False)
+    with open(ARCHIVO_DB, 'w', encoding='utf-8') as f: json.dump(db, f, indent=4, ensure_ascii=False)
+
+def guardar_nuevo_item(archivo, item):
+    if not item: return
+    lista = cargar_db_lista(archivo)
+    if item not in lista:
+        lista.append(item)
+        with open(archivo, 'w', encoding='utf-8') as f: json.dump(lista, f, indent=4, ensure_ascii=False)
 
 def obtener_nombre_cache(usuario):
     usuario_limpio = "".join(x for x in usuario if x.isalnum()).lower()
@@ -45,17 +57,17 @@ def obtener_nombre_cache(usuario):
 
 def guardar_cache_ventas(lista_ventas, usuario):
     archivo = obtener_nombre_cache(usuario)
-    with open(archivo, 'w', encoding='utf-8') as f:
-        json.dump(lista_ventas, f, indent=4, ensure_ascii=False)
+    with open(archivo, 'w', encoding='utf-8') as f: json.dump(lista_ventas, f, indent=4, ensure_ascii=False)
 
 def recuperar_cache_ventas(usuario):
     archivo = obtener_nombre_cache(usuario)
     if os.path.exists(archivo):
-        with open(archivo, 'r', encoding='utf-8') as f:
-            return json.load(f)
+        with open(archivo, 'r', encoding='utf-8') as f: return json.load(f)
     return []
 
-BASE_CLIENTES = cargar_base_clientes()
+BASE_CLIENTES = cargar_db_diccionario(ARCHIVO_DB)
+BASE_CHOFERES = cargar_db_lista(ARCHIVO_CHOFERES)
+BASE_ENTIDADES = cargar_db_lista(ARCHIVO_ENTIDADES)
 
 st.set_page_config(page_title="BC Combustibles - Gestión Pro", page_icon="⛽", layout="wide")
 
@@ -86,8 +98,7 @@ cliente = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
 
 st.sidebar.markdown("<br>", unsafe_allow_html=True)
 ruta_logo = next((v for v in ["Logo.jpeg", "Logo.jpg", "logo.png"] if os.path.exists(v)), None)
-if ruta_logo:
-    st.sidebar.image(ruta_logo, use_container_width=True)
+if ruta_logo: st.sidebar.image(ruta_logo, use_container_width=True)
 
 # 🛑 CONTROL DE IDENTIDAD OBLIGATORIO 🛑
 st.sidebar.subheader("👤 Identificación")
@@ -115,6 +126,15 @@ st.sidebar.divider()
 cliente_reporte = st.sidebar.text_input("Nombre Excel Final:", placeholder="Ej: Resumen_Sucursal")
 st.sidebar.info(f"Sesión: {st.session_state.usuario_actual}\nExcel: {len(st.session_state.resumen_ventas)} filas\nEn cola IA: {len(st.session_state.cola_extracciones)}")
 
+# 🟢 BOTÓN DE LIMPIEZA DE BASES 🟢
+with st.sidebar.expander("🛠️ Mantenimiento"):
+    st.write("Si hay errores en el autocompletado, podés borrar la memoria.")
+    if st.button("🗑️ Limpiar TODAS las bases de memoria"):
+        for arch in [ARCHIVO_DB, ARCHIVO_CHOFERES, ARCHIVO_ENTIDADES]:
+            if os.path.exists(arch): os.remove(arch)
+        st.success("✅ Bases limpiadas correctamente.")
+        st.rerun()
+
 # ==========================================
 # 3. MÓDULO: VENTAS A CAMIONES
 # ==========================================
@@ -141,25 +161,34 @@ if opcion == "🚛 Ventas a Camiones":
             codigo_ia = limpiar_texto(datos_actuales.get('codigo_cliente', ''))
             nombre_ia = limpiar_texto(datos_actuales.get('razon_social', ''))
             v_fecha = limpiar_texto(datos_actuales.get('fecha', ''))
-            v_chofer = limpiar_texto(datos_actuales.get('chofer', ''))
+            v_chofer = limpiar_texto(datos_actuales.get('chofer', '')).upper()
             v_o_litros = limpiar_texto(datos_actuales.get('numero_orden_autorizacion', ''))
             v_efectivo = to_f(datos_actuales.get('efectivo', 0.0))
             v_o_efectivo = limpiar_texto(datos_actuales.get('orden_efectivo', ''))
             
+            # 🟢 AUTO-CORRECTOR DE CLIENTES 🟢
             nombre_sugerido = BASE_CLIENTES.get(codigo_ia, nombre_ia)
-            es_nuevo = bool(codigo_ia and codigo_ia not in BASE_CLIENTES)
+            es_nuevo_cli = bool(codigo_ia and codigo_ia not in BASE_CLIENTES)
 
+            # 🟢 AUTO-CORRECTOR DE CHOFERES 🟢
+            chofer_final = v_chofer
+            if v_chofer and BASE_CHOFERES:
+                coincidencias_c = difflib.get_close_matches(v_chofer, BASE_CHOFERES, n=1, cutoff=0.5)
+                if coincidencias_c: chofer_final = coincidencias_c[0]
+
+            # 🟢 AUTO-CORRECTOR DE ENTIDADES 🟢
             entidad_ia = limpiar_texto(datos_actuales.get('entidad_pagadora', '')).upper()
             entidad_final = entidad_ia
             if entidad_ia:
-                coincidencias = difflib.get_close_matches(entidad_ia, ENTIDADES_OFICIALES, n=1, cutoff=0.4)
-                if coincidencias: entidad_final = coincidencias[0]
+                lista_completa_entidades = ENTIDADES_OFICIALES + BASE_ENTIDADES
+                coincidencias_e = difflib.get_close_matches(entidad_ia, lista_completa_entidades, n=1, cutoff=0.4)
+                if coincidencias_e: entidad_final = coincidencias_e[0]
 
-            if es_nuevo: st.info("✨ ¡Atención! Código nuevo detectado.")
+            if es_nuevo_cli: st.info("✨ ¡Atención! Código de cliente nuevo detectado.")
 
             c1, c2, c3, c4 = st.columns([1.5, 2, 1, 3])
             fecha = c1.text_input("Fecha", v_fecha)
-            chofer = c2.text_input("Chofer", v_chofer)
+            chofer = c2.text_input("Chofer", chofer_final)
             codigo_final = c3.text_input("Cód. Cli.", codigo_ia)
             cliente_rs = c4.text_input("Cliente de Factura", nombre_sugerido)
             
@@ -183,13 +212,19 @@ if opcion == "🚛 Ventas a Camiones":
             if btn_guardar:
                 cod_l = codigo_final.strip().upper()
                 nom_l = cliente_rs.strip().upper()
+                chofer_l = chofer.strip().upper()
+                entidad_l = entidad.strip().upper()
+
+                # 🟢 GUARDADO EN MEMORIAS 🟢
                 if cod_l and (cod_l not in BASE_CLIENTES or BASE_CLIENTES[cod_l] != nom_l):
                     guardar_nuevo_cliente(cod_l, nom_l)
+                if chofer_l: guardar_nuevo_item(ARCHIVO_CHOFERES, chofer_l)
+                if entidad_l and entidad_l not in ENTIDADES_OFICIALES: guardar_nuevo_item(ARCHIVO_ENTIDADES, entidad_l)
 
                 registro = {
-                    "Fecha": fecha.strip(), "Chofer": chofer.strip().upper(), "Cliente": f"{cod_l} {nom_l}".strip(),
+                    "Fecha": fecha.strip(), "Chofer": chofer_l, "Cliente": f"{cod_l} {nom_l}".strip(),
                     "Litros": litros, "Importe": importe, "Factura": factura_nro.strip().upper(),
-                    "Entidad pagadora": entidad.strip().upper(), "Orden Litros": str(o_litros).strip().upper(),
+                    "Entidad pagadora": entidad_l, "Orden Litros": str(o_litros).strip().upper(),
                     "Efectivo": val_efectivo, "Orden Efectivo": str(o_efectivo).strip().upper()
                 }
                 st.session_state.resumen_ventas.append(registro)
@@ -236,22 +271,22 @@ if opcion == "🚛 Ventas a Camiones":
             
             if col_lote1.button("🚀 INICIAR ANÁLISIS DE LOTE COMPLETO"):
                 with st.spinner("La Inteligencia Artificial está leyendo todos los documentos... (Esto puede demorar unos minutos 🧉)"):
-                    # 🟢 ACÁ ESTÁ EL LAZO CORTO ARREGLADO PARA EL CLIENTE 🟢
+                    # 🟢 PROMPT BLINDADO PARA CHOFER Y VALORES NUMÉRICOS 🟢
                     prompt = """
                     Analizá la imagen adjunta. Extraé un JSON único con máxima precisión.
                     --- MAPA FACTURA ---
                     - 'fecha': Buscá la palabra "Hora:". A la izquierda está la Fecha impresa. Usá esta.
                     - 'nro_factura': Buscá "Nro." debajo del tipo de comprobante.
-                    - 'codigo_cliente': ATENCIÓN, NO ES EL CUIT. Es el número identificador CORTO (ej: 4079, 181804) que está al principio de la línea del nombre del cliente, justo DEBAJO del renglón del CUIT.
-                    - 'razon_social': El nombre completo del cliente (ej: ORTIZ GUSTAVO JULIO). Excluín el código numérico inicial de este campo. Solo dejá el nombre.
+                    - 'codigo_cliente': Es el número identificador CORTO (ej: 4079, 181804) que está al principio de la línea del nombre del cliente, justo DEBAJO del renglón del CUIT. NO ES EL CUIT.
+                    - 'razon_social': El nombre completo del cliente. Excluín el código numérico inicial de este campo.
                     - 'litros_factura': Número exacto a la izquierda de la 'x'. No inventes dígitos.
                     - 'importe': Valor a la derecha de "TOTAL".
-                    --- MAPA VALE ---
-                    - 'chofer': OBLIGATORIO extraer nombre manuscrito.
+                    --- MAPA VALE DE CARGA (EL PAPEL RECTANGULAR CON CASILLEROS) ---
+                    - 'chofer': Ignorá cualquier firma o nombre al pie de la factura blanca. Extraé ÚNICAMENTE lo que esté escrito a mano dentro de los casilleros correspondientes al renglón "CHOFER" en el vale de carga.
                     - 'entidad_pagadora': Extraé EXACTAMENTE lo escrito.
-                    - 'numero_orden_autorizacion': Número en casilla 'ORDEN' superior.
-                    - 'efectivo': Número manuscrito. Ignora líneas de diseño. Si hay raya de anulación total, devolvé 0.0.
-                    - 'orden_efectivo': Número en casilla 'ORDEN' inferior.
+                    - 'numero_orden_autorizacion': Es el número manuscrito ubicado ESPECÍFICAMENTE en el recuadro que dice "ORDEN" en la fila correspondiente a "LITROS". Si está tachado, dejalo vacío.
+                    - 'efectivo': Número manuscrito en la fila "EFECTIVO". Ignora líneas de diseño impresas. Si hay raya de anulación total que cruza todo el casillero, devolvé 0.0.
+                    - 'orden_efectivo': Es el número manuscrito ubicado ESPECÍFICAMENTE en el recuadro que dice "ORDEN" en la fila correspondiente a "EFECTIVO". Si está tachado, dejalo vacío.
                     Devolvé ÚNICAMENTE JSON puro. Usa punto para decimales.
                     """
                     for doc in st.session_state.lote_pendientes:
