@@ -71,47 +71,30 @@ BASE_ENTIDADES = cargar_db_lista(ARCHIVO_ENTIDADES)
 
 st.set_page_config(page_title="BC Combustibles - Gestión Pro", page_icon="⛽", layout="wide")
 
-# Estilos Visuales
 st.markdown(f"""
     <style>
         .stApp {{ background-color: white !important; }}
         h1, h2, h3 {{ color: {COLOR_ROJO} !important; font-family: 'Montserrat', sans-serif; }}
-        .stButton>button {{
-            background-color: {COLOR_ROJO}; color: white; border-radius: 12px; font-weight: bold; height: 3em; border: none; width: 100%;
-        }}
+        .stButton>button {{ background-color: {COLOR_ROJO}; color: white; border-radius: 12px; font-weight: bold; height: 3em; border: none; width: 100%; }}
         [data-testid="stSidebar"] {{ background-color: #f8f9fa; border-right: 1px solid #e0e0e0; }}
         .stDataFrame {{ border: 1px solid #e0e0e0; border-radius: 8px; }}
-        [data-testid="stSidebar"] .stTextInput div[data-baseweb="input"] {{
-            border: 2px solid {COLOR_ROJO} !important; border-radius: 8px !important; background-color: #ffffff !important;
-        }}
-        .alerta-ingreso {{
-            padding: 20px; border-radius: 15px; background-color: #fff3f3; border-left: 5px solid {COLOR_ROJO};
-            color: #721c24; font-weight: bold; text-align: center; font-size: 1.2em;
-        }}
+        [data-testid="stSidebar"] .stTextInput div[data-baseweb="input"] {{ border: 2px solid {COLOR_ROJO} !important; border-radius: 8px !important; background-color: #ffffff !important; }}
+        .alerta-ingreso {{ padding: 20px; border-radius: 15px; background-color: #fff3f3; border-left: 5px solid {COLOR_ROJO}; color: #721c24; font-weight: bold; text-align: center; font-size: 1.2em; }}
     </style>
 """, unsafe_allow_html=True)
 
-# ==========================================
-# 2. CONFIGURACIÓN Y ESTADO DE SESIÓN
-# ==========================================
 cliente = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
 
 st.sidebar.markdown("<br>", unsafe_allow_html=True)
 ruta_logo = next((v for v in ["Logo.jpeg", "Logo.jpg", "logo.png"] if os.path.exists(v)), None)
 if ruta_logo: st.sidebar.image(ruta_logo, use_container_width=True)
 
-# 🛑 CONTROL DE IDENTIDAD OBLIGATORIO 🛑
 st.sidebar.subheader("👤 Identificación")
 usuario_app = st.sidebar.text_input("Tu nombre para operar:", value="", placeholder="Ej: Nancy o Diego")
 
 if not usuario_app.strip():
     st.title("⛽ Sistema de Gestión BC Combustibles")
-    st.markdown("""
-        <div class="alerta-ingreso">
-            ⚠️ ACCESO RESTRINGIDO<br>
-            Ingresá tu nombre en el panel lateral para habilitar el sistema.
-        </div>
-    """, unsafe_allow_html=True)
+    st.markdown("""<div class="alerta-ingreso">⚠️ ACCESO RESTRINGIDO<br>Ingresá tu nombre en el panel lateral para habilitar el sistema.</div>""", unsafe_allow_html=True)
     st.stop()
 
 if 'lote_pendientes' not in st.session_state: st.session_state.lote_pendientes = []
@@ -126,29 +109,21 @@ st.sidebar.divider()
 cliente_reporte = st.sidebar.text_input("Nombre Excel Final:", placeholder="Ej: Resumen_Sucursal")
 st.sidebar.info(f"Sesión: {st.session_state.usuario_actual}\nExcel: {len(st.session_state.resumen_ventas)} filas\nEn cola IA: {len(st.session_state.cola_extracciones)}")
 
-# 🟢 BOTÓN DE LIMPIEZA DE BASES 🟢
 with st.sidebar.expander("🛠️ Mantenimiento"):
-    st.write("Si hay errores en el autocompletado, podés borrar la memoria.")
     if st.button("🗑️ Limpiar TODAS las bases de memoria"):
         for arch in [ARCHIVO_DB, ARCHIVO_CHOFERES, ARCHIVO_ENTIDADES]:
             if os.path.exists(arch): os.remove(arch)
-        st.success("✅ Bases limpiadas correctamente.")
+        st.success("✅ Bases limpiadas.")
         st.rerun()
 
-# ==========================================
-# 3. MÓDULO: VENTAS A CAMIONES
-# ==========================================
 if opcion == "🚛 Ventas a Camiones":
-    
-    # --- MODO REVISIÓN (CINTA TRANSPORTADORA) ---
     if len(st.session_state.cola_extracciones) > 0:
         st.title(f"🔄 Cinta Transportadora - {st.session_state.usuario_actual}")
         total_restantes = len(st.session_state.cola_extracciones)
         st.warning(f"Tienes {total_restantes} documento(s) esperando tu revisión.")
         
         datos_actuales = st.session_state.cola_extracciones[0]
-        origen_doc = datos_actuales.get('_origen', 'Documento desconocido')
-        st.subheader(f"📝 Revisando: {origen_doc}")
+        st.subheader(f"📝 Revisando: {datos_actuales.get('_origen', 'Documento desconocido')}")
 
         with st.form("validador_lote"):
             def limpiar_texto(v): return "" if str(v).strip().lower() in ["none", "null", ""] else str(v).strip()
@@ -166,17 +141,14 @@ if opcion == "🚛 Ventas a Camiones":
             v_efectivo = to_f(datos_actuales.get('efectivo', 0.0))
             v_o_efectivo = limpiar_texto(datos_actuales.get('orden_efectivo', ''))
             
-            # 🟢 AUTO-CORRECTOR DE CLIENTES 🟢
             nombre_sugerido = BASE_CLIENTES.get(codigo_ia, nombre_ia)
             es_nuevo_cli = bool(codigo_ia and codigo_ia not in BASE_CLIENTES)
 
-            # 🟢 AUTO-CORRECTOR DE CHOFERES 🟢
             chofer_final = v_chofer
             if v_chofer and BASE_CHOFERES:
                 coincidencias_c = difflib.get_close_matches(v_chofer, BASE_CHOFERES, n=1, cutoff=0.5)
                 if coincidencias_c: chofer_final = coincidencias_c[0]
 
-            # 🟢 AUTO-CORRECTOR DE ENTIDADES 🟢
             entidad_ia = limpiar_texto(datos_actuales.get('entidad_pagadora', '')).upper()
             entidad_final = entidad_ia
             if entidad_ia:
@@ -215,9 +187,7 @@ if opcion == "🚛 Ventas a Camiones":
                 chofer_l = chofer.strip().upper()
                 entidad_l = entidad.strip().upper()
 
-                # 🟢 GUARDADO EN MEMORIAS 🟢
-                if cod_l and (cod_l not in BASE_CLIENTES or BASE_CLIENTES[cod_l] != nom_l):
-                    guardar_nuevo_cliente(cod_l, nom_l)
+                if cod_l and (cod_l not in BASE_CLIENTES or BASE_CLIENTES[cod_l] != nom_l): guardar_nuevo_cliente(cod_l, nom_l)
                 if chofer_l: guardar_nuevo_item(ARCHIVO_CHOFERES, chofer_l)
                 if entidad_l and entidad_l not in ENTIDADES_OFICIALES: guardar_nuevo_item(ARCHIVO_ENTIDADES, entidad_l)
 
@@ -236,7 +206,6 @@ if opcion == "🚛 Ventas a Camiones":
                 st.session_state.cola_extracciones.pop(0)
                 st.rerun()
 
-    # --- MODO RECOLECCIÓN (CÁMARA / SUBIDA) ---
     else:
         st.title(f"🚛 Registro de Cargas - {st.session_state.usuario_actual}")
         st.subheader("📸 Paso 1: Recolectar Documentos")
@@ -244,49 +213,46 @@ if opcion == "🚛 Ventas a Camiones":
         tab1, tab2 = st.tabs(["📁 Subir Archivos (PC)", "📸 Cámara en Vivo"])
         
         with tab1:
-            st.info("💡 Método más rápido: Crea una carpeta, copiá ahí todas las fotos del celular, y seleccionalas todas juntas acá.")
             fotos_disco = st.file_uploader("Seleccionar comprobantes", type=["pdf","jpg","png","jpeg"], accept_multiple_files=True)
             if fotos_disco:
                 if st.button("➕ Sumar archivos a la Pila"):
-                    for f in fotos_disco:
-                        st.session_state.lote_pendientes.append({'nombre': f.name, 'data': f.getvalue(), 'tipo': f.type})
+                    for f in fotos_disco: st.session_state.lote_pendientes.append({'nombre': f.name, 'data': f.getvalue(), 'tipo': f.type})
                     st.success(f"✅ Se sumaron los archivos. Ya tenés {len(st.session_state.lote_pendientes)} comprobantes en la pila.")
 
         with tab2:
-            st.info("💡 Cámara Web / Enlace Móvil: Capturá de a una.")
             foto_camara = st.camera_input("Enfocar documento")
             if foto_camara:
                 if st.button("➕ Sumar captura a la Pila"):
-                    st.session_state.lote_pendientes.append({
-                        'nombre': f"Captura_Camara_{len(st.session_state.lote_pendientes)+1}.jpg",
-                        'data': foto_camara.getvalue(), 'tipo': foto_camara.type
-                    })
-                    st.success(f"✅ ¡Agregado! Ya tenés {len(st.session_state.lote_pendientes)} comprobantes en la pila.")
+                    st.session_state.lote_pendientes.append({'nombre': f"Captura_{len(st.session_state.lote_pendientes)+1}.jpg", 'data': foto_camara.getvalue(), 'tipo': foto_camara.type})
+                    st.success(f"✅ ¡Agregado! Pila: {len(st.session_state.lote_pendientes)}")
         
         st.divider()
         st.subheader("📦 Pila de Trabajo")
         if st.session_state.lote_pendientes:
-            st.write(f"Hay **{len(st.session_state.lote_pendientes)}** documentos listos para ser analizados por la IA.")
             col_lote1, col_lote2 = st.columns([3, 1])
             
             if col_lote1.button("🚀 INICIAR ANÁLISIS DE LOTE COMPLETO"):
-                with st.spinner("La Inteligencia Artificial está leyendo todos los documentos... (Esto puede demorar unos minutos 🧉)"):
-                    # 🟢 PROMPT BLINDADO PARA CHOFER Y VALORES NUMÉRICOS 🟢
+                with st.spinner("La Inteligencia Artificial está leyendo..."):
+                    # 🟢 PROMPT BLINDADO: ANCLAJE SEMÁNTICO Y ANTI-LÍNEAS 🟢
                     prompt = """
-                    Analizá la imagen adjunta. Extraé un JSON único con máxima precisión.
-                    --- MAPA FACTURA ---
-                    - 'fecha': Buscá la palabra "Hora:". A la izquierda está la Fecha impresa. Usá esta.
+                    Analizá la imagen adjunta. Hay DOS comprobantes en la foto: un ticket largo (Factura) y un papel con casilleros (Vale de Carga). Extraé un JSON único.
+                    
+                    --- MAPA FACTURA (Ticket largo impreso) ---
+                    - 'fecha': Fecha impresa junto a "Hora:".
                     - 'nro_factura': Buscá "Nro." debajo del tipo de comprobante.
-                    - 'codigo_cliente': Es el número identificador CORTO (ej: 4079, 181804) que está al principio de la línea del nombre del cliente, justo DEBAJO del renglón del CUIT. NO ES EL CUIT.
-                    - 'razon_social': El nombre completo del cliente. Excluín el código numérico inicial de este campo.
-                    - 'litros_factura': Número exacto a la izquierda de la 'x'. No inventes dígitos.
+                    - 'codigo_cliente': Número CORTO al inicio del nombre del cliente (ej: 4079).
+                    - 'razon_social': Nombre del cliente (sin el código).
+                    - 'litros_factura': Número exacto a la izquierda de la 'x'.
                     - 'importe': Valor a la derecha de "TOTAL".
-                    --- MAPA VALE DE CARGA (EL PAPEL RECTANGULAR CON CASILLEROS) ---
-                    - 'chofer': Ignorá cualquier firma o nombre al pie de la factura blanca. Extraé ÚNICAMENTE lo que esté escrito a mano dentro de los casilleros correspondientes al renglón "CHOFER" en el vale de carga.
-                    - 'entidad_pagadora': Extraé EXACTAMENTE lo escrito.
-                    - 'numero_orden_autorizacion': Es el número manuscrito ubicado ESPECÍFICAMENTE en el recuadro que dice "ORDEN" en la fila correspondiente a "LITROS". Si está tachado, dejalo vacío.
-                    - 'efectivo': Número manuscrito en la fila "EFECTIVO". Ignora líneas de diseño impresas. Si hay raya de anulación total que cruza todo el casillero, devolvé 0.0.
-                    - 'orden_efectivo': Es el número manuscrito ubicado ESPECÍFICAMENTE en el recuadro que dice "ORDEN" en la fila correspondiente a "EFECTIVO". Si está tachado, dejalo vacío.
+                    
+                    --- MAPA VALE DE CARGA (Papel pequeño con casilleros) ---
+                    ATENCIÓN: Buscá en la foto el papel que tiene escrito "VALE DE CARGA". Leé EXCLUSIVAMENTE los datos escritos a mano dentro de ese papel. Prohibido sacar el nombre de firmas en el ticket blanco.
+                    - 'chofer': Extraé el nombre escrito en los casilleros del renglón "CHOFER".
+                    - 'entidad_pagadora': Texto en el renglón "ENTIDAD PAGADORA".
+                    - 'numero_orden_autorizacion': Número en la casilla "ORDEN" superior.
+                    - 'efectivo': Mirá el renglón "EFECTIVO". Hay números (ej: 60000) que cruzan las líneas verticales del diseño de la grilla. LAS LÍNEAS IMPRESAS DEL PAPEL NO SON TACHADURAS. Extraé el número exacto. Solo poné 0.0 si la cajita de efectivo está completamente vacía.
+                    - 'orden_efectivo': Número en la casilla "ORDEN" inferior.
+                    
                     Devolvé ÚNICAMENTE JSON puro. Usa punto para decimales.
                     """
                     for doc in st.session_state.lote_pendientes:
@@ -313,10 +279,7 @@ if opcion == "🚛 Ventas a Camiones":
             if col_lote2.button("🗑️ Vaciar Pila"):
                 st.session_state.lote_pendientes = []
                 st.rerun()
-        else:
-            st.write("La pila está vacía. Empezá a capturar o subir archivos arriba.")
 
-    # --- TABLA Y EXPORTACIÓN ---
     if st.session_state.resumen_ventas:
         st.divider()
         df = pd.DataFrame(st.session_state.resumen_ventas)
