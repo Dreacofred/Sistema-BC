@@ -101,20 +101,40 @@ st.sidebar.markdown("<br>", unsafe_allow_html=True)
 ruta_logo = next((v for v in ["Logo.jpeg", "Logo.jpg", "logo.png"] if os.path.exists(v)), None)
 if ruta_logo: st.sidebar.image(ruta_logo, use_container_width=True)
 
+# ==========================================
+# 2. IDENTIFICACIÓN (Lógica unificada)
+# ==========================================
 st.sidebar.subheader("👤 Identificación")
-usuario_app = st.sidebar.text_input("Tu nombre para operar:", value="", placeholder="Ej: Nancy o Diego")
 
-if not usuario_app.strip():
+# Inicializar la variable en la sesión si no existe
+if 'usuario_actual' not in st.session_state:
+    st.session_state.usuario_actual = ""
+
+# El valor predeterminado de la caja ahora viene de la memoria de la sesión
+usuario_app = st.sidebar.text_input(
+    "Tu nombre para operar:", 
+    value=st.session_state.usuario_actual, 
+    placeholder="Ej: Nancy, Diego o Tomas"
+)
+
+# Si el usuario escribe algo nuevo, actualizamos la memoria y cargamos sus datos
+if usuario_app != st.session_state.usuario_actual:
+    st.session_state.usuario_actual = usuario_app
+    st.session_state.resumen_ventas = recuperar_cache_ventas(usuario_app)
+
+# Si no hay nadie identificado, bloqueamos la pantalla
+if not st.session_state.usuario_actual.strip():
     st.title("⛽ Sistema de Gestión BC Combustibles")
     st.markdown("""<div class="alerta-ingreso">⚠️ ACCESO RESTRINGIDO<br>Ingresá tu nombre en el panel lateral para habilitar el sistema.</div>""", unsafe_allow_html=True)
     st.stop()
 
+# Si llegamos acá, es porque hay un usuario activo
+st.sidebar.info(f"Operador activo: {st.session_state.usuario_actual}")
+
+# Inicializar otros estados si no existen
 if 'lote_pendientes' not in st.session_state: st.session_state.lote_pendientes = []
 if 'cola_extracciones' not in st.session_state: st.session_state.cola_extracciones = []
-
-if 'usuario_actual' not in st.session_state or st.session_state.usuario_actual != usuario_app:
-    st.session_state.usuario_actual = usuario_app
-    st.session_state.resumen_ventas = recuperar_cache_ventas(usuario_app)
+if 'resumen_ventas' not in st.session_state: st.session_state.resumen_ventas = []
 
 opcion = st.sidebar.radio("Seleccioná la tarea:", ["🚛 Ventas a Camiones", "📄 Facturas de Proveedores"])
 st.sidebar.divider()
