@@ -36,15 +36,24 @@ ruta_logo = next((v for v in ["Logo.jpeg", "Logo.jpg", "logo.png", "../Logo.jpeg
 if ruta_logo: st.sidebar.image(ruta_logo, use_container_width=True)
 
 st.sidebar.subheader("👤 Identificación")
-usuario_app = st.sidebar.text_input("Tu nombre para operar:", value="", placeholder="Ej: Nancy o Diego")
 
-if not usuario_app.strip():
+# --- MEMORIA COMPARTIDA ---
+if 'usuario_actual' not in st.session_state:
+    st.session_state.usuario_actual = ""
+
+usuario_app = st.sidebar.text_input(
+    "Tu nombre para operar:", 
+    value=st.session_state.usuario_actual, 
+    placeholder="Ej: Nancy, Diego o Tomas"
+)
+
+if usuario_app != st.session_state.usuario_actual:
+    st.session_state.usuario_actual = usuario_app
+
+if not st.session_state.usuario_actual.strip():
     st.title("💳 Módulo de Lectura de Cheques")
     st.markdown("""<div class="alerta-ingreso">⚠️ ACCESO RESTRINGIDO<br>Ingresá tu nombre en el panel lateral para habilitar el sistema.</div>""", unsafe_allow_html=True)
     st.stop()
-
-if 'usuario_actual' not in st.session_state or st.session_state.usuario_actual != usuario_app:
-    st.session_state.usuario_actual = usuario_app
 
 st.sidebar.info(f"Operador activo: {st.session_state.usuario_actual}")
 
