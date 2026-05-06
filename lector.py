@@ -7,7 +7,7 @@ import json
 import os
 import io
 import difflib
-import time # 🟢 Nuevo: para manejar los descansos entre fotos
+import time
 from datetime import datetime
 
 # Herramientas de diseño para el Excel
@@ -120,9 +120,6 @@ opcion = st.sidebar.radio("Seleccioná la tarea:", ["🚛 Ventas a Camiones", "�
 st.sidebar.divider()
 cliente_reporte = st.sidebar.text_input("Nombre Excel Final:", placeholder="Ej: Resumen_Sucursal")
 
-# ==========================================
-# 3. MÓDULO: VENTAS A CAMIONES
-# ==========================================
 if opcion == "🚛 Ventas a Camiones":
     if len(st.session_state.cola_extracciones) > 0:
         st.title(f"🔄 Cinta Transportadora - {st.session_state.usuario_actual}")
@@ -150,7 +147,6 @@ if opcion == "🚛 Ventas a Camiones":
             
             nombre_sugerido = BASE_CLIENTES.get(codigo_ia, nombre_ia)
             es_nuevo_cli = bool(codigo_ia and codigo_ia not in BASE_CLIENTES)
-
             chofer_final = v_chofer
             if v_chofer and BASE_CHOFERES:
                 coincidencias_c = difflib.get_close_matches(v_chofer, BASE_CHOFERES, n=1, cutoff=0.5)
@@ -162,36 +158,24 @@ if opcion == "🚛 Ventas a Camiones":
                 coincidencias_e = difflib.get_close_matches(entidad_ia, ENTIDADES_OFICIALES, n=1, cutoff=0.4)
                 if coincidencias_e: entidad_final = coincidencias_e[0]
 
-            es_novedad_chofer = bool(chofer_final and chofer_final not in BASE_CHOFERES)
-
             if es_nuevo_cli: st.info("✨ ¡Atención! Código de cliente nuevo detectado.")
-            if es_novedad_chofer:
-                st.markdown(f"""<div class="bloque-alerta">⚠️ ATENCIÓN {st.session_state.usuario_actual.upper()}:<br>El chofer en pantalla no figura en la memoria del sistema. Revisá que esté bien escrito.</div>""", unsafe_allow_html=True)
+            if chofer_final and chofer_final not in BASE_CHOFERES:
+                st.markdown(f"""<div class="bloque-alerta">⚠️ ATENCIÓN {st.session_state.usuario_actual.upper()}:<br>El chofer en pantalla no figura en la memoria. Revisá que esté bien escrito.</div>""", unsafe_allow_html=True)
 
             c1, c2, c3, c4 = st.columns([1.5, 2, 1, 3])
-            fecha = c1.text_input("Fecha", v_fecha)
-            chofer = c2.text_input("Chofer", chofer_final)
-            codigo_final = c3.text_input("Cód. Cli.", codigo_ia)
-            cliente_rs = c4.text_input("Cliente de Factura", nombre_sugerido)
+            fecha, chofer, codigo_final, cliente_rs = c1.text_input("Fecha", v_fecha), c2.text_input("Chofer", chofer_final), c3.text_input("Cód. Cli.", codigo_ia), c4.text_input("Cliente de Factura", nombre_sugerido)
             
             c5, c6, c7 = st.columns(3)
-            litros = c5.number_input("Litros", value=to_f(datos_actuales.get('litros_factura', 0.0)), format="%.4f")
-            importe = c6.number_input("Importe", value=to_f(datos_actuales.get('importe', 0.0)))
-            factura_nro = c7.text_input("Factura Nº", limpiar_texto(datos_actuales.get('nro_factura', '')))
+            litros, importe, factura_nro = c5.number_input("Litros", value=to_f(datos_actuales.get('litros_factura', 0.0)), format="%.4f"), c6.number_input("Importe", value=to_f(datos_actuales.get('importe', 0.0))), c7.text_input("Factura Nº", limpiar_texto(datos_actuales.get('nro_factura', '')))
             entidad = st.text_input("Entidad pagadora", entidad_final)
             
             with st.expander("Órdenes y Efectivo", expanded=True):
                 ca1, ca2, ca3 = st.columns(3)
-                o_litros = ca1.text_input("Orden Litros", v_o_litros)
-                val_efectivo = ca2.number_input("Efectivo", value=v_efectivo)
-                o_efectivo = ca3.text_input("Orden Efectivo", v_o_efectivo)
+                o_litros, val_efectivo, o_efectivo = ca1.text_input("Orden Litros", v_o_litros), ca2.number_input("Efectivo", value=v_efectivo), ca3.text_input("Orden Efectivo", v_o_efectivo)
 
             st.markdown("<br>", unsafe_allow_html=True)
             col_b1, col_b2 = st.columns(2)
-            btn_guardar = col_b1.form_submit_button("✅ GUARDAR Y VER SIGUIENTE")
-            btn_descartar = col_b2.form_submit_button("🗑️ DESCARTAR (Mala foto/Error)")
-
-            if btn_guardar:
+            if col_b1.form_submit_button("✅ GUARDAR Y VER SIGUIENTE"):
                 cod_l, nom_l, chofer_l, entidad_l = codigo_final.strip().upper(), cliente_rs.strip().upper(), chofer.strip().upper(), entidad.strip().upper()
                 if cod_l and (cod_l not in BASE_CLIENTES or BASE_CLIENTES[cod_l] != nom_l): guardar_nuevo_cliente(cod_l, nom_l)
                 if chofer_l: guardar_nuevo_item(ARCHIVO_CHOFERES, chofer_l)
@@ -201,73 +185,55 @@ if opcion == "🚛 Ventas a Camiones":
                 st.session_state.cola_extracciones.pop(0) 
                 st.rerun()
             
-            if btn_descartar:
+            if col_b2.form_submit_button("🗑️ DESCARTAR"):
                 st.session_state.cola_extracciones.pop(0)
                 st.rerun()
 
     else:
         st.title(f"🚛 Registro de Cargas - {st.session_state.usuario_actual}")
         st.subheader("📸 Paso 1: Recolectar Documentos")
-        
-        tab1, tab2 = st.tabs(["📁 Subir Archivos (PC)", "📸 Cámara en Vivo"])
+        tab1, tab2 = st.tabs(["📁 Subir Archivos", "📸 Cámara"])
         with tab1:
             fotos_disco = st.file_uploader("Seleccionar comprobantes", type=["pdf","jpg","png","jpeg"], accept_multiple_files=True)
-            if fotos_disco:
-                if st.button("➕ Sumar archivos a la Pila"):
-                    for f in fotos_disco: st.session_state.lote_pendientes.append({'nombre': f.name, 'data': f.getvalue(), 'tipo': f.type})
-                    st.success(f"✅ Se sumaron los archivos. Ya tenés {len(st.session_state.lote_pendientes)} comprobantes en la pila.")
+            if fotos_disco and st.button("➕ Sumar archivos a la Pila"):
+                for f in fotos_disco: st.session_state.lote_pendientes.append({'nombre': f.name, 'data': f.getvalue(), 'tipo': f.type})
+                st.success(f"✅ Se sumaron {len(fotos_disco)} archivos.")
 
         with tab2:
             foto_camara = st.camera_input("Enfocar documento")
-            if foto_camara:
-                if st.button("➕ Sumar captura a la Pila"):
-                    st.session_state.lote_pendientes.append({'nombre': f"Captura_{len(st.session_state.lote_pendientes)+1}.jpg", 'data': foto_camara.getvalue(), 'tipo': foto_camara.type})
-                    st.success(f"✅ ¡Agregado!")
+            if foto_camara and st.button("➕ Sumar captura a la Pila"):
+                st.session_state.lote_pendientes.append({'nombre': f"Captura_{len(st.session_state.lote_pendientes)+1}.jpg", 'data': foto_camara.getvalue(), 'tipo': foto_camara.type})
+                st.success("✅ ¡Agregado!")
         
         st.divider()
         if st.session_state.lote_pendientes:
             st.subheader(f"📦 Pila de Trabajo ({len(st.session_state.lote_pendientes)} archivos)")
             if st.button("🚀 INICIAR ANÁLISIS DE LOTE COMPLETO"):
-                barra_progreso = st.progress(0)
-                status_text = st.empty()
-                
+                barra_progreso, status_text = st.progress(0), st.empty()
                 for i, doc in enumerate(st.session_state.lote_pendientes):
-                    status_text.text(f"Analizando {doc['nombre']} ({i+1}/{len(st.session_state.lote_pendientes)})...")
-                    
-                    # 🟢 LÓGICA DE REINTENTO (Versión 7.8) 🟢
-                    exito = False
-                    intentos = 3
+                    status_text.text(f"Analizando {doc['nombre']}...")
+                    exito, intentos = False, 3
                     while intentos > 0 and not exito:
                         try:
-                            # Prompt con anclaje semántico
                             prompt = "Analizá la imagen. Extraé JSON con: fecha, nro_factura, codigo_cliente (corto, no CUIT), razon_social, litros_factura, importe. Del VALE DE CARGA extraé: chofer (de los casilleros), entidad_pagadora, numero_orden_autorizacion, efectivo (ignorá líneas de diseño), orden_efectivo. Solo JSON puro."
-                            
-                            img_ia = Image.open(io.BytesIO(doc['data']))
-                            res = cliente_ia.models.generate_content(model='gemini-2.5-pro', contents=[prompt, img_ia])
+                            res = cliente_ia.models.generate_content(model='gemini-2.5-pro', contents=[prompt, Image.open(io.BytesIO(doc['data']))])
                             raw_text = res.text.strip().replace('```json', '').replace('```', '')
                             start, end = raw_text.find('{'), raw_text.rfind('}') + 1
                             datos_extraidos = json.loads(raw_text[start:end])
                             datos_extraidos['_origen'] = doc['nombre']
                             st.session_state.cola_extracciones.append(datos_extraidos)
                             exito = True
-                        except Exception as e:
+                        except:
                             intentos -= 1
-                            if intentos > 0:
-                                time.sleep(2) # Esperamos 2 seg para no saturar
-                            else:
-                                st.session_state.cola_extracciones.append({'_origen': f"⚠️ ERROR en {doc['nombre']}: {str(e)[:50]}"})
-                    
+                            time.sleep(2)
+                    if not exito: st.session_state.cola_extracciones.append({'_origen': f"⚠️ Error en {doc['nombre']}"})
                     barra_progreso.progress((i + 1) / len(st.session_state.lote_pendientes))
-                    time.sleep(1) # Pequeño respiro entre archivos
-                
                 st.session_state.lote_pendientes = [] 
                 st.rerun() 
-            
             if st.button("🗑️ Vaciar Pila"):
                 st.session_state.lote_pendientes = []
                 st.rerun()
 
-    # -- TABLA FINAL --
     if st.session_state.resumen_ventas:
         st.divider()
         df = pd.DataFrame(st.session_state.resumen_ventas)
@@ -281,13 +247,20 @@ if opcion == "🚛 Ventas a Camiones":
             ws = writer.sheets['Ventas']
             for i, col in enumerate(df.columns): ws.column_dimensions[get_column_letter(i + 1)].width = 20
         
-        col_ex1.download_button(label="📥 Descargar Excel", data=buffer.getvalue(), file_name=f"Resumen_{datetime.now().strftime('%d-%m-%Y')}.xlsx", use_container_width=True)
-        if col_ex2.button("🗑️ Vaciar Planilla Final", use_container_width=True):
+        # 🟢 AUTO-RESET: Al hacer clic, se limpia todo automáticamente 🟢
+        if col_ex1.download_button(label="📥 Descargar Excel y Reiniciar", data=buffer.getvalue(), file_name=f"Resumen_{datetime.now().strftime('%d-%m-%Y')}.xlsx", use_container_width=True):
+            st.session_state.resumen_ventas = []
+            st.session_state.cola_extracciones = []
+            st.session_state.lote_pendientes = []
+            archivo_usuario = obtener_nombre_cache(st.session_state.usuario_actual)
+            if os.path.exists(archivo_usuario): os.remove(archivo_usuario)
+            st.rerun()
+
+        if col_ex2.button("🗑️ Vaciar sin descargar", use_container_width=True):
             st.session_state.resumen_ventas = []
             if os.path.exists(obtener_nombre_cache(st.session_state.usuario_actual)): os.remove(obtener_nombre_cache(st.session_state.usuario_actual))
             st.rerun()
 
-# --- MANTENIMIENTO EN EL SIDEBAR ---
 with st.sidebar.expander("🛠️ Mantenimiento"):
     if st.button("🗑️ Limpiar Memoria (Choferes/Clientes)"):
         for arch in [ARCHIVO_DB, ARCHIVO_CHOFERES]:
