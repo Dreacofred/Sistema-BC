@@ -1,4 +1,5 @@
 # Archivo: pages/Cheques.py
+# INICIO DEL CÓDIGO
 import streamlit as st
 from google import genai
 from PIL import Image
@@ -77,18 +78,18 @@ with col_ingreso:
                     REGLAS DE EXTRACCIÓN:
                     1. EMISOR: Es la razón social impresa (ej: "DANKO MADERAS SRL"). Está a la izquierda del cheque. IGNORA LOS SELLOS DE GOMA SOBRE LAS FIRMAS.
                     2. CUIT: El número de CUIT del emisor impreso a la izquierda.
-                    3. BANDA NUMÉRICA (ARRIBA O ABAJO): Buscá el trío de números que identifica al banco. 
-                       - El primero es el CÓDIGO DE BANCO (ej: 386).
-                       - El segundo es la SUCURSAL (ej: 137).
-                       - El tercero es la PLAZA (ej: 3200).
+                    3. BANDA NUMÉRICA (ARRIBA O ABAJO): Buscá los números que identifican al banco y la plaza. 
+                       - El CÓDIGO DE BANCO es el primer número de esa secuencia (ej: 386).
+                       - La PLAZA es el tercer número de esa secuencia (ej: 3200). 
+                       - IGNORA la sucursal (el número del medio).
                     4. FECHAS: 
                        - Fecha_Emision: La fecha en la que se hizo el cheque (ej: Concordia, 11 de Abril).
                        - Fecha_Pago: La fecha de cobro diferido ("Páguese el..."). ES LA MÁS IMPORTANTE.
+                    5. IMPORTE (¡MUY IMPORTANTE!): En Argentina el punto (.) separa los miles. Si lees "500.000", significa quinientos mil. Debes devolver el número entero sin formato, es decir: 500000. Si tiene centavos, usa punto (ej: 500000.50). NUNCA confundas un separador de miles con un decimal.
                     
                     Devolvé ÚNICAMENTE un objeto JSON con esta estructura:
                     {
                         "Banco_Cod": "3 dígitos",
-                        "Sucursal_Cod": "3 o 4 dígitos",
                         "Plaza": "4 dígitos (ej: 3200)",
                         "Banco_Nombre": "Nombre del banco",
                         "Numero_Cheque": "Número serie",
@@ -127,23 +128,18 @@ with col_cinta:
     if len(st.session_state.cheques_procesados) > 0:
         df_cheques = pd.DataFrame(st.session_state.cheques_procesados)
         
-        # Editor de datos para corrección manual
+        # Editor de datos SIN filas extra (num_rows="fixed")
         df_editado = st.data_editor(
             df_cheques, 
-            num_rows="dynamic",
+            num_rows="fixed",
             use_container_width=True,
             hide_index=True
         )
         
-        # Limpieza de filas fantasma
-        df_limpio = df_editado.dropna(subset=['Numero_Cheque'])
-        if 'Numero_Cheque' in df_limpio.columns:
-            df_limpio = df_limpio[df_limpio['Numero_Cheque'].astype(str).str.strip() != '']
-        
-        st.session_state.cheques_procesados = df_limpio.to_dict('records')
+        st.session_state.cheques_procesados = df_editado.to_dict('records')
         
         st.markdown("---")
-        total_cheques = pd.to_numeric(df_limpio['Importe'], errors='coerce').sum()
+        total_cheques = pd.to_numeric(df_editado['Importe'], errors='coerce').sum()
         st.info(f"**Total acumulado en cinta:** ${total_cheques:,.2f}")
         
         col_btn1, col_btn2 = st.columns(2)
@@ -159,3 +155,4 @@ with col_cinta:
                 st.rerun()
     else:
         st.info("No hay cheques en la cinta.")
+# ### FIN DEL CÓDIGO ###
