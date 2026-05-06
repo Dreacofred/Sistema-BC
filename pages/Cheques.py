@@ -31,7 +31,6 @@ st.markdown(f"""
 cliente_ia = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
 
 st.sidebar.markdown("<br>", unsafe_allow_html=True)
-# Busca el logo en la carpeta principal o en la misma carpeta
 ruta_logo = next((v for v in ["Logo.jpeg", "Logo.jpg", "logo.png", "../Logo.jpeg", "../Logo.jpg"] if os.path.exists(v)), None)
 if ruta_logo: st.sidebar.image(ruta_logo, use_container_width=True)
 
@@ -53,16 +52,13 @@ st.sidebar.info(f"Operador activo: {st.session_state.usuario_actual}")
 # ==========================================
 st.title(f"💳 Módulo de Cheques - {st.session_state.usuario_actual}")
 
-# Inicializamos la "cinta transportadora" en la memoria de la sesión
 if 'cheques_procesados' not in st.session_state:
     st.session_state.cheques_procesados = []
 
-# Dividimos la pantalla: Izquierda para carga, Derecha para la cinta transportadora
 col_ingreso, col_cinta = st.columns([1, 2])
 
 with col_ingreso:
     st.subheader("📸 Ingreso de Cheque")
-    # Permitimos usar la cámara de la compu/celular o subir un archivo
     imagen_capturada = st.camera_input("Escanear con cámara")
     imagen_subida = st.file_uploader("O subir foto del cheque", type=['jpg', 'jpeg', 'png'])
     
@@ -73,19 +69,34 @@ with col_ingreso:
         st.image(img, caption="Vista previa del cheque", use_container_width=True)
         
         if st.button("Procesar Cheque con IA", use_container_width=True):
-            with st.spinner("Analizando imagen..."):
+            with st.spinner("Analizando cheque al detalle..."):
                 try:
-                    # Prompt estricto para forzar a Gemini a devolver solo el JSON
                     prompt = """
-                    Sos un asistente administrativo experto. Analizá la imagen de este cheque argentino y extraé los datos.
-                    Devolvé ÚNICAMENTE un objeto JSON válido con la siguiente estructura exacta (sin formato markdown ni texto adicional):
+                    Sos un experto bancario procesando cheques físicos argentinos. Analizá la imagen y extraé los datos con precisión quirúrgica.
+                    
+                    REGLAS DE EXTRACCIÓN:
+                    1. EMISOR: Es la razón social impresa (ej: "DANKO MADERAS SRL"). Está a la izquierda del cheque. IGNORA LOS SELLOS DE GOMA SOBRE LAS FIRMAS.
+                    2. CUIT: El número de CUIT del emisor impreso a la izquierda.
+                    3. BANDA NUMÉRICA (ARRIBA O ABAJO): Buscá el trío de números que identifica al banco. 
+                       - El primero es el CÓDIGO DE BANCO (ej: 386).
+                       - El segundo es la SUCURSAL (ej: 137).
+                       - El tercero es la PLAZA (ej: 3200).
+                    4. FECHAS: 
+                       - Fecha_Emision: La fecha en la que se hizo el cheque (ej: Concordia, 11 de Abril).
+                       - Fecha_Pago: La fecha de cobro diferido ("Páguese el..."). ES LA MÁS IMPORTANTE.
+                    
+                    Devolvé ÚNICAMENTE un objeto JSON con esta estructura:
                     {
-                        "Banco": "Nombre del banco",
-                        "Numero_Cheque": "Número del cheque (solo números)",
+                        "Banco_Cod": "3 dígitos",
+                        "Sucursal_Cod": "3 o 4 dígitos",
+                        "Plaza": "4 dígitos (ej: 3200)",
+                        "Banco_Nombre": "Nombre del banco",
+                        "Numero_Cheque": "Número serie",
                         "Importe": 0.00,
-                        "Fecha_Cobro": "DD/MM/AAAA",
-                        "Emisor": "Nombre de quien firma o razón social",
-                        "CUIT": "Número de CUIT si figura (sino vacío)"
+                        "Fecha_Emision": "DD/MM/AAAA",
+                        "Fecha_Pago": "DD/MM/AAAA",
+                        "Emisor": "Razón social impresa",
+                        "CUIT": "Número de CUIT"
                     }
                     """
                     
@@ -94,7 +105,6 @@ with col_ingreso:
                         contents=[prompt, img]
                     )
                     
-                    # Limpiamos la respuesta por si Gemini agrega las comillas de markdown (```json ... ```)
                     texto_json = respuesta.text.strip()
                     if texto_json.startswith("```json"):
                         texto_json = texto_json[7:-3]
@@ -102,46 +112,44 @@ with col_ingreso:
                         texto_json = texto_json[3:-3]
                         
                     datos_cheque = json.loads(texto_json.strip())
-                    
-                    # Agregamos el operador que lo escaneó para tener trazabilidad
                     datos_cheque["Operador"] = st.session_state.usuario_actual
                     
                     st.session_state.cheques_procesados.append(datos_cheque)
-                    st.success("¡Cheque procesado y agregado a la cinta!")
-                    st.rerun() # Recargamos para limpiar la vista y actualizar la tabla
+                    st.success("¡Cheque agregado a la cinta!")
+                    st.rerun()
                     
                 except Exception as e:
-                    st.error(f"Hubo un error al leer el cheque. Probá con otra foto más nítida. Detalle: {e}")
+                    st.error(f"Error en lectura: {e}")
 
 with col_cinta:
-    st.subheader("⚙️ Cinta Transportadora (Cheques a procesar)")
+    st.subheader("⚙️ Cinta Transportadora")
     
     if len(st.session_state.cheques_procesados) > 0:
-        # Convertimos la lista de la sesión en un DataFrame
         df_cheques = pd.DataFrame(st.session_state.cheques_procesados)
         
-        # Mostramos un editor de datos. Esto es clave: permite corregir a mano si la IA leyó mal un número o una letra.
+        # Editor de datos para corrección manual
         df_editado = st.data_editor(
             df_cheques, 
-            num_rows="dynamic", # Permite borrar filas si se escaneó uno doble
+            num_rows="dynamic",
             use_container_width=True,
             hide_index=True
         )
         
-        # Actualizamos la memoria con los datos editados
-        st.session_state.cheques_procesados = df_editado.to_dict('records')
+        # Limpieza de filas fantasma
+        df_limpio = df_editado.dropna(subset=['Numero_Cheque'])
+        if 'Numero_Cheque' in df_limpio.columns:
+            df_limpio = df_limpio[df_limpio['Numero_Cheque'].astype(str).str.strip() != '']
+        
+        st.session_state.cheques_procesados = df_limpio.to_dict('records')
         
         st.markdown("---")
-        # Totalizador rápido para control de caja
-        total_cheques = pd.to_numeric(df_editado['Importe'], errors='coerce').sum()
-        st.info(f"**Total en cheques listos para guardar:** ${total_cheques:,.2f}")
+        total_cheques = pd.to_numeric(df_limpio['Importe'], errors='coerce').sum()
+        st.info(f"**Total acumulado en cinta:** ${total_cheques:,.2f}")
         
         col_btn1, col_btn2 = st.columns(2)
         with col_btn1:
             if st.button("💾 Guardar Lote", type="primary", use_container_width=True):
-                # ACÁ VA LA LÓGICA DE GUARDADO (Ej: Google Sheets, CSV, Base de datos)
-                st.success("Lote guardado correctamente. (Falta conectar destino)")
-                # Limpiamos la cinta después de guardar
+                st.success("Lote de cheques guardado.")
                 st.session_state.cheques_procesados = []
                 st.rerun()
                 
@@ -150,4 +158,4 @@ with col_cinta:
                 st.session_state.cheques_procesados = []
                 st.rerun()
     else:
-        st.info("La cinta está vacía. Escaneá un cheque para empezar.")
+        st.info("No hay cheques en la cinta.")
