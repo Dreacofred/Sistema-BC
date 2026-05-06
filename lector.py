@@ -175,7 +175,6 @@ if opcion == "🚛 Ventas a Camiones":
                 coincidencias_c = difflib.get_close_matches(v_chofer, BASE_CHOFERES, n=1, cutoff=0.5)
                 if coincidencias_c: chofer_final = coincidencias_c[0]
 
-            # 🟢 LA ENTIDAD SE COMPARA SOLO CON TU LISTA DEL CÓDIGO 🟢
             entidad_ia = limpiar_texto(datos_actuales.get('entidad_pagadora', '')).upper()
             entidad_final = entidad_ia
             if entidad_ia and ENTIDADES_OFICIALES:
@@ -186,10 +185,11 @@ if opcion == "🚛 Ventas a Camiones":
 
             if es_nuevo_cli: st.info("✨ ¡Atención! Código de cliente nuevo detectado.")
             
+            # 🟢 ALERTA DINÁMICA CON EL NOMBRE DEL USUARIO ACTUAL 🟢
             if es_novedad_chofer:
                 st.markdown(f"""
                     <div class="bloque-alerta">
-                        ⚠️ ATENCIÓN NANCY:<br>
+                        ⚠️ ATENCIÓN {st.session_state.usuario_actual.upper()}:<br>
                         El chofer en pantalla no figura en la memoria del sistema.<br>
                         Por favor, revisá que esté BIEN escrito antes de guardar.
                     </div>
@@ -225,7 +225,6 @@ if opcion == "🚛 Ventas a Camiones":
                 entidad_l = entidad.strip().upper()
 
                 if cod_l and (cod_l not in BASE_CLIENTES or BASE_CLIENTES[cod_l] != nom_l): guardar_nuevo_cliente(cod_l, nom_l)
-                # 🟢 ACÁ SE GUARDA EL CHOFER PERO YA NO LA ENTIDAD 🟢
                 if chofer_l: guardar_nuevo_item(ARCHIVO_CHOFERES, chofer_l)
 
                 registro = {
