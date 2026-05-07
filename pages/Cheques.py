@@ -127,49 +127,71 @@ with col_ingreso:
                 """
                 
                 for i, archivo_imagen in enumerate(imagenes_a_procesar):
-                    try:
-                        img = Image.open(archivo_imagen)
-                        respuesta = cliente_ia.models.generate_content(
-                            model='gemini-2.5-flash',
-                            contents=[prompt, img]
-                        )
-                        
-                        raw_text = respuesta.text.strip()
-                        marcador = chr(96) * 3
-                        if raw_text.startswith(f"{marcador}json"): raw_text = raw_text[7:-3].strip()
-                        elif raw_text.startswith(marcador): raw_text = raw_text[3:-3].strip()
-                        
-                        try:
-                            # Intento 1: Parseo directo
-                            datos_extraidos = json.loads(raw_text)
-                        except Exception as parse_err:
-                            # Intento 2: Rescate agresivo buscando corchetes
-                            start_idx = raw_text.find('[')
-                            end_idx = raw_text.rfind(']') + 1
-                            if start_idx != -1 and end_idx != 0:
-                                datos_extraidos = json.loads(raw_text[start_idx:end_idx])
-                            else:
-                                start_idx_obj = raw_text.find('{')
-                                end_idx_obj = raw_text.rfind('}') + 1
-                                if start_idx_obj != -1 and end_idx_obj != 0:
-                                    datos_extraidos = [json.loads(raw_text[start_idx_obj:end_idx_obj])]
-                                else:
-                                    raise ValueError(f"La IA no devolvió datos válidos. Texto recibido: {raw_text[:50]}...")
-                        
-                        if isinstance(datos_extraidos, dict): 
-                            datos_extraidos = [datos_extraidos]
-                            
-                        for cheque in datos_extraidos:
-                            cheque["Operador"] = st.session_state.usuario_actual
-                            st.session_state.cheques_procesados.append(cheque)
-                            cheques_totales_nuevos += 1
-                            
-                    except Exception as e:
-                        errores += 1
-                        # Mostramos el error TÉCNICO EXACTO para poder debuggear
-                        st.error(f"❌ Falló la foto #{i+1} | DETALLE TÉCNICO: {str(e)}")
+                    max_reintentos = 3
+                    exito = False
                     
-                    # Pausa MÁS LARGA (3.5 seg) para evitar Rate Limits (Too Many Requests) de Google
+                    for intento in range(max_reintentos):
+                        if exito:
+                            break
+                            
+                        try:
+                            # Reseteamos el puntero del archivo por si es un reintento
+                            archivo_imagen.seek(0)
+                            img = Image.open(archivo_imagen)
+                            
+                            respuesta = cliente_ia.models.generate_content(
+                                model='gemini-2.5-flash',
+                                contents=[prompt, img]
+                            )
+                            
+                            raw_text = respuesta.text.strip()
+                            marcador = chr(96) * 3
+                            if raw_text.startswith(f"{marcador}json"): raw_text = raw_text[7:-3].strip()
+                            elif raw_text.startswith(marcador): raw_text = raw_text[3:-3].strip()
+                            
+                            try:
+                                # Intento 1: Parseo directo
+                                datos_extraidos = json.loads(raw_text)
+                            except Exception as parse_err:
+                                # Intento 2: Rescate agresivo buscando corchetes
+                                start_idx = raw_text.find('[')
+                                end_idx = raw_text.rfind(']') + 1
+                                if start_idx != -1 and end_idx != 0:
+                                    datos_extraidos = json.loads(raw_text[start_idx:end_idx])
+                                else:
+                                    start_idx_obj = raw_text.find('{')
+                                    end_idx_obj = raw_text.rfind('}') + 1
+                                    if start_idx_obj != -1 and end_idx_obj != 0:
+                                        datos_extraidos = [json.loads(raw_text[start_idx_obj:end_idx_obj])]
+                                    else:
+                                        raise ValueError(f"La IA no devolvió datos válidos. Texto recibido: {raw_text[:50]}...")
+                            
+                            if isinstance(datos_extraidos, dict): 
+                                datos_extraidos = [datos_extraidos]
+                                
+                            for cheque in datos_extraidos:
+                                cheque["Operador"] = st.session_state.usuario_actual
+                                st.session_state.cheques_procesados.append(cheque)
+                                cheques_totales_nuevos += 1
+                                
+                            exito = True # Todo salió bien, no necesitamos reintentar
+                                
+                        except Exception as e:
+                            error_str = str(e)
+                            # Detectamos si es un error de saturación de Google (503 o 429)
+                            if "503" in error_str or "429" in error_str:
+                                if intento < max_reintentos - 1:
+                                    st.warning(f"⏳ Google saturado. Reintentando foto #{i+1} en {5 * (intento + 1)} segundos...")
+                                    time.sleep(5 * (intento + 1))
+                                else:
+                                    errores += 1
+                                    st.error(f"❌ Falló la foto #{i+1} tras {max_reintentos} intentos | Google no responde (Error 503).")
+                            else:
+                                errores += 1
+                                st.error(f"❌ Falló la foto #{i+1} | DETALLE TÉCNICO: {error_str}")
+                                break # Si el error es otro, cancelamos los reintentos de esta foto
+                    
+                    # Pausa entre fotos distintas
                     if len(imagenes_a_procesar) > 1:
                         time.sleep(3.5)
                 
