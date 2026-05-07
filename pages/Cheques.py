@@ -7,6 +7,10 @@ import pandas as pd
 import json
 import os
 import io
+from datetime import datetime
+
+# Herramientas para el diseño del Excel
+from openpyxl.utils import get_column_letter
 
 # ==========================================
 # 1. IDENTIDAD Y CONFIGURACIÓN VISUAL (ESTILO BC)
@@ -37,7 +41,7 @@ if ruta_logo: st.sidebar.image(ruta_logo, use_container_width=True)
 
 st.sidebar.subheader("👤 Identificación")
 
-# --- MEMORIA COMPARTIDA ---
+# --- MEMORIA COMPARTIDA (Se sincroniza con lector.py) ---
 if 'usuario_actual' not in st.session_state:
     st.session_state.usuario_actual = ""
 
@@ -68,46 +72,50 @@ if 'cheques_procesados' not in st.session_state:
 col_ingreso, col_cinta = st.columns([1, 2])
 
 with col_ingreso:
-    st.subheader("📸 Ingreso de Cheque")
+    st.subheader("📸 Ingreso de Cheque(s)")
+    st.caption("Podés procesar de 1 a 4 cheques por foto.")
     imagen_capturada = st.camera_input("Escanear con cámara")
-    imagen_subida = st.file_uploader("O subir foto del cheque", type=['jpg', 'jpeg', 'png'])
+    imagen_subida = st.file_uploader("O subir foto", type=['jpg', 'jpeg', 'png'])
     
     imagen_actual = imagen_capturada if imagen_capturada else imagen_subida
 
     if imagen_actual is not None:
         img = Image.open(imagen_actual)
-        st.image(img, caption="Vista previa del cheque", use_container_width=True)
+        st.image(img, caption="Vista previa de los cheques", use_container_width=True)
         
-        if st.button("Procesar Cheque con IA", use_container_width=True):
-            with st.spinner("Analizando cheque al detalle..."):
+        if st.button("Procesar Imagen con IA", use_container_width=True):
+            with st.spinner("Analizando imagen al detalle..."):
                 try:
                     prompt = """
-                    Sos un experto bancario procesando cheques físicos argentinos. Analizá la imagen y extraé los datos con precisión quirúrgica.
+                    Sos un experto bancario procesando cheques físicos argentinos. En la imagen puede haber de 1 a 4 cheques.
+                    Analizá la imagen detalladamente y extraé los datos de TODOS los cheques que encuentres.
                     
-                    REGLAS DE EXTRACCIÓN:
+                    REGLAS DE EXTRACCIÓN PARA CADA CHEQUE:
                     1. EMISOR: Es la razón social impresa (ej: "DANKO MADERAS SRL"). Está a la izquierda del cheque. IGNORA LOS SELLOS DE GOMA SOBRE LAS FIRMAS.
                     2. CUIT: El número de CUIT del emisor impreso a la izquierda.
-                    3. BANDA NUMÉRICA (ARRIBA O ABAJO): Buscá los números que identifican al banco y la plaza. 
-                       - El CÓDIGO DE BANCO es el primer número de esa secuencia (ej: 386).
-                       - La PLAZA es el tercer número de esa secuencia (ej: 3200). 
+                    3. BANDA NUMÉRICA: 
+                       - El CÓDIGO DE BANCO es el primer número (ej: 386).
+                       - La PLAZA es el tercer número (ej: 3200). 
                        - IGNORA la sucursal (el número del medio).
                     4. FECHAS: 
-                       - Fecha_Emision: La fecha en la que se hizo el cheque (ej: Concordia, 11 de Abril).
-                       - Fecha_Pago: La fecha de cobro diferido ("Páguese el..."). ES LA MÁS IMPORTANTE.
-                    5. IMPORTE (¡MUY IMPORTANTE!): En Argentina el punto (.) separa los miles. Si lees "500.000", significa quinientos mil. Debes devolver el número entero sin formato, es decir: 500000. Si tiene centavos, usa punto (ej: 500000.50). NUNCA confundas un separador de miles con un decimal.
+                       - Fecha_Emision: La fecha en la que se emitió/hizo el cheque.
+                       - Fecha_Pago: La fecha de cobro ("Páguese el..."). ¡ATENCIÓN! Si el cheque es un "cheque común" y NO tiene la leyenda "Páguese el..." con una fecha diferida, entonces la Fecha_Pago debe ser EXACTAMENTE LA MISMA que la Fecha_Emision.
+                    5. IMPORTE: Devolvé el número entero (ej: 500000). El punto en el cheque es separador de miles.
                     
-                    Devolvé ÚNICAMENTE un objeto JSON con esta estructura:
-                    {
-                        "Banco_Cod": "3 dígitos",
-                        "Plaza": "4 dígitos (ej: 3200)",
-                        "Banco_Nombre": "Nombre del banco",
-                        "Numero_Cheque": "Número serie",
-                        "Importe": 0.00,
-                        "Fecha_Emision": "DD/MM/AAAA",
-                        "Fecha_Pago": "DD/MM/AAAA",
-                        "Emisor": "Razón social impresa",
-                        "CUIT": "Número de CUIT"
-                    }
+                    Devolvé ÚNICAMENTE un ARRAY de objetos JSON con esta estructura exacta:
+                    [
+                        {
+                            "Banco_Cod": "3 dígitos",
+                            "Plaza": "4 dígitos",
+                            "Banco_Nombre": "Nombre",
+                            "Numero_Cheque": "Número",
+                            "Importe": 0.00,
+                            "Fecha_Emision": "DD/MM/AAAA",
+                            "Fecha_Pago": "DD/MM/AAAA",
+                            "Emisor": "Nombre impreso",
+                            "CUIT": "Número CUIT"
+                        }
+                    ]
                     """
                     
                     respuesta = cliente_ia.models.generate_content(
@@ -115,17 +123,20 @@ with col_ingreso:
                         contents=[prompt, img]
                     )
                     
+                    # Limpieza segura para evitar romper el visor de código
+                    marcador = chr(96) * 3
                     texto_json = respuesta.text.strip()
-                    if texto_json.startswith("```json"):
-                        texto_json = texto_json[7:-3]
-                    elif texto_json.startswith("```"):
-                        texto_json = texto_json[3:-3]
+                    if texto_json.startswith(f"{marcador}json"): texto_json = texto_json[7:-3]
+                    elif texto_json.startswith(marcador): texto_json = texto_json[3:-3]
                         
-                    datos_cheque = json.loads(texto_json.strip())
-                    datos_cheque["Operador"] = st.session_state.usuario_actual
+                    datos_extraidos = json.loads(texto_json.strip())
+                    if isinstance(datos_extraidos, dict): datos_extraidos = [datos_extraidos]
                     
-                    st.session_state.cheques_procesados.append(datos_cheque)
-                    st.success("¡Cheque agregado a la cinta!")
+                    for cheque in datos_extraidos:
+                        cheque["Operador"] = st.session_state.usuario_actual
+                        st.session_state.cheques_procesados.append(cheque)
+                        
+                    st.success(f"¡Se procesaron {len(datos_extraidos)} cheque(s)!")
                     st.rerun()
                     
                 except Exception as e:
@@ -137,7 +148,7 @@ with col_cinta:
     if len(st.session_state.cheques_procesados) > 0:
         df_cheques = pd.DataFrame(st.session_state.cheques_procesados)
         
-        # Editor de datos SIN filas extra (num_rows="fixed")
+        # Editor de datos fijo para correcciones
         df_editado = st.data_editor(
             df_cheques, 
             num_rows="fixed",
@@ -148,18 +159,35 @@ with col_cinta:
         st.session_state.cheques_procesados = df_editado.to_dict('records')
         
         st.markdown("---")
-        total_cheques = pd.to_numeric(df_editado['Importe'], errors='coerce').sum()
-        st.info(f"**Total acumulado en cinta:** ${total_cheques:,.2f}")
+        total_importe = pd.to_numeric(df_editado['Importe'], errors='coerce').sum()
+        st.info(f"**Total acumulado en cinta:** ${total_importe:,.2f} ({len(df_cheques)} cheques)")
         
-        col_btn1, col_btn2 = st.columns(2)
-        with col_btn1:
-            if st.button("💾 Guardar Lote", type="primary", use_container_width=True):
-                st.success("Lote de cheques guardado.")
+        # --- LÓGICA DE EXPORTACIÓN ---
+        buffer = io.BytesIO()
+        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+            df_editado.to_excel(writer, index=False, sheet_name='Cheques_Procesados')
+            ws = writer.sheets['Cheques_Procesados']
+            # Ajuste automático de columnas
+            for i, col in enumerate(df_editado.columns):
+                ws.column_dimensions[get_column_letter(i + 1)].width = 20
+
+        col_ex1, col_ex2 = st.columns(2)
+        
+        with col_ex1:
+            # Al descargar, se limpia la cinta automáticamente
+            if st.download_button(
+                label="📥 Descargar Excel y Reiniciar",
+                data=buffer.getvalue(),
+                file_name=f"Lote_Cheques_{datetime.now().strftime('%d-%m-%Y')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+                type="primary"
+            ):
                 st.session_state.cheques_procesados = []
                 st.rerun()
                 
-        with col_btn2:
-            if st.button("🗑️ Vaciar Cinta", use_container_width=True):
+        with col_ex2:
+            if st.button("🗑️ Vaciar sin descargar", use_container_width=True):
                 st.session_state.cheques_procesados = []
                 st.rerun()
     else:
