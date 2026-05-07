@@ -77,7 +77,7 @@ col_ingreso, col_cinta = st.columns([1, 2])
 
 with col_ingreso:
     st.subheader("📸 Ingreso de Cheque(s)")
-    st.caption("CONSEJO: Acomodá hasta 4 cheques en la foto. Procurá buena luz.")
+    st.caption("CONSEJO: Acomodá hasta 4 cheques en la foto. Procurá buena luz y enfoque.")
     
     imagen_capturada = st.camera_input("Escanear con cámara", key=f"cam_{st.session_state.reset_key}")
     imagenes_subidas = st.file_uploader("O subir foto(s)", type=['jpg', 'jpeg', 'png'], accept_multiple_files=True, key=f"up_{st.session_state.reset_key}")
@@ -93,11 +93,11 @@ with col_ingreso:
         st.image(imagenes_a_procesar, width=150)
         
         if st.button("Procesar Imagen(es) con IA", use_container_width=True):
-            with st.spinner(f"El experto IA está analizando {len(imagenes_a_procesar)} foto(s)... (Puede tardar unos segundos extra por el nivel de detalle)"):
+            with st.spinner(f"Escaneando en ALTA RESOLUCIÓN {len(imagenes_a_procesar)} foto(s)... (Unos segundos más por el nivel de detalle)"):
                 cheques_totales_nuevos = 0
                 errores = 0
                 
-                # --- SÚPER PROMPT CREADO POR EL GEM ---
+                # Súper Prompt de tu GEM (con el refuerzo de no adivinar si está borroso)
                 prompt = """
                 Rol: Especialista en Visión Artificial, OCR Financiero y Extracción Estructurada de Datos (Contexto Bancario Argentino).
 
@@ -111,7 +111,7 @@ with col_ingreso:
                 2. Banda Magnética: [Escribe la banda detectada BBB-SSS-PPPP]. Aislar Banco_Cod y Plaza.
                 3. Importe: [Escribe el importe numérico detectado. Verifica visualmente la cantidad exacta de ceros].
                 4. Fechas: [Identificar emisión vs. pago].
-                5. Emisor y CUIT: [Identificar el texto exacto ubicado en la misma línea].
+                5. Emisor y CUIT: [Identificar el texto exacto ubicado en la misma línea. LEÉ LETRA POR LETRA Y NÚMERO POR NÚMERO. NO ADIVINES. Si está tapado por un sello y es 100% ilegible, escribe "ILEGIBLE" en vez de adivinar].
 
                 Restricciones y Reglas de Negocio Críticas:
                 - Banda Magnética (zona inferior): El formato es siempre `BBB-SSS-PPPP`. 
@@ -120,7 +120,7 @@ with col_ingreso:
                   * SUCURSAL = 2do grupo (`SSS`) -> DEBE IGNORARSE COMPLETAMENTE.
                 - Fechas: Si el cheque NO especifica una fecha de pago diferido (no dice "Páguese el..."), entonces la `Fecha_Pago` debe ser idéntica a la `Fecha_Emision`.
                 - Emisor: Debe ser la Razón Social o titular impreso. Para evitar extraer nombres erróneos, DEBES buscar el nombre del emisor que se encuentra al lado del CUIT o en su mismo renglón. Ignora absolutamente cualquier texto proveniente de sellos de goma, direcciones o nombres de localidades.
-                - CUIT: Buscar exclusivamente la palabra literal "CUIT" para extraer el número (Formato XX-XXXXXXXX-X).
+                - CUIT: Buscar exclusivamente la palabra literal "CUIT" para extraer el número (Formato XX-XXXXXXXX-X o sin guiones).
                 - Importe Exacto: No asumas valores. Verifica estrictamente la cantidad de ceros (ej. no confundir 500.000 con 500). El valor final debe ser un número entero sin separadores de miles ni puntos.
                 - Aislamiento: La información de un cheque no debe mezclarse jamás con la del cheque adyacente.
 
@@ -161,7 +161,9 @@ with col_ingreso:
                             if img.mode in ('RGBA', 'P'):
                                 img = img.convert('RGB')
                                 
-                            max_dim = 1600 
+                            # EL CAMBIO CLAVE: Aumentamos el tamaño máximo para que no pierda resolución
+                            # Pasamos de 1600 a 3000 píxeles. La IA va a poder leer la letra más chica.
+                            max_dim = 3000 
                             if max(img.size) > max_dim:
                                 img.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
                             
@@ -172,27 +174,22 @@ with col_ingreso:
                             
                             raw_text = respuesta.text.strip()
                             
-                            # --- NUEVA LÓGICA DE PARSEO INTELIGENTE ---
-                            # Separamos el borrador (pensamiento de la IA) del JSON final
                             texto_para_json = raw_text
                             if "</Borrador_Analisis>" in raw_text:
                                 texto_para_json = raw_text.split("</Borrador_Analisis>")[1].strip()
                             
-                            # Limpiamos las comillas invertidas si las puso
                             marcador = chr(96) * 3
                             if texto_para_json.startswith(f"{marcador}json"): 
                                 texto_para_json = texto_para_json[7:-3].strip()
                             elif texto_para_json.startswith(marcador): 
                                 texto_para_json = texto_para_json[3:-3].strip()
                             
-                            # Intentamos extraer el array JSON
                             try:
                                 start_idx = texto_para_json.find('[')
                                 end_idx = texto_para_json.rfind(']') + 1
                                 if start_idx != -1 and end_idx != 0:
                                     datos_extraidos = json.loads(texto_para_json[start_idx:end_idx])
                                 else:
-                                    # Por si devuelve un solo objeto
                                     start_idx_obj = texto_para_json.find('{')
                                     end_idx_obj = texto_para_json.rfind('}') + 1
                                     if start_idx_obj != -1 and end_idx_obj != 0:
@@ -223,7 +220,7 @@ with col_ingreso:
                                     st.error(f"❌ Falló la foto #{i+1}. Excedió el tiempo límite.")
                             else:
                                 if intento < 2:
-                                    st.warning(f"🔄 Ajustando lectura de foto #{i+1} para mejorar precisión...")
+                                    st.warning(f"🔄 Releyendo foto #{i+1} para mejorar precisión...")
                                     time.sleep(2)
                                 else:
                                     errores += 1
@@ -233,7 +230,7 @@ with col_ingreso:
                     time.sleep(2)
                 
                 if cheques_totales_nuevos > 0:
-                    st.success(f"¡Se procesaron {cheques_totales_nuevos} cheque(s) en total con alta precisión!")
+                    st.success(f"¡Se procesaron {cheques_totales_nuevos} cheque(s) en total con alta resolución!")
                     if errores > 0:
                         st.warning(f"Ojo: Hubo {errores} foto(s) con error. Revisá el detalle arriba.")
                     
