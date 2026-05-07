@@ -97,30 +97,33 @@ with col_ingreso:
                 cheques_totales_nuevos = 0
                 errores = 0
                 
-                # Prompt directo y sin vueltas para que no pierda tiempo pensando de más
+                # --- EL NUEVO PROMPT QUIRÚRGICO ---
                 prompt = """
-                Sos un experto bancario procesando cheques físicos argentinos. En la imagen hay entre 1 y 4 cheques apilados.
-                Extraé los datos de TODOS los cheques que encuentres.
+                Sos un experto bancario procesando cheques físicos argentinos. En la imagen hay entre 1 y 4 cheques apilados (pueden estar orientados verticalmente). Analizá cada cheque de forma aislada para no cruzar los datos.
                 
-                REGLAS DE EXTRACCIÓN:
-                1. EMISOR: Razón social impresa a la izquierda. Ignora sellos de goma.
-                2. CUIT: Número de CUIT impreso.
-                3. BANDA NUMÉRICA: Banco (1er número), Plaza (3er número).
-                4. FECHAS: Fecha_Emision y Fecha_Pago (si es cheque común sin diferido, repetí la fecha de emisión).
-                5. IMPORTE: Número entero (ej: 500000). El punto es separador de miles.
+                REGLAS ESTRICTAS DE EXTRACCIÓN:
+                1. BANDA NUMÉRICA (Abajo a la derecha, formato BBB-SSS-PPPP): 
+                   - Banco_Cod: Primeros 3 dígitos antes del primer guion (ej: 011).
+                   - Plaza: Es el TERCER grupo de números, generalmente de 4 dígitos (ej: 3100). ¡NUNCA extraigas la sucursal que es el número del medio!
+                2. FECHAS (¡ATENCIÓN, NO LAS DUPLIQUES!):
+                   - Fecha_Emision: Buscala arriba, junto al nombre de la ciudad (ej: PARANA, 19 de Marzo).
+                   - Fecha_Pago: Buscala más abajo, después de la palabra "El" o "Páguese el..." (ej: El 17 de Abril). Si el cheque no es diferido, repetí la fecha de emisión.
+                3. CUIT: Buscá literalmente la sigla "CUIT" seguida del número XX-XXXXXXXX-X. Ignorá otros números sueltos.
+                4. EMISOR: Es la Razón Social o el Titular de la cuenta impreso. Suele estar cerca del CUIT. NUNCA extraigas direcciones, calles ni ciudades como Emisor (ej: Ignorá "Alta Gracia" o "Cerrito").
+                5. IMPORTE: El monto en números sin separador de miles.
                 
                 Devolvé ÚNICAMENTE un ARRAY JSON PURO. Sin texto adicional. Formato estricto:
                 [
                     {
                         "Banco_Cod": "3 dígitos",
                         "Plaza": "4 dígitos",
-                        "Banco_Nombre": "Nombre",
+                        "Banco_Nombre": "Nombre del Banco",
                         "Numero_Cheque": "Número",
                         "Importe": 0.00,
                         "Fecha_Emision": "DD/MM/AAAA",
                         "Fecha_Pago": "DD/MM/AAAA",
-                        "Emisor": "Nombre impreso",
-                        "CUIT": "Número CUIT"
+                        "Emisor": "Razón Social o Titular",
+                        "CUIT": "XX-XXXXXXXX-X"
                     }
                 ]
                 """
@@ -136,17 +139,14 @@ with col_ingreso:
                             archivo_imagen.seek(0)
                             img = Image.open(archivo_imagen)
                             
-                            # --- LA SOLUCIÓN: OPTIMIZACIÓN DE IMAGEN ---
-                            # Convertimos a formato compatible y achicamos la foto si es enorme.
-                            # Esto evita el Timeout del servidor y los "falsos 503".
+                            # Optimización para evitar saturar el servidor gratuito
                             if img.mode in ('RGBA', 'P'):
                                 img = img.convert('RGB')
                                 
-                            max_dim = 1600 # Resolución óptima para lectura rápida
+                            max_dim = 1600
                             if max(img.size) > max_dim:
                                 img.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
                             
-                            # Llamada a la IA
                             respuesta = cliente_ia.models.generate_content(
                                 model='gemini-2.5-flash',
                                 contents=[prompt, img]
@@ -197,7 +197,7 @@ with col_ingreso:
                                 st.error(f"❌ Falló la foto #{i+1} | DETALLE: {error_str}")
                                 break 
                     
-                    time.sleep(2) # Pausa cortita entre fotos
+                    time.sleep(2) 
                 
                 if cheques_totales_nuevos > 0:
                     st.success(f"¡Se procesaron {cheques_totales_nuevos} cheque(s) en total!")
