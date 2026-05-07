@@ -151,14 +151,14 @@ with col_ingreso:
                             if img.mode in ('RGBA', 'P'):
                                 img = img.convert('RGB')
                                 
-                            # Resolución alta para el modelo PRO
+                            # Resolución alta para lectura nítida
                             max_dim = 3000 
                             if max(img.size) > max_dim:
                                 img.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
                             
-                            # --- LLAMADA AL MODELO PRO CON INSTRUCCIÓN DE SISTEMA Y TEMPERATURA 0 ---
+                            # --- LLAMADA AL MODELO FLASH CON INSTRUCCIÓN DE SISTEMA Y TEMPERATURA 0 ---
                             respuesta = cliente_ia.models.generate_content(
-                                model='gemini-1.5-pro-latest', # EL CAMBIO: Agregamos "-latest"
+                                model='gemini-2.5-flash', # VOLVEMOS ATRÁS A FLASH POR BLOQUEO DE API
                                 contents=[img], # Solo mandamos la imagen acá
                                 config=types.GenerateContentConfig(
                                     system_instruction=instruccion_sistema, # El prompt va acá
