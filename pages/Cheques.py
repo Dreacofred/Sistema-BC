@@ -110,7 +110,7 @@ with col_ingreso:
                    - Fecha_Pago: La fecha de cobro ("Páguese el..."). ¡ATENCIÓN! Si el cheque es un "cheque común" y NO tiene la leyenda "Páguese el..." con una fecha diferida, entonces la Fecha_Pago debe ser EXACTAMENTE LA MISMA que la Fecha_Emision.
                 5. IMPORTE: Devolvé el número entero (ej: 500000). El punto en el cheque es separador de miles.
                 
-                Devolvé ÚNICAMENTE un ARRAY de objetos JSON con esta estructura exacta. Asegurate de devolver formato JSON puro:
+                Devolvé ÚNICAMENTE un ARRAY de objetos JSON con esta estructura exacta. NO agregues comillas invertidas ni texto adicional. SOLO EL JSON PURO:
                 [
                     {
                         "Banco_Cod": "3 dígitos",
@@ -135,24 +135,30 @@ with col_ingreso:
                         )
                         
                         raw_text = respuesta.text.strip()
+                        marcador = chr(96) * 3
+                        if raw_text.startswith(f"{marcador}json"): raw_text = raw_text[7:-3].strip()
+                        elif raw_text.startswith(marcador): raw_text = raw_text[3:-3].strip()
                         
-                        # Búsqueda robusta del bloque JSON (Array)
-                        start_idx = raw_text.find('[')
-                        end_idx = raw_text.rfind(']') + 1
-                        
-                        if start_idx != -1 and end_idx != 0:
-                            texto_json = raw_text[start_idx:end_idx]
-                            datos_extraidos = json.loads(texto_json)
-                        else:
-                            # Plan B: Por si devolvió un solo objeto en vez de un array
-                            start_idx = raw_text.find('{')
-                            end_idx = raw_text.rfind('}') + 1
+                        try:
+                            # Intento 1: Parseo directo
+                            datos_extraidos = json.loads(raw_text)
+                        except Exception as parse_err:
+                            # Intento 2: Rescate agresivo buscando corchetes
+                            start_idx = raw_text.find('[')
+                            end_idx = raw_text.rfind(']') + 1
                             if start_idx != -1 and end_idx != 0:
-                                texto_json = raw_text[start_idx:end_idx]
-                                datos_extraidos = [json.loads(texto_json)]
+                                datos_extraidos = json.loads(raw_text[start_idx:end_idx])
                             else:
-                                raise ValueError("No se detectó un JSON válido en la respuesta.")
+                                start_idx_obj = raw_text.find('{')
+                                end_idx_obj = raw_text.rfind('}') + 1
+                                if start_idx_obj != -1 and end_idx_obj != 0:
+                                    datos_extraidos = [json.loads(raw_text[start_idx_obj:end_idx_obj])]
+                                else:
+                                    raise ValueError(f"La IA no devolvió datos válidos. Texto recibido: {raw_text[:50]}...")
                         
+                        if isinstance(datos_extraidos, dict): 
+                            datos_extraidos = [datos_extraidos]
+                            
                         for cheque in datos_extraidos:
                             cheque["Operador"] = st.session_state.usuario_actual
                             st.session_state.cheques_procesados.append(cheque)
@@ -160,22 +166,21 @@ with col_ingreso:
                             
                     except Exception as e:
                         errores += 1
-                        # st.error no bloquea, solo muestra el mensaje y sigue
-                        st.error(f"Aviso: Hubo un problema al leer la foto #{i+1}. Podés revisar la imagen o ingresarla manualmente.")
-                        print(f"Error técnico: {e}") # Para ver en la consola si es necesario
+                        # Mostramos el error TÉCNICO EXACTO para poder debuggear
+                        st.error(f"❌ Falló la foto #{i+1} | DETALLE TÉCNICO: {str(e)}")
                     
-                    # Pequeña pausa para no saturar la API de Gemini si subimos muchas fotos
+                    # Pausa MÁS LARGA (3.5 seg) para evitar Rate Limits (Too Many Requests) de Google
                     if len(imagenes_a_procesar) > 1:
-                        time.sleep(1.5)
+                        time.sleep(3.5)
                 
                 if cheques_totales_nuevos > 0:
                     st.success(f"¡Se procesaron {cheques_totales_nuevos} cheque(s) en total!")
                     if errores > 0:
-                        st.warning(f"Ojo: Hubo {errores} foto(s) que no se pudieron procesar bien. Las demás ya están en la cinta.")
-                    time.sleep(2)
+                        st.warning(f"Ojo: Hubo {errores} foto(s) que no se procesaron. Podés ver el error arriba.")
+                    time.sleep(3)
                     st.rerun()
                 elif errores > 0:
-                    st.error("No se pudo leer ningún cheque de las imágenes subidas. Intentá mejorar la luz o el enfoque.")
+                    st.error("Ninguna imagen pudo ser procesada. Por favor lee los detalles técnicos arriba para saber qué falló.")
 
 with col_cinta:
     st.subheader("⚙️ Cinta Transportadora")
