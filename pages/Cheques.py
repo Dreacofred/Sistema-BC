@@ -158,7 +158,7 @@ with col_ingreso:
                             
                             # --- LLAMADA AL MODELO PRO CON INSTRUCCIÓN DE SISTEMA Y TEMPERATURA 0 ---
                             respuesta = cliente_ia.models.generate_content(
-                                model='gemini-1.5-pro', # EL CAMBIO PRINCIPAL
+                                model='gemini-1.5-pro-latest', # EL CAMBIO: Agregamos "-latest"
                                 contents=[img], # Solo mandamos la imagen acá
                                 config=types.GenerateContentConfig(
                                     system_instruction=instruccion_sistema, # El prompt va acá
