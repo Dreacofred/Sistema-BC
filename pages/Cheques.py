@@ -73,74 +73,88 @@ col_ingreso, col_cinta = st.columns([1, 2])
 
 with col_ingreso:
     st.subheader("📸 Ingreso de Cheque(s)")
-    st.caption("Podés procesar de 1 a 4 cheques por foto.")
-    imagen_capturada = st.camera_input("Escanear con cámara")
-    imagen_subida = st.file_uploader("O subir foto", type=['jpg', 'jpeg', 'png'])
+    st.caption("Podés procesar de 1 a 4 cheques por foto. Seleccioná varias fotos a la vez si lo necesitás.")
     
-    imagen_actual = imagen_capturada if imagen_capturada else imagen_subida
+    imagen_capturada = st.camera_input("Escanear con cámara")
+    imagenes_subidas = st.file_uploader("O subir foto(s)", type=['jpg', 'jpeg', 'png'], accept_multiple_files=True)
+    
+    imagenes_a_procesar = []
+    if imagen_capturada:
+        imagenes_a_procesar.append(imagen_capturada)
+    if imagenes_subidas:
+        imagenes_a_procesar.extend(imagenes_subidas)
 
-    if imagen_actual is not None:
-        img = Image.open(imagen_actual)
-        st.image(img, caption="Vista previa de los cheques", use_container_width=True)
+    if len(imagenes_a_procesar) > 0:
+        st.write(f"**{len(imagenes_a_procesar)} imagen(es) lista(s)** para analizar.")
+        st.image(imagenes_a_procesar, width=150)
         
-        if st.button("Procesar Imagen con IA", use_container_width=True):
-            with st.spinner("Analizando imagen al detalle..."):
-                try:
-                    prompt = """
-                    Sos un experto bancario procesando cheques físicos argentinos. En la imagen puede haber de 1 a 4 cheques.
-                    Analizá la imagen detalladamente y extraé los datos de TODOS los cheques que encuentres.
-                    
-                    REGLAS DE EXTRACCIÓN PARA CADA CHEQUE:
-                    1. EMISOR: Es la razón social impresa (ej: "DANKO MADERAS SRL"). Está a la izquierda del cheque. IGNORA LOS SELLOS DE GOMA SOBRE LAS FIRMAS.
-                    2. CUIT: El número de CUIT del emisor impreso a la izquierda.
-                    3. BANDA NUMÉRICA: 
-                       - El CÓDIGO DE BANCO es el primer número (ej: 386).
-                       - La PLAZA es el tercer número (ej: 3200). 
-                       - IGNORA la sucursal (el número del medio).
-                    4. FECHAS: 
-                       - Fecha_Emision: La fecha en la que se emitió/hizo el cheque.
-                       - Fecha_Pago: La fecha de cobro ("Páguese el..."). ¡ATENCIÓN! Si el cheque es un "cheque común" y NO tiene la leyenda "Páguese el..." con una fecha diferida, entonces la Fecha_Pago debe ser EXACTAMENTE LA MISMA que la Fecha_Emision.
-                    5. IMPORTE: Devolvé el número entero (ej: 500000). El punto en el cheque es separador de miles.
-                    
-                    Devolvé ÚNICAMENTE un ARRAY de objetos JSON con esta estructura exacta:
-                    [
-                        {
-                            "Banco_Cod": "3 dígitos",
-                            "Plaza": "4 dígitos",
-                            "Banco_Nombre": "Nombre",
-                            "Numero_Cheque": "Número",
-                            "Importe": 0.00,
-                            "Fecha_Emision": "DD/MM/AAAA",
-                            "Fecha_Pago": "DD/MM/AAAA",
-                            "Emisor": "Nombre impreso",
-                            "CUIT": "Número CUIT"
-                        }
-                    ]
-                    """
-                    
-                    respuesta = cliente_ia.models.generate_content(
-                        model='gemini-2.5-flash',
-                        contents=[prompt, img]
-                    )
-                    
-                    # Limpieza segura para evitar romper el visor de código
-                    marcador = chr(96) * 3
-                    texto_json = respuesta.text.strip()
-                    if texto_json.startswith(f"{marcador}json"): texto_json = texto_json[7:-3]
-                    elif texto_json.startswith(marcador): texto_json = texto_json[3:-3]
+        if st.button("Procesar Imagen(es) con IA", use_container_width=True):
+            with st.spinner(f"Analizando {len(imagenes_a_procesar)} foto(s) al detalle... Esto puede tardar unos segundos."):
+                cheques_totales_nuevos = 0
+                errores = 0
+                
+                prompt = """
+                Sos un experto bancario procesando cheques físicos argentinos. En la imagen puede haber de 1 a 4 cheques.
+                Analizá la imagen detalladamente y extraé los datos de TODOS los cheques que encuentres.
+                
+                REGLAS DE EXTRACCIÓN PARA CADA CHEQUE:
+                1. EMISOR: Es la razón social impresa (ej: "DANKO MADERAS SRL"). Está a la izquierda del cheque. IGNORA LOS SELLOS DE GOMA SOBRE LAS FIRMAS.
+                2. CUIT: El número de CUIT del emisor impreso a la izquierda.
+                3. BANDA NUMÉRICA: 
+                   - El CÓDIGO DE BANCO es el primer número (ej: 386).
+                   - La PLAZA es el tercer número (ej: 3200). 
+                   - IGNORA la sucursal (el número del medio).
+                4. FECHAS: 
+                   - Fecha_Emision: La fecha en la que se emitió/hizo el cheque.
+                   - Fecha_Pago: La fecha de cobro ("Páguese el..."). ¡ATENCIÓN! Si el cheque es un "cheque común" y NO tiene la leyenda "Páguese el..." con una fecha diferida, entonces la Fecha_Pago debe ser EXACTAMENTE LA MISMA que la Fecha_Emision.
+                5. IMPORTE: Devolvé el número entero (ej: 500000). El punto en el cheque es separador de miles.
+                
+                Devolvé ÚNICAMENTE un ARRAY de objetos JSON con esta estructura exacta:
+                [
+                    {
+                        "Banco_Cod": "3 dígitos",
+                        "Plaza": "4 dígitos",
+                        "Banco_Nombre": "Nombre",
+                        "Numero_Cheque": "Número",
+                        "Importe": 0.00,
+                        "Fecha_Emision": "DD/MM/AAAA",
+                        "Fecha_Pago": "DD/MM/AAAA",
+                        "Emisor": "Nombre impreso",
+                        "CUIT": "Número CUIT"
+                    }
+                ]
+                """
+                
+                for archivo_imagen in imagenes_a_procesar:
+                    try:
+                        img = Image.open(archivo_imagen)
+                        respuesta = cliente_ia.models.generate_content(
+                            model='gemini-2.5-flash',
+                            contents=[prompt, img]
+                        )
                         
-                    datos_extraidos = json.loads(texto_json.strip())
-                    if isinstance(datos_extraidos, dict): datos_extraidos = [datos_extraidos]
-                    
-                    for cheque in datos_extraidos:
-                        cheque["Operador"] = st.session_state.usuario_actual
-                        st.session_state.cheques_procesados.append(cheque)
+                        marcador = chr(96) * 3
+                        texto_json = respuesta.text.strip()
+                        if texto_json.startswith(f"{marcador}json"): texto_json = texto_json[7:-3]
+                        elif texto_json.startswith(marcador): texto_json = texto_json[3:-3]
+                            
+                        datos_extraidos = json.loads(texto_json.strip())
+                        if isinstance(datos_extraidos, dict): datos_extraidos = [datos_extraidos]
                         
-                    st.success(f"¡Se procesaron {len(datos_extraidos)} cheque(s)!")
+                        for cheque in datos_extraidos:
+                            cheque["Operador"] = st.session_state.usuario_actual
+                            st.session_state.cheques_procesados.append(cheque)
+                            cheques_totales_nuevos += 1
+                            
+                    except Exception as e:
+                        errores += 1
+                        st.error(f"Error procesando una de las imágenes: {e}")
+                
+                if cheques_totales_nuevos > 0:
+                    st.success(f"¡Se procesaron {cheques_totales_nuevos} cheque(s) en total!")
                     st.rerun()
-                    
-                except Exception as e:
-                    st.error(f"Error en lectura: {e}")
+                elif errores > 0:
+                    st.warning("Hubo errores y no se pudieron leer cheques.")
 
 with col_cinta:
     st.subheader("⚙️ Cinta Transportadora")
@@ -148,7 +162,6 @@ with col_cinta:
     if len(st.session_state.cheques_procesados) > 0:
         df_cheques = pd.DataFrame(st.session_state.cheques_procesados)
         
-        # Editor de datos fijo para correcciones
         df_editado = st.data_editor(
             df_cheques, 
             num_rows="fixed",
@@ -162,19 +175,16 @@ with col_cinta:
         total_importe = pd.to_numeric(df_editado['Importe'], errors='coerce').sum()
         st.info(f"**Total acumulado en cinta:** ${total_importe:,.2f} ({len(df_cheques)} cheques)")
         
-        # --- LÓGICA DE EXPORTACIÓN ---
         buffer = io.BytesIO()
         with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
             df_editado.to_excel(writer, index=False, sheet_name='Cheques_Procesados')
             ws = writer.sheets['Cheques_Procesados']
-            # Ajuste automático de columnas
             for i, col in enumerate(df_editado.columns):
                 ws.column_dimensions[get_column_letter(i + 1)].width = 20
 
         col_ex1, col_ex2 = st.columns(2)
         
         with col_ex1:
-            # Al descargar, se limpia la cinta automáticamente
             if st.download_button(
                 label="📥 Descargar Excel y Reiniciar",
                 data=buffer.getvalue(),
@@ -192,4 +202,3 @@ with col_cinta:
                 st.rerun()
     else:
         st.info("No hay cheques en la cinta.")
-# ### FIN DEL CÓDIGO ###
