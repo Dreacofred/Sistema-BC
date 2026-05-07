@@ -2,12 +2,14 @@
 # INICIO DEL CÓDIGO
 import streamlit as st
 from google import genai
+from google.genai import types  # Agregado para configurar la Temperatura
 from PIL import Image
 import pandas as pd
 import json
 import os
 import io
 import time
+import textwrap  # Agregado para arreglar la sangría del prompt
 from datetime import datetime
 
 # Herramientas para el diseño del Excel
@@ -96,8 +98,9 @@ with col_ingreso:
                 cheques_totales_nuevos = 0
                 errores = 0
                 
-                # --- PROMPT MAESTRO ---
-                prompt = """
+                # --- PROMPT MAESTRO CORREGIDO ---
+                # Usamos textwrap.dedent para limpiar los espacios
+                prompt = textwrap.dedent("""
                 Rol: Especialista en Visión Artificial, OCR Financiero y Extracción de Datos (Contexto Bancario Argentino).
 
                 Contexto: El sistema procesa fotografías que contienen entre 1 y 4 cheques físicos apilados. Existe un riesgo crítico de "alucinación por saturación" (cruzar el CUIT, importe o fechas de un cheque a otro). 
@@ -109,7 +112,7 @@ with col_ingreso:
                 2. Fechas: Si el cheque NO especifica una fecha de pago diferido (no dice "Páguese el..."), entonces la "Fecha_Pago" debe ser exactamente igual a la "Fecha_Emision".
                 3. Emisor: Identifica la Razón Social o el titular impreso, generalmente cerca del CUIT. Ignora direcciones, nombres de localidades o sellos de goma.
                 4. CUIT: Busca la palabra literal "CUIT" para extraer el número.
-                5. Importe: Extraer el valor numérico exacto y convertirlo a un número entero continuo, sin puntos separadores de miles ni signos.
+                5. Importe: Extraer el valor numérico exacto y convertido a un número entero continuo, sin puntos separadores de miles ni signos.
                 6. Aislamiento estricto: Prohibido combinar datos de diferentes cheques.
 
                 Formato de salida:
@@ -132,7 +135,7 @@ with col_ingreso:
                   }
                 ]
                 ```
-                """
+                """)
                 
                 for i, archivo_imagen in enumerate(imagenes_a_procesar):
                     exito = False
@@ -153,9 +156,13 @@ with col_ingreso:
                             if max(img.size) > max_dim:
                                 img.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
                             
+                            # Llamada a la API con Temperatura 0 para evitar alucinaciones
                             respuesta = cliente_ia.models.generate_content(
                                 model='gemini-2.5-flash',
-                                contents=[prompt, img]
+                                contents=[prompt, img],
+                                config=types.GenerateContentConfig(
+                                    temperature=0.0
+                                )
                             )
                             
                             raw_text = respuesta.text.strip()
