@@ -1,15 +1,18 @@
 # Archivo: pages/Cheques.py
+# INICIO DEL CÓDIGO
 import streamlit as st
 from google import genai
-from google.genai import types
+from google.genai import types  # Agregado para configurar la Temperatura
 from PIL import Image
 import pandas as pd
 import json
 import os
 import io
 import time
-import textwrap
+import textwrap  # Agregado para arreglar la sangría del prompt
 from datetime import datetime
+
+# Herramientas para el diseño del Excel
 from openpyxl.utils import get_column_letter
 
 # ==========================================
@@ -31,27 +34,7 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. FUNCIONES DE APOYO (RECORTE E IA)
-# ==========================================
-def segmentar_cheques(img):
-    """
-    Detecta la orientación y divide la imagen si es necesario para 
-    evitar que la IA mezcle datos de cheques diferentes.
-    """
-    width, height = img.size
-    # Si la imagen es notablemente más alta que ancha, asumimos cheques apilados
-    if height > width * 1.2:
-        num_segmentos = 4 if height > width * 2.5 else 2
-        segmentos = []
-        alto_segmento = height // num_segmentos
-        for i in range(num_segmentos):
-            caja = (0, i * alto_segmento, width, (i + 1) * alto_segmento)
-            segmentos.append(img.crop(caja))
-        return segmentos
-    return [img]
-
-# ==========================================
-# 3. CONEXIÓN A LA IA Y MENÚ LATERAL
+# 2. CONEXIÓN A LA IA Y MENÚ LATERAL
 # ==========================================
 cliente_ia = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
 
@@ -81,7 +64,7 @@ if not st.session_state.usuario_actual.strip():
 st.sidebar.info(f"Operador activo: {st.session_state.usuario_actual}")
 
 # ==========================================
-# 4. MÓDULO PRINCIPAL DE CHEQUES
+# 3. MÓDULO PRINCIPAL DE CHEQUES
 # ==========================================
 st.title(f"💳 Módulo de Cheques - {st.session_state.usuario_actual}")
 
@@ -111,74 +94,144 @@ with col_ingreso:
         st.image(imagenes_a_procesar, width=150)
         
         if st.button("Procesar Imagen(es) con IA", use_container_width=True):
-            with st.spinner(f"Analizando con precisión mejorada..."):
+            with st.spinner(f"Analizando en ALTA RESOLUCIÓN {len(imagenes_a_procesar)} foto(s)... (Puede tardar unos segundos)"):
                 cheques_totales_nuevos = 0
                 errores = 0
                 
+                # --- PROMPT MAESTRO CORREGIDO ---
+                # Usamos textwrap.dedent para limpiar los espacios
                 prompt = textwrap.dedent("""
-                Rol: Especialista en Visión Artificial y OCR Financiero Argentino.
-                
-                REGLA DE ORO DE EXTRACCIÓN:
-                - EMISOR/CUIT: El nombre del titular (Emisor) está siempre físicamente cerca del CUIT. NO confundir con el beneficiario (el nombre que sigue a 'Páguese a').
-                - BANDA MAGNÉTICA: Extrae el 1er grupo de 3 dígitos (Banco_Cod) y el 3er grupo de 4 dígitos (Plaza). Ignora el resto.
-                - IMPORTANTE: Si la imagen es un fragmento de un cheque, extrae solo lo que veas con total seguridad.
-                
+                Rol: Especialista en Visión Artificial, OCR Financiero y Extracción de Datos (Contexto Bancario Argentino).
+
+                Contexto: El sistema procesa fotografías que contienen entre 1 y 4 cheques físicos apilados. Existe un riesgo crítico de "alucinación por saturación" (cruzar el CUIT, importe o fechas de un cheque a otro). 
+
+                Tarea: Analizar la imagen aplicando "Chain of Thought" (Cadena de Pensamiento). Debes aislar visualmente cada cheque y procesarlo secuencialmente de arriba hacia abajo (o izquierda a derecha). Mientras analizas un cheque, debes ignorar el resto de la imagen.
+
+                Restricciones y Reglas de Extracción:
+                1. Banda Magnética (zona inferior): Formato BBB-SSS-PPPP. Extrae el 1er grupo de 3 dígitos (Banco_Cod) y el 3er grupo de 4 dígitos (Plaza). El 2do grupo (Sucursal) se ignora por completo.
+                2. Fechas: Si el cheque NO especifica una fecha de pago diferido (no dice "Páguese el..."), entonces la "Fecha_Pago" debe ser exactamente igual a la "Fecha_Emision".
+                3. Emisor: Identifica la Razón Social o el titular impreso, generalmente cerca del CUIT. Ignora direcciones, nombres de localidades o sellos de goma.
+                4. CUIT: Busca la palabra literal "CUIT" para extraer el número.
+                5. Importe: Extraer el valor numérico exacto y convertido a un número entero continuo, sin puntos separadores de miles ni signos.
+                6. Aislamiento estricto: Prohibido combinar datos de diferentes cheques.
+
                 Formato de salida:
-                1. <Borrador_Analisis>: Detalle de lo observado.
-                2. JSON: Un array con los objetos:
-                [{"Banco_Cod": "3 dígitos", "Plaza": "4 dígitos", "Banco_Nombre": "Nombre", "Numero_Cheque": "Nro", "Importe": entero, "Fecha_Emision": "DD/MM/AAAA", "Fecha_Pago": "DD/MM/AAAA", "Emisor": "Razón Social", "CUIT": "XX-XXXXXXXX-X"}]
+                Tu respuesta DEBE contener obligatoriamente dos partes:
+                1. Un bloque de texto llamado `<Borrador_Analisis>` donde detalles tu lectura cheque por cheque para asegurar que no cruzas datos.
+                2. Un bloque de código con UN SOLO ARRAY de objetos JSON puros, respetando ESTRICTAMENTE la siguiente estructura:
+
+                ```json
+                [
+                  {
+                    "Banco_Cod": "3 dígitos",
+                    "Plaza": "4 dígitos",
+                    "Banco_Nombre": "Nombre del Banco",
+                    "Numero_Cheque": "Número del cheque",
+                    "Importe": número entero sin puntos,
+                    "Fecha_Emision": "DD/MM/AAAA",
+                    "Fecha_Pago": "DD/MM/AAAA",
+                    "Emisor": "Razón Social o Titular",
+                    "CUIT": "XX-XXXXXXXX-X"
+                  }
+                ]
+                ```
                 """)
                 
                 for i, archivo_imagen in enumerate(imagenes_a_procesar):
-                    try:
-                        archivo_imagen.seek(0)
-                        img_full = Image.open(archivo_imagen).convert('RGB')
-                        
-                        # REDUCCIÓN DE ALUCINACIÓN: Segmentamos la foto en partes
-                        fragmentos = segmentar_cheques(img_full)
-                        
-                        for idx, frag in enumerate(fragmentos):
-                            # Preparamos el fragmento para la IA
-                            max_dim = 2500
-                            if max(frag.size) > max_dim:
-                                frag.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
+                    exito = False
+                    
+                    for intento in range(3):
+                        if exito:
+                            break
                             
-                            exito_frag = False
-                            for intento in range(2): # Reintentos por fragmento
-                                if exito_frag: break
-                                try:
-                                    respuesta = cliente_ia.models.generate_content(
-                                        model='gemini-2.0-flash',
-                                        contents=[prompt, frag],
-                                        config=types.GenerateContentConfig(temperature=0.0)
-                                    )
-                                    
-                                    raw_text = respuesta.text.strip()
-                                    # Extraer JSON de la respuesta
-                                    if "[" in raw_text:
-                                        json_str = raw_text[raw_text.find("["):raw_text.rfind("]")+1]
-                                        datos = json.loads(json_str)
-                                        
-                                        for cheque in datos:
-                                            # Validamos que no sea un objeto vacío o alucinación sin importe
-                                            if cheque.get("Importe", 0) > 0:
-                                                cheque["Operador"] = st.session_state.usuario_actual
-                                                st.session_state.cheques_procesados.append(cheque)
-                                                cheques_totales_nuevos += 1
-                                        exito_frag = True
-                                except Exception:
-                                    time.sleep(1)
-                                    continue
-                                    
-                    except Exception as e:
-                        errores += 1
-                        st.error(f"Error en imagen {i+1}: {str(e)}")
+                        try:
+                            archivo_imagen.seek(0)
+                            img = Image.open(archivo_imagen)
+                            
+                            if img.mode in ('RGBA', 'P'):
+                                img = img.convert('RGB')
+                                
+                            # Resolución alta para lectura nítida
+                            max_dim = 3000 
+                            if max(img.size) > max_dim:
+                                img.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
+                            
+                            # Llamada a la API con Temperatura 0 para evitar alucinaciones
+                            respuesta = cliente_ia.models.generate_content(
+                                model='gemini-2.5-flash',
+                                contents=[prompt, img],
+                                config=types.GenerateContentConfig(
+                                    temperature=0.0
+                                )
+                            )
+                            
+                            raw_text = respuesta.text.strip()
+                            
+                            texto_para_json = raw_text
+                            if "</Borrador_Analisis>" in raw_text:
+                                texto_para_json = raw_text.split("</Borrador_Analisis>")[1].strip()
+                            
+                            marcador = chr(96) * 3
+                            if texto_para_json.startswith(f"{marcador}json"): 
+                                texto_para_json = texto_para_json[7:-3].strip()
+                            elif texto_para_json.startswith(marcador): 
+                                texto_para_json = texto_para_json[3:-3].strip()
+                            
+                            try:
+                                start_idx = texto_para_json.find('[')
+                                end_idx = texto_para_json.rfind(']') + 1
+                                if start_idx != -1 and end_idx != 0:
+                                    datos_extraidos = json.loads(texto_para_json[start_idx:end_idx])
+                                else:
+                                    start_idx_obj = texto_para_json.find('{')
+                                    end_idx_obj = texto_para_json.rfind('}') + 1
+                                    if start_idx_obj != -1 and end_idx_obj != 0:
+                                        datos_extraidos = [json.loads(texto_para_json[start_idx_obj:end_idx_obj])]
+                                    else:
+                                        raise ValueError("No se detectó el bloque JSON final en la respuesta.")
+                            except Exception as parse_err:
+                                raise ValueError(f"Error al estructurar los datos finales. {parse_err}")
+                            
+                            if isinstance(datos_extraidos, dict): 
+                                datos_extraidos = [datos_extraidos]
+                                
+                            for cheque in datos_extraidos:
+                                cheque["Operador"] = st.session_state.usuario_actual
+                                st.session_state.cheques_procesados.append(cheque)
+                                cheques_totales_nuevos += 1
+                                
+                            exito = True 
+                                
+                        except Exception as e:
+                            error_str = str(e)
+                            if "503" in error_str or "429" in error_str or "timeout" in error_str.lower():
+                                if intento < 2:
+                                    st.warning(f"⏳ Servidor ocupado. Reintentando foto #{i+1} en breve...")
+                                    time.sleep(3)
+                                else:
+                                    errores += 1
+                                    st.error(f"❌ Falló la foto #{i+1}. Excedió el tiempo límite.")
+                            else:
+                                if intento < 2:
+                                    st.warning(f"🔄 Releyendo foto #{i+1} para mejorar precisión...")
+                                    time.sleep(2)
+                                else:
+                                    errores += 1
+                                    st.error(f"❌ Falló la foto #{i+1} | DETALLE: {error_str}")
+                                    break 
+                    
+                    time.sleep(2)
                 
                 if cheques_totales_nuevos > 0:
-                    st.success(f"¡Se procesaron {cheques_totales_nuevos} cheque(s) con éxito!")
+                    st.success(f"¡Se procesaron {cheques_totales_nuevos} cheque(s) en total!")
+                    if errores > 0:
+                        st.warning(f"Aviso: Hubo error en {errores} foto(s). Revisá el detalle arriba.")
+                    
                     st.session_state.reset_key += 1
-                    time.sleep(1)
+                    time.sleep(1.5)
                     st.rerun()
+                elif errores > 0:
+                    st.error("No se pudo extraer la información. Asegurate de que los cheques estén legibles.")
 
 with col_cinta:
     st.subheader("⚙️ Cinta Transportadora")
@@ -226,3 +279,4 @@ with col_cinta:
                 st.rerun()
     else:
         st.info("No hay cheques en la cinta.")
+# ### FIN DEL CÓDIGO ###
