@@ -135,7 +135,7 @@ with col_ingreso:
                 """
                 
                 for i, archivo_imagen in enumerate(imagenes_a_procesar):
-                    max_reintentos = 3
+                    max_reintentos = 5
                     exito = False
                     
                     for intento in range(max_reintentos):
@@ -189,8 +189,9 @@ with col_ingreso:
                             # Detectamos si es un error de saturación de Google (503 o 429)
                             if "503" in error_str or "429" in error_str:
                                 if intento < max_reintentos - 1:
-                                    st.warning(f"⏳ Google saturado. Reintentando foto #{i+1} en {5 * (intento + 1)} segundos...")
-                                    time.sleep(5 * (intento + 1))
+                                    tiempo_espera = 10 * (intento + 1)
+                                    st.warning(f"⏳ Google saturado. Reintentando foto #{i+1} en {tiempo_espera} segundos (Intento {intento + 1} de {max_reintentos - 1})...")
+                                    time.sleep(tiempo_espera)
                                 else:
                                     errores += 1
                                     st.error(f"❌ Falló la foto #{i+1} tras {max_reintentos} intentos | Google no responde (Error 503).")
