@@ -70,14 +70,18 @@ st.title(f"💳 Módulo de Cheques - {st.session_state.usuario_actual}")
 if 'cheques_procesados' not in st.session_state:
     st.session_state.cheques_procesados = []
 
+# --- NUEVO: Clave dinámica para vaciar el uploader automáticamente ---
+if 'reset_key' not in st.session_state:
+    st.session_state.reset_key = 0
+
 col_ingreso, col_cinta = st.columns([1, 2])
 
 with col_ingreso:
     st.subheader("📸 Ingreso de Cheque(s)")
-    st.caption("Podés procesar de 1 a 4 cheques por foto. Seleccioná varias fotos a la vez si lo necesitás.")
+    st.caption("CONSEJO: Subí de a 1 o 2 fotos por vez para no saturar el sistema gratuito.")
     
-    imagen_capturada = st.camera_input("Escanear con cámara")
-    imagenes_subidas = st.file_uploader("O subir foto(s)", type=['jpg', 'jpeg', 'png'], accept_multiple_files=True)
+    imagen_capturada = st.camera_input("Escanear con cámara", key=f"cam_{st.session_state.reset_key}")
+    imagenes_subidas = st.file_uploader("O subir foto(s)", type=['jpg', 'jpeg', 'png'], accept_multiple_files=True, key=f"up_{st.session_state.reset_key}")
     
     imagenes_a_procesar = []
     if imagen_capturada:
@@ -199,7 +203,10 @@ with col_ingreso:
                     st.success(f"¡Se procesaron {cheques_totales_nuevos} cheque(s) en total!")
                     if errores > 0:
                         st.warning(f"Ojo: Hubo {errores} foto(s) que no se procesaron. Podés ver el error arriba.")
-                    time.sleep(3)
+                    
+                    # Reseteamos el uploader para la próxima foto
+                    st.session_state.reset_key += 1
+                    time.sleep(2)
                     st.rerun()
                 elif errores > 0:
                     st.error("Ninguna imagen pudo ser procesada. Por favor lee los detalles técnicos arriba para saber qué falló.")
