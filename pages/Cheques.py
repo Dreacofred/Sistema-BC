@@ -42,7 +42,7 @@ if ruta_logo: st.sidebar.image(ruta_logo, use_container_width=True)
 
 st.sidebar.subheader("👤 Identificación")
 
-# --- MEMORIA COMPARTIDA (Se sincroniza con lector.py) ---
+# --- MEMORIA COMPARTIDA ---
 if 'usuario_actual' not in st.session_state:
     st.session_state.usuario_actual = ""
 
@@ -70,7 +70,6 @@ st.title(f"💳 Módulo de Cheques - {st.session_state.usuario_actual}")
 if 'cheques_procesados' not in st.session_state:
     st.session_state.cheques_procesados = []
 
-# --- NUEVO: Clave dinámica para vaciar el uploader automáticamente ---
 if 'reset_key' not in st.session_state:
     st.session_state.reset_key = 0
 
@@ -78,7 +77,7 @@ col_ingreso, col_cinta = st.columns([1, 2])
 
 with col_ingreso:
     st.subheader("📸 Ingreso de Cheque(s)")
-    st.caption("CONSEJO: Procesá hasta 4 cheques por foto. Podés seleccionar varias fotos a la vez.")
+    st.caption("CONSEJO: Procesá hasta 4 cheques por foto.")
     
     imagen_capturada = st.camera_input("Escanear con cámara", key=f"cam_{st.session_state.reset_key}")
     imagenes_subidas = st.file_uploader("O subir foto(s)", type=['jpg', 'jpeg', 'png'], accept_multiple_files=True, key=f"up_{st.session_state.reset_key}")
@@ -94,31 +93,23 @@ with col_ingreso:
         st.image(imagenes_a_procesar, width=150)
         
         if st.button("Procesar Imagen(es) con IA", use_container_width=True):
-            with st.spinner(f"Analizando {len(imagenes_a_procesar)} foto(s) al detalle... Esto puede tardar unos segundos."):
+            with st.spinner(f"Optimizando y analizando {len(imagenes_a_procesar)} foto(s)..."):
                 cheques_totales_nuevos = 0
                 errores = 0
                 
+                # Prompt directo y sin vueltas para que no pierda tiempo pensando de más
                 prompt = """
-                Sos un experto bancario procesando cheques físicos argentinos. En la imagen puede haber de 1 a 4 cheques apilados.
+                Sos un experto bancario procesando cheques físicos argentinos. En la imagen hay entre 1 y 4 cheques apilados.
+                Extraé los datos de TODOS los cheques que encuentres.
                 
-                INSTRUCCIÓN PASO A PASO PARA NO CONFUNDIR DATOS:
-                1. Primero, escaneá visualmente la imagen de ARRIBA hacia ABAJO.
-                2. Identificá cuántos cheques individuales hay.
-                3. Procesá los cheques estrictamente en orden: primero el de arriba de todo, luego el de abajo, y así sucesivamente. Aisla los datos de cada cheque para no mezclar el CUIT de un cheque con la cuenta o importe de otro.
+                REGLAS DE EXTRACCIÓN:
+                1. EMISOR: Razón social impresa a la izquierda. Ignora sellos de goma.
+                2. CUIT: Número de CUIT impreso.
+                3. BANDA NUMÉRICA: Banco (1er número), Plaza (3er número).
+                4. FECHAS: Fecha_Emision y Fecha_Pago (si es cheque común sin diferido, repetí la fecha de emisión).
+                5. IMPORTE: Número entero (ej: 500000). El punto es separador de miles.
                 
-                REGLAS DE EXTRACCIÓN PARA CADA CHEQUE:
-                1. EMISOR: Es la razón social impresa (ej: "DANKO MADERAS SRL"). Está a la izquierda del cheque. IGNORA LOS SELLOS DE GOMA SOBRE LAS FIRMAS.
-                2. CUIT: El número de CUIT del emisor impreso a la izquierda.
-                3. BANDA NUMÉRICA: 
-                   - El CÓDIGO DE BANCO es el primer número (ej: 386).
-                   - La PLAZA es el tercer número (ej: 3200). 
-                   - IGNORA la sucursal (el número del medio).
-                4. FECHAS: 
-                   - Fecha_Emision: La fecha en la que se emitió/hizo el cheque.
-                   - Fecha_Pago: La fecha de cobro ("Páguese el..."). ¡ATENCIÓN! Si el cheque es un "cheque común" y NO tiene la leyenda "Páguese el..." con una fecha diferida, entonces la Fecha_Pago debe ser EXACTAMENTE LA MISMA que la Fecha_Emision.
-                5. IMPORTE: Devolvé el número entero sin puntos intermedios ni signos (ej: 500000). El punto en el cheque es separador de miles.
-                
-                Devolvé obligatoriamente un ARRAY (lista) de objetos JSON con esta estructura exacta. Podés escribir un breve análisis antes si te ayuda a no confundirte, pero el final de tu respuesta DEBE ser este bloque de código JSON:
+                Devolvé ÚNICAMENTE un ARRAY JSON PURO. Sin texto adicional. Formato estricto:
                 [
                     {
                         "Banco_Cod": "3 dígitos",
@@ -135,18 +126,27 @@ with col_ingreso:
                 """
                 
                 for i, archivo_imagen in enumerate(imagenes_a_procesar):
-                    max_reintentos = 5
                     exito = False
                     
-                    for intento in range(max_reintentos):
+                    for intento in range(3): # Max 3 intentos cortos
                         if exito:
                             break
                             
                         try:
-                            # Reseteamos el puntero del archivo por si es un reintento
                             archivo_imagen.seek(0)
                             img = Image.open(archivo_imagen)
                             
+                            # --- LA SOLUCIÓN: OPTIMIZACIÓN DE IMAGEN ---
+                            # Convertimos a formato compatible y achicamos la foto si es enorme.
+                            # Esto evita el Timeout del servidor y los "falsos 503".
+                            if img.mode in ('RGBA', 'P'):
+                                img = img.convert('RGB')
+                                
+                            max_dim = 1600 # Resolución óptima para lectura rápida
+                            if max(img.size) > max_dim:
+                                img.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
+                            
+                            # Llamada a la IA
                             respuesta = cliente_ia.models.generate_content(
                                 model='gemini-2.5-flash',
                                 contents=[prompt, img]
@@ -157,11 +157,10 @@ with col_ingreso:
                             if raw_text.startswith(f"{marcador}json"): raw_text = raw_text[7:-3].strip()
                             elif raw_text.startswith(marcador): raw_text = raw_text[3:-3].strip()
                             
+                            # Parseo del JSON
                             try:
-                                # Intento 1: Parseo directo
                                 datos_extraidos = json.loads(raw_text)
-                            except Exception as parse_err:
-                                # Intento 2: Rescate agresivo buscando llaves o corchetes
+                            except:
                                 start_idx = raw_text.find('[')
                                 end_idx = raw_text.rfind(']') + 1
                                 if start_idx != -1 and end_idx != 0:
@@ -172,7 +171,7 @@ with col_ingreso:
                                     if start_idx_obj != -1 and end_idx_obj != 0:
                                         datos_extraidos = [json.loads(raw_text[start_idx_obj:end_idx_obj])]
                                     else:
-                                        raise ValueError(f"La IA no devolvió datos válidos. Texto recibido: {raw_text[:50]}...")
+                                        raise ValueError("La IA devolvió texto ilegible.")
                             
                             if isinstance(datos_extraidos, dict): 
                                 datos_extraidos = [datos_extraidos]
@@ -182,39 +181,34 @@ with col_ingreso:
                                 st.session_state.cheques_procesados.append(cheque)
                                 cheques_totales_nuevos += 1
                                 
-                            exito = True # Todo salió bien, no necesitamos reintentar
+                            exito = True 
                                 
                         except Exception as e:
                             error_str = str(e)
-                            # Detectamos si es un error de saturación de Google (503 o 429)
-                            if "503" in error_str or "429" in error_str:
-                                if intento < max_reintentos - 1:
-                                    tiempo_espera = 10 * (intento + 1)
-                                    st.warning(f"⏳ Google saturado. Reintentando foto #{i+1} en {tiempo_espera} segundos (Intento {intento + 1} de {max_reintentos - 1})...")
-                                    time.sleep(tiempo_espera)
+                            if "503" in error_str or "429" in error_str or "timeout" in error_str.lower():
+                                if intento < 2:
+                                    st.warning(f"⏳ Optimizando carga. Reintentando foto #{i+1} en breve...")
+                                    time.sleep(3)
                                 else:
                                     errores += 1
-                                    st.error(f"❌ Falló la foto #{i+1} tras {max_reintentos} intentos | Google no responde (Error 503).")
+                                    st.error(f"❌ Falló la foto #{i+1}. La imagen resultó muy pesada de procesar.")
                             else:
                                 errores += 1
-                                st.error(f"❌ Falló la foto #{i+1} | DETALLE TÉCNICO: {error_str}")
-                                break # Si el error es otro, cancelamos los reintentos de esta foto
+                                st.error(f"❌ Falló la foto #{i+1} | DETALLE: {error_str}")
+                                break 
                     
-                    # Pausa entre fotos distintas para darle respiro al servidor
-                    if len(imagenes_a_procesar) > 1:
-                        time.sleep(3.5)
+                    time.sleep(2) # Pausa cortita entre fotos
                 
                 if cheques_totales_nuevos > 0:
                     st.success(f"¡Se procesaron {cheques_totales_nuevos} cheque(s) en total!")
                     if errores > 0:
-                        st.warning(f"Ojo: Hubo {errores} foto(s) que no se procesaron. Podés ver el error arriba.")
+                        st.warning(f"Ojo: Hubo {errores} foto(s) con error. Revisá el detalle arriba.")
                     
-                    # Reseteamos el uploader para la próxima foto
                     st.session_state.reset_key += 1
-                    time.sleep(2)
+                    time.sleep(1.5)
                     st.rerun()
                 elif errores > 0:
-                    st.error("Ninguna imagen pudo ser procesada. Por favor lee los detalles técnicos arriba para saber qué falló.")
+                    st.error("No se pudo extraer información. Intentá con fotos que enfoquen mejor el lote.")
 
 with col_cinta:
     st.subheader("⚙️ Cinta Transportadora")
