@@ -2,13 +2,12 @@
 # INICIO DEL CÓDIGO
 import streamlit as st
 from google import genai
-from PIL import Image, ImageDraw
+from PIL import Image
 import pandas as pd
 import json
 import os
 import io
 import time
-import re
 from datetime import datetime
 
 # Herramientas para el diseño del Excel
@@ -77,185 +76,155 @@ col_ingreso, col_cinta = st.columns([1, 2])
 
 with col_ingreso:
     st.subheader("📸 Ingreso de Cheque(s)")
-    st.caption("CONSEJO: Acomodá hasta 4 cheques en la foto. Procurá buena luz.")
+    st.caption("CONSEJO: Acomodá hasta 4 cheques en la foto. Procurá buena luz y enfoque.")
     
     imagen_capturada = st.camera_input("Escanear con cámara", key=f"cam_{st.session_state.reset_key}")
     imagenes_subidas = st.file_uploader("O subir foto(s)", type=['jpg', 'jpeg', 'png'], accept_multiple_files=True, key=f"up_{st.session_state.reset_key}")
     
     imagenes_a_procesar = []
-    if imagen_capturada: imagenes_a_procesar.append(imagen_capturada)
-    if imagenes_subidas: imagenes_a_procesar.extend(imagenes_subidas)
+    if imagen_capturada:
+        imagenes_a_procesar.append(imagen_capturada)
+    if imagenes_subidas:
+        imagenes_a_procesar.extend(imagenes_subidas)
 
     if len(imagenes_a_procesar) > 0:
-        st.write(f"**{len(imagenes_a_procesar)} imagen(es) en cola.**")
+        st.write(f"**{len(imagenes_a_procesar)} imagen(es) lista(s)** para analizar.")
+        st.image(imagenes_a_procesar, width=150)
         
-        # Espacio donde vamos a mostrar cómo se pinta de negro
-        visor_proceso = st.empty()
-        visor_proceso.image(imagenes_a_procesar[0], width=200, caption="Imagen original lista")
-        
-        if st.button("Procesar con Enmascaramiento", use_container_width=True):
-            cheques_totales_nuevos = 0
-            errores = 0
-            
-            prompt_conteo = "¿Cuántos cheques distintos hay en esta imagen? Respondé ÚNICAMENTE con un número entero (ejemplo: 1, 2, 3 o 4)."
-            
-            with st.spinner("Iniciando escaneo progresivo..."):
+        if st.button("Procesar Imagen(es) con IA", use_container_width=True):
+            with st.spinner(f"Analizando en ALTA RESOLUCIÓN {len(imagenes_a_procesar)} foto(s)... (Puede tardar unos segundos)"):
+                cheques_totales_nuevos = 0
+                errores = 0
+                
+                # --- PROMPT MAESTRO ---
+                prompt = """
+                Rol: Especialista en Visión Artificial, OCR Financiero y Extracción de Datos (Contexto Bancario Argentino).
+
+                Contexto: El sistema procesa fotografías que contienen entre 1 y 4 cheques físicos apilados. Existe un riesgo crítico de "alucinación por saturación" (cruzar el CUIT, importe o fechas de un cheque a otro). 
+
+                Tarea: Analizar la imagen aplicando "Chain of Thought" (Cadena de Pensamiento). Debes aislar visualmente cada cheque y procesarlo secuencialmente de arriba hacia abajo (o izquierda a derecha). Mientras analizas un cheque, debes ignorar el resto de la imagen.
+
+                Restricciones y Reglas de Extracción:
+                1. Banda Magnética (zona inferior): Formato BBB-SSS-PPPP. Extrae el 1er grupo de 3 dígitos (Banco_Cod) y el 3er grupo de 4 dígitos (Plaza). El 2do grupo (Sucursal) se ignora por completo.
+                2. Fechas: Si el cheque NO especifica una fecha de pago diferido (no dice "Páguese el..."), entonces la "Fecha_Pago" debe ser exactamente igual a la "Fecha_Emision".
+                3. Emisor: Identifica la Razón Social o el titular impreso, generalmente cerca del CUIT. Ignora direcciones, nombres de localidades o sellos de goma.
+                4. CUIT: Busca la palabra literal "CUIT" para extraer el número.
+                5. Importe: Extraer el valor numérico exacto y convertirlo a un número entero continuo, sin puntos separadores de miles ni signos.
+                6. Aislamiento estricto: Prohibido combinar datos de diferentes cheques.
+
+                Formato de salida:
+                Tu respuesta DEBE contener obligatoriamente dos partes:
+                1. Un bloque de texto llamado `<Borrador_Analisis>` donde detalles tu lectura cheque por cheque para asegurar que no cruzas datos.
+                2. Un bloque de código con UN SOLO ARRAY de objetos JSON puros, respetando ESTRICTAMENTE la siguiente estructura:
+
+                ```json
+                [
+                  {
+                    "Banco_Cod": "3 dígitos",
+                    "Plaza": "4 dígitos",
+                    "Banco_Nombre": "Nombre del Banco",
+                    "Numero_Cheque": "Número del cheque",
+                    "Importe": número entero sin puntos,
+                    "Fecha_Emision": "DD/MM/AAAA",
+                    "Fecha_Pago": "DD/MM/AAAA",
+                    "Emisor": "Razón Social o Titular",
+                    "CUIT": "XX-XXXXXXXX-X"
+                  }
+                ]
+                ```
+                """
+                
                 for i, archivo_imagen in enumerate(imagenes_a_procesar):
-                    try:
-                        archivo_imagen.seek(0)
-                        img = Image.open(archivo_imagen)
-                        
-                        if img.mode in ('RGBA', 'P'): img = img.convert('RGB')
-                        
-                        # Mantenemos alta resolución para lectura clara
-                        max_dim = 2500 
-                        if max(img.size) > max_dim:
-                            img.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
-                        
-                        w, h = img.size
-                        es_horizontal = w > h
-                        
-                        # 1. Contar los cheques para saber cuántas veces iterar
-                        resp_conteo = cliente_ia.models.generate_content(
-                            model='gemini-2.5-flash',
-                            contents=[prompt_conteo, img]
-                        )
-                        numeros_encontrados = re.findall(r'\d+', resp_conteo.text)
-                        cantidad = int(numeros_encontrados[0]) if numeros_encontrados else 1
-                        cantidad = min(max(cantidad, 1), 5)
-                        
-                        st.info(f"📄 Foto {i+1}: Detectados {cantidad} cheque(s). Iniciando lectura y borrado secuencial...")
-                        
-                        # 2. Inicializamos el lienzo y el límite del marcador negro
-                        draw = ImageDraw.Draw(img)
-                        limite_actual_pintado = 0
-                        
-                        # Variables dinámicas según orientación
-                        orientacion_texto = "HORIZONTAL (uno al lado del otro)" if es_horizontal else "VERTICAL (apilados)"
-                        clave_coordenada = "limite_derecho_x" if es_horizontal else "limite_inferior_y"
-                        instruccion_enfoque = "el cheque más a la IZQUIERDA" if es_horizontal else "el cheque más ARRIBA"
-                        
-                        # 3. Bucle de Lectura y Pintado
-                        for k in range(cantidad):
-                            # Mostramos en pantalla cómo va quedando la imagen
-                            visor_proceso.image(img, width=350, caption=f"Foto {i+1} - Analizando cheque {k+1} de {cantidad}...")
+                    exito = False
+                    
+                    for intento in range(3):
+                        if exito:
+                            break
                             
-                            prompt_extraccion = f"""
-                            Rol: Especialista en OCR Financiero Argentino.
+                        try:
+                            archivo_imagen.seek(0)
+                            img = Image.open(archivo_imagen)
                             
-                            Contexto: Los cheques están orientados de forma {orientacion_texto}. La imagen puede tener bloques negros tapando los cheques que ya procesamos.
+                            if img.mode in ('RGBA', 'P'):
+                                img = img.convert('RGB')
+                                
+                            # Resolución alta para lectura nítida
+                            max_dim = 3000 
+                            if max(img.size) > max_dim:
+                                img.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
                             
-                            Tarea: Enfocate ÚNICAMENTE en {instruccion_enfoque} que esté VISIBLE (sin pintar de negro). Extraé sus datos.
-                            Además, necesito saber dónde termina este cheque para poder taparlo de negro en el próximo paso.
+                            respuesta = cliente_ia.models.generate_content(
+                                model='gemini-2.5-flash',
+                                contents=[prompt, img]
+                            )
                             
-                            Estrategia de Ejecución (Chain of Thought):
-                            Abre un `<Borrador_Analisis>`. Transcribe literalmente lo que ves del cheque actual.
+                            raw_text = respuesta.text.strip()
                             
-                            Restricciones:
-                            - Banda Magnética: BBB-SSS-PPPP. Extraé Banco_Cod (BBB) y Plaza (PPPP). IGNORÁ SUCURSAL (SSS).
-                            - Emisor: Razón Social. IGNORÁ "FILIAL", "SUCURSAL" o localidades.
-                            - CUIT: Buscar "CUIT".
+                            texto_para_json = raw_text
+                            if "</Borrador_Analisis>" in raw_text:
+                                texto_para_json = raw_text.split("</Borrador_Analisis>")[1].strip()
                             
-                            Formato de Salida Obligatorio:
-                            <Borrador_Analisis>
-                            (Tu análisis mental aquí)
-                            </Borrador_Analisis>
-                            ```json
-                            {{
-                                "Banco_Cod": "3 dígitos",
-                                "Plaza": "4 dígitos",
-                                "Banco_Nombre": "String",
-                                "Numero_Cheque": "String",
-                                "Importe": 0,
-                                "Fecha_Emision": "DD/MM/AAAA",
-                                "Fecha_Pago": "DD/MM/AAAA",
-                                "Emisor": "String",
-                                "CUIT": "XX-XXXXXXXX-X",
-                                "{clave_coordenada}": Número del 0 al 1000 que indica dónde termina el papel de ESTE cheque (0 es inicio, 1000 es fin de imagen).
-                            }}
-                            ```
-                            """
+                            marcador = chr(96) * 3
+                            if texto_para_json.startswith(f"{marcador}json"): 
+                                texto_para_json = texto_para_json[7:-3].strip()
+                            elif texto_para_json.startswith(marcador): 
+                                texto_para_json = texto_para_json[3:-3].strip()
                             
-                            exito_lectura = False
-                            for intento in range(3):
-                                if exito_lectura: break
-                                try:
-                                    resp_lectura = cliente_ia.models.generate_content(
-                                        model='gemini-2.5-flash',
-                                        contents=[prompt_extraccion, img]
-                                    )
-                                    
-                                    raw_text = resp_lectura.text.strip()
-                                    texto_para_json = raw_text
-                                    if "</Borrador_Analisis>" in raw_text:
-                                        texto_para_json = raw_text.split("</Borrador_Analisis>")[1].strip()
-                                    
-                                    marcador = chr(96) * 3
-                                    if texto_para_json.startswith(f"{marcador}json"): texto_para_json = texto_para_json[7:-3].strip()
-                                    elif texto_para_json.startswith(marcador): texto_para_json = texto_para_json[3:-3].strip()
-                                    
+                            try:
+                                start_idx = texto_para_json.find('[')
+                                end_idx = texto_para_json.rfind(']') + 1
+                                if start_idx != -1 and end_idx != 0:
+                                    datos_extraidos = json.loads(texto_para_json[start_idx:end_idx])
+                                else:
                                     start_idx_obj = texto_para_json.find('{')
                                     end_idx_obj = texto_para_json.rfind('}') + 1
-                                    
                                     if start_idx_obj != -1 and end_idx_obj != 0:
-                                        datos_cheque = json.loads(texto_para_json[start_idx_obj:end_idx_obj])
-                                        
-                                        # Extraemos la coordenada para pintar de negro y la sacamos del dict final
-                                        coordenada_fin = datos_cheque.pop(clave_coordenada, 1000)
-                                        
-                                        datos_cheque["Operador"] = st.session_state.usuario_actual
-                                        st.session_state.cheques_procesados.append(datos_cheque)
-                                        cheques_totales_nuevos += 1
-                                        exito_lectura = True
-                                        
-                                        # --- LA MAGIA DEL ENMASCARAMIENTO (PINTAMOS DE NEGRO) ---
-                                        # Si la IA alucina y tira 1000, forzamos un avance matemático seguro
-                                        if coordenada_fin >= 980 and k < (cantidad - 1):
-                                            coordenada_fin = int((k + 1) * (1000 / cantidad))
-                                            
-                                        if es_horizontal:
-                                            x_pixel = int(w * (coordenada_fin / 1000.0))
-                                            # Evitamos retroceder
-                                            if x_pixel <= limite_actual_pintado: x_pixel = limite_actual_pintado + int(w/cantidad)
-                                            draw.rectangle([limite_actual_pintado, 0, x_pixel, h], fill="black")
-                                            limite_actual_pintado = x_pixel
-                                        else:
-                                            y_pixel = int(h * (coordenada_fin / 1000.0))
-                                            # Evitamos retroceder
-                                            if y_pixel <= limite_actual_pintado: y_pixel = limite_actual_pintado + int(h/cantidad)
-                                            draw.rectangle([0, limite_actual_pintado, w, y_pixel], fill="black")
-                                            limite_actual_pintado = y_pixel
-                                            
+                                        datos_extraidos = [json.loads(texto_para_json[start_idx_obj:end_idx_obj])]
                                     else:
-                                        raise ValueError("JSON roto.")
-                                        
-                                except Exception as e:
-                                    if "503" in str(e) or "429" in str(e): time.sleep(3)
-                                    elif intento == 2:
-                                        errores += 1
-                                        st.warning(f"⚠️ Cheque {k+1} ilegible. Avanzando al siguiente...")
-                                        # Si falla, pintamos de negro matemáticamente para poder avanzar
-                                        avance = int(w/cantidad) if es_horizontal else int(h/cantidad)
-                                        limite_actual_pintado += avance
-                                        if es_horizontal: draw.rectangle([0, 0, limite_actual_pintado, h], fill="black")
-                                        else: draw.rectangle([0, 0, w, limite_actual_pintado], fill="black")
+                                        raise ValueError("No se detectó el bloque JSON final en la respuesta.")
+                            except Exception as parse_err:
+                                raise ValueError(f"Error al estructurar los datos finales. {parse_err}")
                             
-                            time.sleep(2) # Respiro para Google
-                            
-                    except Exception as e:
-                        errores += 1
-                        st.error(f"❌ Falló el análisis de la foto #{i+1}.")
-                
-                # Al final mostramos la imagen toda tapada
-                visor_proceso.image(img, width=350, caption="¡Escaneo completado!")
+                            if isinstance(datos_extraidos, dict): 
+                                datos_extraidos = [datos_extraidos]
+                                
+                            for cheque in datos_extraidos:
+                                cheque["Operador"] = st.session_state.usuario_actual
+                                st.session_state.cheques_procesados.append(cheque)
+                                cheques_totales_nuevos += 1
+                                
+                            exito = True 
+                                
+                        except Exception as e:
+                            error_str = str(e)
+                            if "503" in error_str or "429" in error_str or "timeout" in error_str.lower():
+                                if intento < 2:
+                                    st.warning(f"⏳ Servidor ocupado. Reintentando foto #{i+1} en breve...")
+                                    time.sleep(3)
+                                else:
+                                    errores += 1
+                                    st.error(f"❌ Falló la foto #{i+1}. Excedió el tiempo límite.")
+                            else:
+                                if intento < 2:
+                                    st.warning(f"🔄 Releyendo foto #{i+1} para mejorar precisión...")
+                                    time.sleep(2)
+                                else:
+                                    errores += 1
+                                    st.error(f"❌ Falló la foto #{i+1} | DETALLE: {error_str}")
+                                    break 
+                    
+                    time.sleep(2)
                 
                 if cheques_totales_nuevos > 0:
-                    st.success(f"¡Listo! Se procesaron {cheques_totales_nuevos} cheque(s).")
+                    st.success(f"¡Se procesaron {cheques_totales_nuevos} cheque(s) en total!")
+                    if errores > 0:
+                        st.warning(f"Aviso: Hubo error en {errores} foto(s). Revisá el detalle arriba.")
+                    
                     st.session_state.reset_key += 1
                     time.sleep(1.5)
                     st.rerun()
                 elif errores > 0:
-                    st.error("No se pudo extraer información.")
+                    st.error("No se pudo extraer la información. Asegurate de que los cheques estén legibles.")
 
 with col_cinta:
     st.subheader("⚙️ Cinta Transportadora")
