@@ -2,14 +2,14 @@
 # INICIO DEL CÓDIGO
 import streamlit as st
 from google import genai
-from google.genai import types  # Agregado para configurar la Temperatura
+from google.genai import types
 from PIL import Image
 import pandas as pd
 import json
 import os
 import io
 import time
-import textwrap  # Agregado para arreglar la sangría del prompt
+import textwrap
 from datetime import datetime
 
 # Herramientas para el diseño del Excel
@@ -94,13 +94,12 @@ with col_ingreso:
         st.image(imagenes_a_procesar, width=150)
         
         if st.button("Procesar Imagen(es) con IA", use_container_width=True):
-            with st.spinner(f"Analizando en ALTA RESOLUCIÓN {len(imagenes_a_procesar)} foto(s)... (Puede tardar unos segundos)"):
+            with st.spinner(f"El Cirujano PRO está analizando la imagen... (Tardará entre 15 y 30 segundos, paciencia)"):
                 cheques_totales_nuevos = 0
                 errores = 0
                 
-                # --- PROMPT MAESTRO CORREGIDO ---
-                # Usamos textwrap.dedent para limpiar los espacios
-                prompt = textwrap.dedent("""
+                # --- PROMPT DEFINITIVO (COMO INSTRUCCIÓN DE SISTEMA) ---
+                instruccion_sistema = textwrap.dedent("""
                 Rol: Especialista en Visión Artificial, OCR Financiero y Extracción de Datos (Contexto Bancario Argentino).
 
                 Contexto: El sistema procesa fotografías que contienen entre 1 y 4 cheques físicos apilados. Existe un riesgo crítico de "alucinación por saturación" (cruzar el CUIT, importe o fechas de un cheque a otro). 
@@ -110,10 +109,11 @@ with col_ingreso:
                 Restricciones y Reglas de Extracción:
                 1. Banda Magnética (zona inferior): Formato BBB-SSS-PPPP. Extrae el 1er grupo de 3 dígitos (Banco_Cod) y el 3er grupo de 4 dígitos (Plaza). El 2do grupo (Sucursal) se ignora por completo.
                 2. Fechas: Si el cheque NO especifica una fecha de pago diferido (no dice "Páguese el..."), entonces la "Fecha_Pago" debe ser exactamente igual a la "Fecha_Emision".
-                3. Emisor: Identifica la Razón Social o el titular impreso, generalmente cerca del CUIT. Ignora direcciones, nombres de localidades o sellos de goma.
-                4. CUIT: Busca la palabra literal "CUIT" para extraer el número.
-                5. Importe: Extraer el valor numérico exacto y convertido a un número entero continuo, sin puntos separadores de miles ni signos.
-                6. Aislamiento estricto: Prohibido combinar datos de diferentes cheques.
+                3. Emisor y CUIT (Anclaje Visual): Estos datos SIEMPRE están en la misma línea física. El nombre del Emisor (Razón Social) está inmediatamente a la izquierda o a la derecha de la palabra "CUIT".
+                4. Regla de Oro del Emisor: PROHIBIDO extraer el nombre que aparece después de "Páguese a" o "A la orden de", ya que ese es el beneficiario. Debes buscar exclusivamente en la zona de firmas/datos del titular (generalmente abajo a la izquierda o centro-izquierda).
+                5. CUIT: Extrae los 11 dígitos que acompañan a la palabra "CUIT" en esa misma línea. Si hay dudas, prioriza el texto que tiene formato de CUIT (XX-XXXXXXXX-X).
+                6. Importe: Extraer el valor numérico exacto y convertirlo a un número entero continuo, sin puntos separadores de miles ni signos.
+                7. Aislamiento estricto: Prohibido combinar datos de diferentes cheques.
 
                 Formato de salida:
                 Tu respuesta DEBE contener obligatoriamente dos partes:
@@ -135,7 +135,7 @@ with col_ingreso:
                   }
                 ]
                 ```
-                """)
+                """).strip()
                 
                 for i, archivo_imagen in enumerate(imagenes_a_procesar):
                     exito = False
@@ -151,17 +151,19 @@ with col_ingreso:
                             if img.mode in ('RGBA', 'P'):
                                 img = img.convert('RGB')
                                 
-                            # Resolución alta para lectura nítida
+                            # Resolución alta para el modelo PRO
                             max_dim = 3000 
                             if max(img.size) > max_dim:
                                 img.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
                             
-                            # Llamada a la API con Temperatura 0 para evitar alucinaciones
+                            # --- LLAMADA AL MODELO PRO CON INSTRUCCIÓN DE SISTEMA Y TEMPERATURA 0 ---
                             respuesta = cliente_ia.models.generate_content(
-                                model='gemini-2.5-flash',
-                                contents=[prompt, img],
+                                model='gemini-1.5-pro', # EL CAMBIO PRINCIPAL
+                                contents=[img], # Solo mandamos la imagen acá
                                 config=types.GenerateContentConfig(
-                                    temperature=0.0
+                                    system_instruction=instruccion_sistema, # El prompt va acá
+                                    temperature=0.0,
+                                    top_p=1.0
                                 )
                             )
                             
@@ -206,15 +208,15 @@ with col_ingreso:
                             error_str = str(e)
                             if "503" in error_str or "429" in error_str or "timeout" in error_str.lower():
                                 if intento < 2:
-                                    st.warning(f"⏳ Servidor ocupado. Reintentando foto #{i+1} en breve...")
-                                    time.sleep(3)
+                                    st.warning(f"⏳ Servidor ocupado o pensando mucho. Reintentando en breve...")
+                                    time.sleep(4)
                                 else:
                                     errores += 1
                                     st.error(f"❌ Falló la foto #{i+1}. Excedió el tiempo límite.")
                             else:
                                 if intento < 2:
-                                    st.warning(f"🔄 Releyendo foto #{i+1} para mejorar precisión...")
-                                    time.sleep(2)
+                                    st.warning(f"🔄 Ajustando enfoque. Releyendo foto #{i+1}...")
+                                    time.sleep(3)
                                 else:
                                     errores += 1
                                     st.error(f"❌ Falló la foto #{i+1} | DETALLE: {error_str}")
@@ -223,7 +225,7 @@ with col_ingreso:
                     time.sleep(2)
                 
                 if cheques_totales_nuevos > 0:
-                    st.success(f"¡Se procesaron {cheques_totales_nuevos} cheque(s) en total!")
+                    st.success(f"¡Se procesaron {cheques_totales_nuevos} cheque(s) con la inteligencia del modelo PRO!")
                     if errores > 0:
                         st.warning(f"Aviso: Hubo error en {errores} foto(s). Revisá el detalle arriba.")
                     
