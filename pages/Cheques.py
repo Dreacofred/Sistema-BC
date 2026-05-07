@@ -8,6 +8,7 @@ import json
 import os
 import io
 import time
+import re
 from datetime import datetime
 
 # Herramientas para el diseño del Excel
@@ -92,53 +93,58 @@ with col_ingreso:
         st.image(imagenes_a_procesar, width=150)
         
         if st.button("Procesar Imagen(es) con IA", use_container_width=True):
-            with st.spinner(f"Analizando {len(imagenes_a_procesar)} foto(s)..."):
+            with st.spinner(f"El experto IA está analizando {len(imagenes_a_procesar)} foto(s)... (Puede tardar unos segundos extra por el nivel de detalle)"):
                 cheques_totales_nuevos = 0
                 errores = 0
                 
-                # --- SÚPER PROMPT: NAVEGACIÓN + MAPA ---
+                # --- SÚPER PROMPT CREADO POR EL GEM ---
                 prompt = """
-                Sos un experto bancario procesando cheques físicos argentinos. En la imagen hay entre 1 y 4 cheques apilados.
-                
-                INSTRUCCIONES DE NAVEGACIÓN (CRÍTICO PARA NO MEZCLAR DATOS):
-                1. Escaneá la imagen de ARRIBA hacia ABAJO.
-                2. Identificá visualmente cuántos cheques hay en total.
-                3. Procesá cada cheque UNO POR UNO, estrictamente de arriba hacia abajo. No pases al cheque de abajo hasta haber extraído todos los datos del cheque actual.
-                
-                PARA CADA CHEQUE QUE VISITES, USÁ ESTE MAPA EXACTO:
-                
-                --- ZONA SUPERIOR ---
-                * Izquierda/Centro: Nombre del Banco.
-                * Derecha: "Número" impreso del cheque.
-                * Extremo Derecho: Símbolo "$" con el Importe en números enteros.
-                
-                --- ZONA MEDIA ---
-                * Arriba: FECHA DE EMISIÓN.
-                * Abajo de la emisión: FECHA DE PAGO diferido. (Si no tiene, repetí la de emisión).
-                * Izquierda: 
-                  - CUIT del emisor (Formato XX-XXXXXXXX-X).
-                  - EMISOR: Es la Razón Social o titular. IGNORÁ nombres de calles o ciudades (ej: ignorá "Alta Gracia").
-                
-                --- ZONA INFERIOR ---
-                * BANDA NUMÉRICA MAGNÉTICA (Abajo de todo, números con guiones):
-                  - Banco_Cod: 1er grupo de números (3 dígitos).
-                  - Sucursal: 2do grupo de números (¡IGNORAR TOTALMENTE!).
-                  - Plaza: 3er grupo de números (4 dígitos, ej: 3100, 3218, 5186).
-                
-                Devolvé ÚNICAMENTE un ARRAY JSON PURO, con los cheques ordenados de arriba hacia abajo. Sin texto adicional. Formato estricto:
+                Rol: Especialista en Visión Artificial, OCR Financiero y Extracción Estructurada de Datos (Contexto Bancario Argentino).
+
+                Contexto: Vas a procesar una imagen que contiene entre 1 y 4 cheques físicos argentinos (apilados vertical u horizontalmente). Las imágenes presentan alta densidad de información, sellos superpuestos, múltiples fechas y ruido visual.
+
+                Tarea: Extraer con 100% de precisión los datos críticos de CADA cheque en la imagen y estructurarlos en un JSON. Para evitar cruzar datos entre cheques o inventar información (alucinación por saturación), es OBLIGATORIO que realices un análisis metódico cheque por cheque antes de emitir la respuesta final.
+
+                Estrategia de Ejecución (Chain of Thought OBLIGATORIO):
+                Antes de generar el JSON, debes abrir un bloque de texto llamado `<Borrador_Analisis>`. En este bloque, debes hacer una transcripción mental secuencial (de arriba hacia abajo o izquierda a derecha). Por cada cheque detectado, redacta de forma muy concisa:
+                1. Ubicación: (Ej: Cheque 1 - Arriba).
+                2. Banda Magnética: [Escribe la banda detectada BBB-SSS-PPPP]. Aislar Banco_Cod y Plaza.
+                3. Importe: [Escribe el importe numérico detectado. Verifica visualmente la cantidad exacta de ceros].
+                4. Fechas: [Identificar emisión vs. pago].
+                5. Emisor y CUIT: [Identificar el texto exacto ubicado en la misma línea].
+
+                Restricciones y Reglas de Negocio Críticas:
+                - Banda Magnética (zona inferior): El formato es siempre `BBB-SSS-PPPP`. 
+                  * `Banco_Cod` = 1er grupo de 3 dígitos (`BBB`).
+                  * `Plaza` = 3er grupo de 4 dígitos (`PPPP`). 
+                  * SUCURSAL = 2do grupo (`SSS`) -> DEBE IGNORARSE COMPLETAMENTE.
+                - Fechas: Si el cheque NO especifica una fecha de pago diferido (no dice "Páguese el..."), entonces la `Fecha_Pago` debe ser idéntica a la `Fecha_Emision`.
+                - Emisor: Debe ser la Razón Social o titular impreso. Para evitar extraer nombres erróneos, DEBES buscar el nombre del emisor que se encuentra al lado del CUIT o en su mismo renglón. Ignora absolutamente cualquier texto proveniente de sellos de goma, direcciones o nombres de localidades.
+                - CUIT: Buscar exclusivamente la palabra literal "CUIT" para extraer el número (Formato XX-XXXXXXXX-X).
+                - Importe Exacto: No asumas valores. Verifica estrictamente la cantidad de ceros (ej. no confundir 500.000 con 500). El valor final debe ser un número entero sin separadores de miles ni puntos.
+                - Aislamiento: La información de un cheque no debe mezclarse jamás con la del cheque adyacente.
+
+                Formato de Salida:
+                Tu respuesta DEBE contener únicamente dos bloques: el `<Borrador_Analisis>` y un bloque de código con UN SOLO ARRAY de objetos JSON puros. No agregues saludos ni explicaciones fuera de este formato.
+
+                <Borrador_Analisis>
+                (Tu análisis secuencial paso a paso aquí)
+                </Borrador_Analisis>
+                ```json
                 [
-                    {
-                        "Banco_Cod": "3 dígitos",
-                        "Plaza": "4 dígitos",
-                        "Banco_Nombre": "Nombre del Banco",
-                        "Numero_Cheque": "Número",
-                        "Importe": 0.00,
-                        "Fecha_Emision": "DD/MM/AAAA",
-                        "Fecha_Pago": "DD/MM/AAAA",
-                        "Emisor": "Razón Social o Titular",
-                        "CUIT": "XX-XXXXXXXX-X"
-                    }
+                  {
+                    "Banco_Cod": "3 dígitos",
+                    "Plaza": "4 dígitos",
+                    "Banco_Nombre": "String",
+                    "Numero_Cheque": "String",
+                    "Importe": 0,
+                    "Fecha_Emision": "DD/MM/AAAA",
+                    "Fecha_Pago": "DD/MM/AAAA",
+                    "Emisor": "String",
+                    "CUIT": "XX-XXXXXXXX-X"
+                  }
                 ]
+                ```
                 """
                 
                 for i, archivo_imagen in enumerate(imagenes_a_procesar):
@@ -152,7 +158,6 @@ with col_ingreso:
                             archivo_imagen.seek(0)
                             img = Image.open(archivo_imagen)
                             
-                            # Optimización para evitar saturar el servidor
                             if img.mode in ('RGBA', 'P'):
                                 img = img.convert('RGB')
                                 
@@ -166,25 +171,36 @@ with col_ingreso:
                             )
                             
                             raw_text = respuesta.text.strip()
-                            marcador = chr(96) * 3
-                            if raw_text.startswith(f"{marcador}json"): raw_text = raw_text[7:-3].strip()
-                            elif raw_text.startswith(marcador): raw_text = raw_text[3:-3].strip()
                             
-                            # Parseo
+                            # --- NUEVA LÓGICA DE PARSEO INTELIGENTE ---
+                            # Separamos el borrador (pensamiento de la IA) del JSON final
+                            texto_para_json = raw_text
+                            if "</Borrador_Analisis>" in raw_text:
+                                texto_para_json = raw_text.split("</Borrador_Analisis>")[1].strip()
+                            
+                            # Limpiamos las comillas invertidas si las puso
+                            marcador = chr(96) * 3
+                            if texto_para_json.startswith(f"{marcador}json"): 
+                                texto_para_json = texto_para_json[7:-3].strip()
+                            elif texto_para_json.startswith(marcador): 
+                                texto_para_json = texto_para_json[3:-3].strip()
+                            
+                            # Intentamos extraer el array JSON
                             try:
-                                datos_extraidos = json.loads(raw_text)
-                            except:
-                                start_idx = raw_text.find('[')
-                                end_idx = raw_text.rfind(']') + 1
+                                start_idx = texto_para_json.find('[')
+                                end_idx = texto_para_json.rfind(']') + 1
                                 if start_idx != -1 and end_idx != 0:
-                                    datos_extraidos = json.loads(raw_text[start_idx:end_idx])
+                                    datos_extraidos = json.loads(texto_para_json[start_idx:end_idx])
                                 else:
-                                    start_idx_obj = raw_text.find('{')
-                                    end_idx_obj = raw_text.rfind('}') + 1
+                                    # Por si devuelve un solo objeto
+                                    start_idx_obj = texto_para_json.find('{')
+                                    end_idx_obj = texto_para_json.rfind('}') + 1
                                     if start_idx_obj != -1 and end_idx_obj != 0:
-                                        datos_extraidos = [json.loads(raw_text[start_idx_obj:end_idx_obj])]
+                                        datos_extraidos = [json.loads(texto_para_json[start_idx_obj:end_idx_obj])]
                                     else:
-                                        raise ValueError("La IA devolvió texto ilegible.")
+                                        raise ValueError("No se detectó el bloque JSON final en la respuesta.")
+                            except Exception as parse_err:
+                                raise ValueError(f"Error al estructurar los datos finales. {parse_err}")
                             
                             if isinstance(datos_extraidos, dict): 
                                 datos_extraidos = [datos_extraidos]
@@ -206,14 +222,18 @@ with col_ingreso:
                                     errores += 1
                                     st.error(f"❌ Falló la foto #{i+1}. Excedió el tiempo límite.")
                             else:
-                                errores += 1
-                                st.error(f"❌ Falló la foto #{i+1} | DETALLE: {error_str}")
-                                break 
+                                if intento < 2:
+                                    st.warning(f"🔄 Ajustando lectura de foto #{i+1} para mejorar precisión...")
+                                    time.sleep(2)
+                                else:
+                                    errores += 1
+                                    st.error(f"❌ Falló la foto #{i+1} | DETALLE: {error_str}")
+                                    break 
                     
                     time.sleep(2)
                 
                 if cheques_totales_nuevos > 0:
-                    st.success(f"¡Se procesaron {cheques_totales_nuevos} cheque(s) en total!")
+                    st.success(f"¡Se procesaron {cheques_totales_nuevos} cheque(s) en total con alta precisión!")
                     if errores > 0:
                         st.warning(f"Ojo: Hubo {errores} foto(s) con error. Revisá el detalle arriba.")
                     
