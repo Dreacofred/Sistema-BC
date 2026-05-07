@@ -78,7 +78,7 @@ col_ingreso, col_cinta = st.columns([1, 2])
 
 with col_ingreso:
     st.subheader("📸 Ingreso de Cheque(s)")
-    st.caption("CONSEJO: Subí de a 1 o 2 fotos por vez para no saturar el sistema gratuito.")
+    st.caption("CONSEJO: Procesá hasta 4 cheques por foto. Podés seleccionar varias fotos a la vez.")
     
     imagen_capturada = st.camera_input("Escanear con cámara", key=f"cam_{st.session_state.reset_key}")
     imagenes_subidas = st.file_uploader("O subir foto(s)", type=['jpg', 'jpeg', 'png'], accept_multiple_files=True, key=f"up_{st.session_state.reset_key}")
@@ -99,8 +99,12 @@ with col_ingreso:
                 errores = 0
                 
                 prompt = """
-                Sos un experto bancario procesando cheques físicos argentinos. En la imagen puede haber de 1 a 4 cheques.
-                Analizá la imagen detalladamente y extraé los datos de TODOS los cheques que encuentres.
+                Sos un experto bancario procesando cheques físicos argentinos. En la imagen puede haber de 1 a 4 cheques apilados.
+                
+                INSTRUCCIÓN PASO A PASO PARA NO CONFUNDIR DATOS:
+                1. Primero, escaneá visualmente la imagen de ARRIBA hacia ABAJO.
+                2. Identificá cuántos cheques individuales hay.
+                3. Procesá los cheques estrictamente en orden: primero el de arriba de todo, luego el de abajo, y así sucesivamente. Aisla los datos de cada cheque para no mezclar el CUIT de un cheque con la cuenta o importe de otro.
                 
                 REGLAS DE EXTRACCIÓN PARA CADA CHEQUE:
                 1. EMISOR: Es la razón social impresa (ej: "DANKO MADERAS SRL"). Está a la izquierda del cheque. IGNORA LOS SELLOS DE GOMA SOBRE LAS FIRMAS.
@@ -112,9 +116,9 @@ with col_ingreso:
                 4. FECHAS: 
                    - Fecha_Emision: La fecha en la que se emitió/hizo el cheque.
                    - Fecha_Pago: La fecha de cobro ("Páguese el..."). ¡ATENCIÓN! Si el cheque es un "cheque común" y NO tiene la leyenda "Páguese el..." con una fecha diferida, entonces la Fecha_Pago debe ser EXACTAMENTE LA MISMA que la Fecha_Emision.
-                5. IMPORTE: Devolvé el número entero (ej: 500000). El punto en el cheque es separador de miles.
+                5. IMPORTE: Devolvé el número entero sin puntos intermedios ni signos (ej: 500000). El punto en el cheque es separador de miles.
                 
-                Devolvé ÚNICAMENTE un ARRAY de objetos JSON con esta estructura exacta. NO agregues comillas invertidas ni texto adicional. SOLO EL JSON PURO:
+                Devolvé obligatoriamente un ARRAY (lista) de objetos JSON con esta estructura exacta. Podés escribir un breve análisis antes si te ayuda a no confundirte, pero el final de tu respuesta DEBE ser este bloque de código JSON:
                 [
                     {
                         "Banco_Cod": "3 dígitos",
@@ -157,7 +161,7 @@ with col_ingreso:
                                 # Intento 1: Parseo directo
                                 datos_extraidos = json.loads(raw_text)
                             except Exception as parse_err:
-                                # Intento 2: Rescate agresivo buscando corchetes
+                                # Intento 2: Rescate agresivo buscando llaves o corchetes
                                 start_idx = raw_text.find('[')
                                 end_idx = raw_text.rfind(']') + 1
                                 if start_idx != -1 and end_idx != 0:
@@ -195,7 +199,7 @@ with col_ingreso:
                                 st.error(f"❌ Falló la foto #{i+1} | DETALLE TÉCNICO: {error_str}")
                                 break # Si el error es otro, cancelamos los reintentos de esta foto
                     
-                    # Pausa entre fotos distintas
+                    # Pausa entre fotos distintas para darle respiro al servidor
                     if len(imagenes_a_procesar) > 1:
                         time.sleep(3.5)
                 
