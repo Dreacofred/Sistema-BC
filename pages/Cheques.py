@@ -8,6 +8,7 @@ import json
 import os
 import io
 import time
+import re
 from datetime import datetime
 
 # Herramientas para el diseño del Excel
@@ -42,7 +43,6 @@ if ruta_logo: st.sidebar.image(ruta_logo, use_container_width=True)
 
 st.sidebar.subheader("👤 Identificación")
 
-# --- MEMORIA COMPARTIDA ---
 if 'usuario_actual' not in st.session_state:
     st.session_state.usuario_actual = ""
 
@@ -63,7 +63,36 @@ if not st.session_state.usuario_actual.strip():
 st.sidebar.info(f"Operador activo: {st.session_state.usuario_actual}")
 
 # ==========================================
-# 3. MÓDULO PRINCIPAL DE CHEQUES
+# 3. LÓGICA DE RECORTE INTELIGENTE (DIVIDE Y VENCERÁS)
+# ==========================================
+def recortar_cheques(img, cantidad):
+    """Corta la imagen en N pedazos, asegurando un margen de seguridad."""
+    w, h = img.size
+    slices = []
+    if cantidad <= 1:
+        return [img]
+        
+    # Definimos orientación. Si es más ancha que alta, los cheques están lado a lado.
+    if w > h:
+        paso = w / cantidad
+        superposicion = paso * 0.20 # 20% de margen para no cortar números a la mitad
+        for i in range(cantidad):
+            izq = max(0, int(i * paso - superposicion))
+            der = min(w, int((i + 1) * paso + superposicion))
+            slices.append(img.crop((izq, 0, der, h)))
+    else:
+        # Están apilados de arriba hacia abajo
+        paso = h / cantidad
+        superposicion = paso * 0.20
+        for i in range(cantidad):
+            arr = max(0, int(i * paso - superposicion))
+            aba = min(h, int((i + 1) * paso + superposicion))
+            slices.append(img.crop((0, arr, w, aba)))
+            
+    return slices
+
+# ==========================================
+# 4. MÓDULO PRINCIPAL DE CHEQUES
 # ==========================================
 st.title(f"💳 Módulo de Cheques - {st.session_state.usuario_actual}")
 
@@ -77,138 +106,128 @@ col_ingreso, col_cinta = st.columns([1, 2])
 
 with col_ingreso:
     st.subheader("📸 Ingreso de Cheque(s)")
-    st.caption("CONSEJO: Procesá hasta 4 cheques por foto.")
+    st.caption("CONSEJO: Acomodá hasta 4 cheques derechos en la foto.")
     
     imagen_capturada = st.camera_input("Escanear con cámara", key=f"cam_{st.session_state.reset_key}")
     imagenes_subidas = st.file_uploader("O subir foto(s)", type=['jpg', 'jpeg', 'png'], accept_multiple_files=True, key=f"up_{st.session_state.reset_key}")
     
     imagenes_a_procesar = []
-    if imagen_capturada:
-        imagenes_a_procesar.append(imagen_capturada)
-    if imagenes_subidas:
-        imagenes_a_procesar.extend(imagenes_subidas)
+    if imagen_capturada: imagenes_a_procesar.append(imagen_capturada)
+    if imagenes_subidas: imagenes_a_procesar.extend(imagenes_subidas)
 
     if len(imagenes_a_procesar) > 0:
-        st.write(f"**{len(imagenes_a_procesar)} imagen(es) lista(s)** para analizar.")
+        st.write(f"**{len(imagenes_a_procesar)} imagen(es) lista(s)**.")
         st.image(imagenes_a_procesar, width=150)
         
-        if st.button("Procesar Imagen(es) con IA", use_container_width=True):
-            with st.spinner(f"Optimizando y analizando {len(imagenes_a_procesar)} foto(s)..."):
-                cheques_totales_nuevos = 0
-                errores = 0
-                
-                # --- EL NUEVO PROMPT QUIRÚRGICO ---
-                prompt = """
-                Sos un experto bancario procesando cheques físicos argentinos. En la imagen hay entre 1 y 4 cheques apilados (pueden estar orientados verticalmente). Analizá cada cheque de forma aislada para no cruzar los datos.
-                
-                REGLAS ESTRICTAS DE EXTRACCIÓN:
-                1. BANDA NUMÉRICA (Abajo a la derecha, formato BBB-SSS-PPPP): 
-                   - Banco_Cod: Primeros 3 dígitos antes del primer guion (ej: 011).
-                   - Plaza: Es el TERCER grupo de números, generalmente de 4 dígitos (ej: 3100). ¡NUNCA extraigas la sucursal que es el número del medio!
-                2. FECHAS (¡ATENCIÓN, NO LAS DUPLIQUES!):
-                   - Fecha_Emision: Buscala arriba, junto al nombre de la ciudad (ej: PARANA, 19 de Marzo).
-                   - Fecha_Pago: Buscala más abajo, después de la palabra "El" o "Páguese el..." (ej: El 17 de Abril). Si el cheque no es diferido, repetí la fecha de emisión.
-                3. CUIT: Buscá literalmente la sigla "CUIT" seguida del número XX-XXXXXXXX-X. Ignorá otros números sueltos.
-                4. EMISOR: Es la Razón Social o el Titular de la cuenta impreso. Suele estar cerca del CUIT. NUNCA extraigas direcciones, calles ni ciudades como Emisor (ej: Ignorá "Alta Gracia" o "Cerrito").
-                5. IMPORTE: El monto en números sin separador de miles.
-                
-                Devolvé ÚNICAMENTE un ARRAY JSON PURO. Sin texto adicional. Formato estricto:
-                [
-                    {
-                        "Banco_Cod": "3 dígitos",
-                        "Plaza": "4 dígitos",
-                        "Banco_Nombre": "Nombre del Banco",
-                        "Numero_Cheque": "Número",
-                        "Importe": 0.00,
-                        "Fecha_Emision": "DD/MM/AAAA",
-                        "Fecha_Pago": "DD/MM/AAAA",
-                        "Emisor": "Razón Social o Titular",
-                        "CUIT": "XX-XXXXXXXX-X"
-                    }
-                ]
-                """
-                
+        if st.button("✂️ Cortar y Procesar Imagen(es)", use_container_width=True):
+            cheques_totales_nuevos = 0
+            errores = 0
+            
+            prompt_conteo = "¿Cuántos cheques ves en esta imagen? Respondé ÚNICAMENTE con un número entero (ejemplo: 1, 2, 3 o 4)."
+            
+            prompt_extraccion = """
+            Sos un experto bancario. Esta imagen es un RECORTE que contiene UN cheque principal. Extraé sus datos con precisión milimétrica.
+            
+            REGLAS ESTRICTAS DE EXTRACCIÓN:
+            1. BANDA NUMÉRICA (Abajo, formato BBB-SSS-PPPP): 
+               - Banco_Cod: Primeros 3 dígitos antes del primer guion.
+               - Plaza: TERCER grupo de números (ej: 3100 o 3218). ¡NUNCA extraigas la sucursal (el número del medio)!
+            2. FECHAS:
+               - Fecha_Emision: Junto a la ciudad de emisión.
+               - Fecha_Pago: Después de "Páguese el...". Si es un cheque al día, repetí la fecha de emisión.
+            3. CUIT: Buscá "CUIT" y extraé el formato XX-XXXXXXXX-X.
+            4. EMISOR: Es la Razón Social impresa. Ignorá las direcciones o nombres de ciudades (ej: Ignorá Alta Gracia, Leones, etc).
+            5. IMPORTE: Solo los números enteros, sin puntos separadores (ej: 500000).
+            
+            Devolvé ÚNICAMENTE un objeto JSON puro (sin comillas invertidas ni texto adicional):
+            {
+                "Banco_Cod": "3 dígitos",
+                "Plaza": "4 dígitos",
+                "Banco_Nombre": "Nombre del Banco",
+                "Numero_Cheque": "Número",
+                "Importe": 0.00,
+                "Fecha_Emision": "DD/MM/AAAA",
+                "Fecha_Pago": "DD/MM/AAAA",
+                "Emisor": "Razón Social o Titular",
+                "CUIT": "XX-XXXXXXXX-X"
+            }
+            """
+            
+            with st.spinner("Iniciando guillotina digital..."):
                 for i, archivo_imagen in enumerate(imagenes_a_procesar):
-                    exito = False
-                    
-                    for intento in range(3): # Max 3 intentos cortos
-                        if exito:
-                            break
-                            
-                        try:
-                            archivo_imagen.seek(0)
-                            img = Image.open(archivo_imagen)
-                            
-                            # Optimización para evitar saturar el servidor gratuito
-                            if img.mode in ('RGBA', 'P'):
-                                img = img.convert('RGB')
-                                
-                            max_dim = 1600
-                            if max(img.size) > max_dim:
-                                img.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
-                            
-                            respuesta = cliente_ia.models.generate_content(
-                                model='gemini-2.5-flash',
-                                contents=[prompt, img]
-                            )
-                            
-                            raw_text = respuesta.text.strip()
-                            marcador = chr(96) * 3
-                            if raw_text.startswith(f"{marcador}json"): raw_text = raw_text[7:-3].strip()
-                            elif raw_text.startswith(marcador): raw_text = raw_text[3:-3].strip()
-                            
-                            # Parseo del JSON
-                            try:
-                                datos_extraidos = json.loads(raw_text)
-                            except:
-                                start_idx = raw_text.find('[')
-                                end_idx = raw_text.rfind(']') + 1
-                                if start_idx != -1 and end_idx != 0:
-                                    datos_extraidos = json.loads(raw_text[start_idx:end_idx])
-                                else:
-                                    start_idx_obj = raw_text.find('{')
-                                    end_idx_obj = raw_text.rfind('}') + 1
-                                    if start_idx_obj != -1 and end_idx_obj != 0:
-                                        datos_extraidos = [json.loads(raw_text[start_idx_obj:end_idx_obj])]
+                    try:
+                        archivo_imagen.seek(0)
+                        img = Image.open(archivo_imagen)
+                        
+                        if img.mode in ('RGBA', 'P'): img = img.convert('RGB')
+                        
+                        max_dim = 2000 # Mantenemos alta resolución para el recorte
+                        if max(img.size) > max_dim:
+                            img.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
+                        
+                        # --- PASO 1: Contar los cheques ---
+                        resp_conteo = cliente_ia.models.generate_content(
+                            model='gemini-2.5-flash',
+                            contents=[prompt_conteo, img]
+                        )
+                        
+                        numeros_encontrados = re.findall(r'\d+', resp_conteo.text)
+                        cantidad = int(numeros_encontrados[0]) if numeros_encontrados else 1
+                        cantidad = min(max(cantidad, 1), 5) # Límite lógico de 1 a 5
+                        
+                        st.info(f"📄 Foto {i+1}: Se detectaron {cantidad} cheques. Recortando y analizando...")
+                        
+                        # --- PASO 2: Recortar la imagen ---
+                        recortes = recortar_cheques(img, cantidad)
+                        
+                        # --- PASO 3: Leer cheque por cheque (recortes) ---
+                        for j, recorte in enumerate(recortes):
+                            exito_recorte = False
+                            for intento in range(3):
+                                if exito_recorte: break
+                                try:
+                                    resp_recorte = cliente_ia.models.generate_content(
+                                        model='gemini-2.5-flash',
+                                        contents=[prompt_extraccion, recorte]
+                                    )
+                                    
+                                    raw_text = resp_recorte.text.strip()
+                                    marcador = chr(96) * 3
+                                    if raw_text.startswith(f"{marcador}json"): raw_text = raw_text[7:-3].strip()
+                                    elif raw_text.startswith(marcador): raw_text = raw_text[3:-3].strip()
+                                    
+                                    # Parseamos solo el OBJETO de este cheque
+                                    start_idx = raw_text.find('{')
+                                    end_idx = raw_text.rfind('}') + 1
+                                    if start_idx != -1 and end_idx != 0:
+                                        datos_cheque = json.loads(raw_text[start_idx:end_idx])
+                                        datos_cheque["Operador"] = st.session_state.usuario_actual
+                                        st.session_state.cheques_procesados.append(datos_cheque)
+                                        cheques_totales_nuevos += 1
+                                        exito_recorte = True
                                     else:
-                                        raise ValueError("La IA devolvió texto ilegible.")
+                                        raise ValueError("JSON no encontrado en este recorte.")
+                                        
+                                except Exception as e:
+                                    if "503" in str(e) or "429" in str(e):
+                                        time.sleep(3) # Pausa por saturación
+                                    elif intento == 2:
+                                        errores += 1
+                                        st.warning(f"⚠️ Cheque {j+1} de la foto {i+1} ilegible. Podés cargarlo a mano.")
                             
-                            if isinstance(datos_extraidos, dict): 
-                                datos_extraidos = [datos_extraidos]
-                                
-                            for cheque in datos_extraidos:
-                                cheque["Operador"] = st.session_state.usuario_actual
-                                st.session_state.cheques_procesados.append(cheque)
-                                cheques_totales_nuevos += 1
-                                
-                            exito = True 
-                                
-                        except Exception as e:
-                            error_str = str(e)
-                            if "503" in error_str or "429" in error_str or "timeout" in error_str.lower():
-                                if intento < 2:
-                                    st.warning(f"⏳ Optimizando carga. Reintentando foto #{i+1} en breve...")
-                                    time.sleep(3)
-                                else:
-                                    errores += 1
-                                    st.error(f"❌ Falló la foto #{i+1}. La imagen resultó muy pesada de procesar.")
-                            else:
-                                errores += 1
-                                st.error(f"❌ Falló la foto #{i+1} | DETALLE: {error_str}")
-                                break 
-                    
-                    time.sleep(2) 
+                            time.sleep(2) # Respiro entre recortes para no enojar a Google
+                            
+                    except Exception as e:
+                        errores += 1
+                        st.error(f"❌ Falló el análisis general de la foto #{i+1}.")
                 
                 if cheques_totales_nuevos > 0:
-                    st.success(f"¡Se procesaron {cheques_totales_nuevos} cheque(s) en total!")
-                    if errores > 0:
-                        st.warning(f"Ojo: Hubo {errores} foto(s) con error. Revisá el detalle arriba.")
-                    
+                    st.success(f"¡Listo! Se procesaron {cheques_totales_nuevos} cheque(s) en total.")
                     st.session_state.reset_key += 1
                     time.sleep(1.5)
                     st.rerun()
                 elif errores > 0:
-                    st.error("No se pudo extraer información. Intentá con fotos que enfoquen mejor el lote.")
+                    st.error("No se pudo extraer información. Intentá sacar fotos individuales.")
 
 with col_cinta:
     st.subheader("⚙️ Cinta Transportadora")
