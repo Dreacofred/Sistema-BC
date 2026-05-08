@@ -55,14 +55,6 @@ def guardar_nuevo_item(archivo, item):
         lista.sort() 
         with open(archivo, 'w', encoding='utf-8') as f: json.dump(lista, f, indent=4, ensure_ascii=False)
 
-def borrar_item_especifico(archivo, item_a_borrar):
-    if not os.path.exists(archivo): return
-    lista = cargar_db_lista(archivo)
-    if item_a_borrar in lista:
-        lista.remove(item_a_borrar)
-        with open(archivo, 'w', encoding='utf-8') as f: json.dump(lista, f, indent=4, ensure_ascii=False)
-        st.rerun()
-
 def obtener_nombre_cache(usuario):
     usuario_limpio = "".join(x for x in usuario if x.isalnum()).lower()
     return f"cache_ventas_{usuario_limpio}.json"
@@ -106,43 +98,45 @@ if ruta_logo: st.sidebar.image(ruta_logo, use_container_width=True)
 # ==========================================
 st.sidebar.subheader("👤 Identificación")
 
-# Inicializar la variable en la sesión si no existe
 if 'usuario_actual' not in st.session_state:
     st.session_state.usuario_actual = ""
 
-# El valor predeterminado de la caja ahora viene de la memoria de la sesión
 usuario_app = st.sidebar.text_input(
     "Tu nombre para operar:", 
     value=st.session_state.usuario_actual, 
-    placeholder="Ej: Nancy, Diego o Tomas"
+    placeholder="Ej: Nancy o Diego"
 )
 
-# Si el usuario escribe algo nuevo, actualizamos la memoria y cargamos sus datos
 if usuario_app != st.session_state.usuario_actual:
     st.session_state.usuario_actual = usuario_app
     st.session_state.resumen_ventas = recuperar_cache_ventas(usuario_app)
 
-# Si no hay nadie identificado, bloqueamos la pantalla
 if not st.session_state.usuario_actual.strip():
     st.title("⛽ Sistema de Gestión BC Combustibles")
     st.markdown("""<div class="alerta-ingreso">⚠️ ACCESO RESTRINGIDO<br>Ingresá tu nombre en el panel lateral para habilitar el sistema.</div>""", unsafe_allow_html=True)
     st.stop()
 
-# Si llegamos acá, es porque hay un usuario activo
 st.sidebar.info(f"Operador activo: {st.session_state.usuario_actual}")
 
-# Inicializar otros estados si no existen
+# Inicializar estados de Camiones
 if 'lote_pendientes' not in st.session_state: st.session_state.lote_pendientes = []
 if 'cola_extracciones' not in st.session_state: st.session_state.cola_extracciones = []
 if 'resumen_ventas' not in st.session_state: st.session_state.resumen_ventas = []
 
+# Inicializar estados de Proveedores
+if 'lote_pendientes_prov' not in st.session_state: st.session_state.lote_pendientes_prov = []
+if 'cola_extracciones_prov' not in st.session_state: st.session_state.cola_extracciones_prov = []
+if 'resumen_prov' not in st.session_state: st.session_state.resumen_prov = []
+
 opcion = st.sidebar.radio("Seleccioná la tarea:", ["🚛 Ventas a Camiones", "📄 Facturas de Proveedores"])
 st.sidebar.divider()
-cliente_reporte = st.sidebar.text_input("Nombre Excel Final:", placeholder="Ej: Resumen_Sucursal")
 
+# ==========================================
+# 3. MÓDULO VENTAS A CAMIONES
+# ==========================================
 if opcion == "🚛 Ventas a Camiones":
     if len(st.session_state.cola_extracciones) > 0:
-        st.title(f"🔄 Cinta Transportadora - {st.session_state.usuario_actual}")
+        st.title(f"🔄 Revisión de Cargas - {st.session_state.usuario_actual}")
         total_restantes = len(st.session_state.cola_extracciones)
         st.warning(f"Tienes {total_restantes} documento(s) esperando tu revisión.")
         
@@ -180,18 +174,25 @@ if opcion == "🚛 Ventas a Camiones":
 
             if es_nuevo_cli: st.info("✨ ¡Atención! Código de cliente nuevo detectado.")
             if chofer_final and chofer_final not in BASE_CHOFERES:
-                st.markdown(f"""<div class="bloque-alerta">⚠️ ATENCIÓN {st.session_state.usuario_actual.upper()}:<br>El chofer en pantalla no figura en la memoria. Revisá que esté bien escrito.</div>""", unsafe_allow_html=True)
+                st.markdown(f"""<div class="bloque-alerta">⚠️ ATENCIÓN {st.session_state.usuario_actual.upper()}:<br>El chofer no figura en la memoria. Revisá que esté bien escrito.</div>""", unsafe_allow_html=True)
 
             c1, c2, c3, c4 = st.columns([1.5, 2, 1, 3])
-            fecha, chofer, codigo_final, cliente_rs = c1.text_input("Fecha", v_fecha), c2.text_input("Chofer", chofer_final), c3.text_input("Cód. Cli.", codigo_ia), c4.text_input("Cliente de Factura", nombre_sugerido)
+            fecha = c1.text_input("Fecha", v_fecha)
+            chofer = c2.text_input("Chofer", chofer_final)
+            codigo_final = c3.text_input("Cód. Cli.", codigo_ia)
+            cliente_rs = c4.text_input("Cliente de Factura", nombre_sugerido)
             
             c5, c6, c7 = st.columns(3)
-            litros, importe, factura_nro = c5.number_input("Litros", value=to_f(datos_actuales.get('litros_factura', 0.0)), format="%.4f"), c6.number_input("Importe", value=to_f(datos_actuales.get('importe', 0.0))), c7.text_input("Factura Nº", limpiar_texto(datos_actuales.get('nro_factura', '')))
+            litros = c5.number_input("Litros", value=to_f(datos_actuales.get('litros_factura', 0.0)), format="%.4f")
+            importe = c6.number_input("Importe", value=to_f(datos_actuales.get('importe', 0.0)))
+            factura_nro = c7.text_input("Factura Nº", limpiar_texto(datos_actuales.get('nro_factura', '')))
             entidad = st.text_input("Entidad pagadora", entidad_final)
             
             with st.expander("Órdenes y Efectivo", expanded=True):
                 ca1, ca2, ca3 = st.columns(3)
-                o_litros, val_efectivo, o_efectivo = ca1.text_input("Orden Litros", v_o_litros), ca2.number_input("Efectivo", value=v_efectivo), ca3.text_input("Orden Efectivo", v_o_efectivo)
+                o_litros = ca1.text_input("Orden Litros", v_o_litros)
+                val_efectivo = ca2.number_input("Efectivo", value=v_efectivo)
+                o_efectivo = ca3.text_input("Orden Efectivo", v_o_efectivo)
 
             st.markdown("<br>", unsafe_allow_html=True)
             col_b1, col_b2 = st.columns(2)
@@ -211,7 +212,6 @@ if opcion == "🚛 Ventas a Camiones":
 
     else:
         st.title(f"🚛 Registro de Cargas - {st.session_state.usuario_actual}")
-        st.subheader("📸 Paso 1: Recolectar Documentos")
         tab1, tab2 = st.tabs(["📁 Subir Archivos", "📸 Cámara"])
         with tab1:
             fotos_disco = st.file_uploader("Seleccionar comprobantes", type=["pdf","jpg","png","jpeg"], accept_multiple_files=True)
@@ -237,7 +237,8 @@ if opcion == "🚛 Ventas a Camiones":
                         try:
                             prompt = "Analizá la imagen. Extraé JSON con: fecha, nro_factura, codigo_cliente (corto, no CUIT), razon_social, litros_factura, importe. Del VALE DE CARGA extraé: chofer (de los casilleros), entidad_pagadora, numero_orden_autorizacion, efectivo (ignorá líneas de diseño), orden_efectivo. Solo JSON puro."
                             res = cliente_ia.models.generate_content(model='gemini-2.5-pro', contents=[prompt, Image.open(io.BytesIO(doc['data']))])
-                            raw_text = res.text.strip().replace('```json', '').replace('```', '')
+                            raw_text = res.text.strip().replace('```json', '').replace('
+```', '')
                             start, end = raw_text.find('{'), raw_text.rfind('}') + 1
                             datos_extraidos = json.loads(raw_text[start:end])
                             datos_extraidos['_origen'] = doc['nombre']
@@ -267,8 +268,7 @@ if opcion == "🚛 Ventas a Camiones":
             ws = writer.sheets['Ventas']
             for i, col in enumerate(df.columns): ws.column_dimensions[get_column_letter(i + 1)].width = 20
         
-        # 🟢 AUTO-RESET: Al hacer clic, se limpia todo automáticamente 🟢
-        if col_ex1.download_button(label="📥 Descargar Excel y Reiniciar", data=buffer.getvalue(), file_name=f"Resumen_{datetime.now().strftime('%d-%m-%Y')}.xlsx", use_container_width=True):
+        if col_ex1.download_button(label="📥 Descargar Excel y Reiniciar", data=buffer.getvalue(), file_name=f"Resumen_Camiones_{datetime.now().strftime('%d-%m-%Y')}.xlsx", use_container_width=True):
             st.session_state.resumen_ventas = []
             st.session_state.cola_extracciones = []
             st.session_state.lote_pendientes = []
@@ -281,6 +281,138 @@ if opcion == "🚛 Ventas a Camiones":
             if os.path.exists(obtener_nombre_cache(st.session_state.usuario_actual)): os.remove(obtener_nombre_cache(st.session_state.usuario_actual))
             st.rerun()
 
+
+# ==========================================
+# 4. MÓDULO FACTURAS DE PROVEEDORES
+# ==========================================
+elif opcion == "📄 Facturas de Proveedores":
+    if len(st.session_state.cola_extracciones_prov) > 0:
+        st.title(f"🔄 Revisión de Proveedores - {st.session_state.usuario_actual}")
+        total_restantes = len(st.session_state.cola_extracciones_prov)
+        st.warning(f"Tienes {total_restantes} factura(s) esperando tu revisión.")
+        
+        datos_actuales = st.session_state.cola_extracciones_prov[0]
+        st.subheader(f"📝 Revisando: {datos_actuales.get('_origen', 'Documento desconocido')}")
+
+        with st.form("validador_proveedores"):
+            def limpiar_texto(v): return "" if str(v).strip().lower() in ["none", "null", ""] else str(v).strip()
+            def to_f(v):
+                try: 
+                    v_str = str(v).strip().replace('.', '').replace(',', '.') if ',' in str(v) and '.' in str(v) else str(v).strip().replace(',', '.')
+                    return float(v_str) if v_str else 0.0
+                except: return 0.0
+
+            v_fecha = limpiar_texto(datos_actuales.get('fecha', ''))
+            v_cuit = limpiar_texto(datos_actuales.get('cuit_proveedor', ''))
+            v_razon_social = limpiar_texto(datos_actuales.get('razon_social_proveedor', ''))
+            v_nro_factura = limpiar_texto(datos_actuales.get('nro_factura', ''))
+            v_concepto = limpiar_texto(datos_actuales.get('concepto', ''))
+            
+            c1, c2, c3 = st.columns([1, 1.5, 2])
+            fecha = c1.text_input("Fecha", v_fecha)
+            cuit = c2.text_input("CUIT Proveedor", v_cuit)
+            razon_social = c3.text_input("Razón Social / Nombre", v_razon_social)
+            
+            c4, c5, c6, c7 = st.columns([1.5, 1, 1, 1])
+            nro_factura = c4.text_input("Factura / Remito Nº", v_nro_factura)
+            neto = c5.number_input("Importe Neto", value=to_f(datos_actuales.get('importe_neto', 0.0)))
+            iva = c6.number_input("IVA", value=to_f(datos_actuales.get('importe_iva', 0.0)))
+            total = c7.number_input("Total Factura", value=to_f(datos_actuales.get('importe_total', 0.0)))
+            
+            concepto = st.text_input("Concepto / Detalle", v_concepto)
+
+            st.markdown("<br>", unsafe_allow_html=True)
+            col_b1, col_b2 = st.columns(2)
+            
+            if col_b1.form_submit_button("✅ GUARDAR Y VER SIGUIENTE"):
+                registro_prov = {
+                    "Fecha": fecha.strip(), 
+                    "Proveedor": razon_social.strip().upper(), 
+                    "CUIT": cuit.strip(), 
+                    "Factura": nro_factura.strip(), 
+                    "Neto": neto, 
+                    "IVA": iva, 
+                    "Total": total, 
+                    "Concepto": concepto.strip()
+                }
+                st.session_state.resumen_prov.append(registro_prov)
+                st.session_state.cola_extracciones_prov.pop(0) 
+                st.rerun()
+            
+            if col_b2.form_submit_button("🗑️ DESCARTAR"):
+                st.session_state.cola_extracciones_prov.pop(0)
+                st.rerun()
+
+    else:
+        st.title(f"📄 Carga de Proveedores - {st.session_state.usuario_actual}")
+        tab1, tab2 = st.tabs(["📁 Subir Facturas", "📸 Cámara"])
+        with tab1:
+            fotos_disco = st.file_uploader("Seleccionar facturas o remitos", type=["pdf","jpg","png","jpeg"], accept_multiple_files=True, key="up_prov")
+            if fotos_disco and st.button("➕ Sumar facturas a la Pila"):
+                for f in fotos_disco: st.session_state.lote_pendientes_prov.append({'nombre': f.name, 'data': f.getvalue(), 'tipo': f.type})
+                st.success(f"✅ Se sumaron {len(fotos_disco)} facturas.")
+
+        with tab2:
+            foto_camara = st.camera_input("Enfocar factura", key="cam_prov")
+            if foto_camara and st.button("➕ Sumar captura a la Pila"):
+                st.session_state.lote_pendientes_prov.append({'nombre': f"Factura_{len(st.session_state.lote_pendientes_prov)+1}.jpg", 'data': foto_camara.getvalue(), 'tipo': foto_camara.type})
+                st.success("✅ ¡Factura Agregada!")
+        
+        st.divider()
+        if st.session_state.lote_pendientes_prov:
+            st.subheader(f"📦 Pila de Facturas ({len(st.session_state.lote_pendientes_prov)} documentos)")
+            if st.button("🚀 INICIAR LECTURA DE PROVEEDORES"):
+                barra_progreso, status_text = st.progress(0), st.empty()
+                for i, doc in enumerate(st.session_state.lote_pendientes_prov):
+                    status_text.text(f"Analizando {doc['nombre']}...")
+                    exito, intentos = False, 3
+                    while intentos > 0 and not exito:
+                        try:
+                            prompt_proveedores = "Analizá esta factura o ticket de proveedor. Extraé un JSON con las siguientes claves exactas: 'fecha', 'cuit_proveedor', 'razon_social_proveedor', 'nro_factura', 'importe_neto', 'importe_iva', 'importe_total', 'concepto'. Si algún valor no está, dejalo vacío. Solo devolvé formato JSON puro, sin marcadores de código ni texto adicional."
+                            res = cliente_ia.models.generate_content(model='gemini-2.5-pro', contents=[prompt_proveedores, Image.open(io.BytesIO(doc['data']))])
+                            raw_text = res.text.strip().replace('```json', '').replace('```', '')
+                            start, end = raw_text.find('{'), raw_text.rfind('}') + 1
+                            datos_extraidos = json.loads(raw_text[start:end])
+                            datos_extraidos['_origen'] = doc['nombre']
+                            st.session_state.cola_extracciones_prov.append(datos_extraidos)
+                            exito = True
+                        except:
+                            intentos -= 1
+                            time.sleep(2)
+                    if not exito: st.session_state.cola_extracciones_prov.append({'_origen': f"⚠️ Error en {doc['nombre']}"})
+                    barra_progreso.progress((i + 1) / len(st.session_state.lote_pendientes_prov))
+                st.session_state.lote_pendientes_prov = [] 
+                st.rerun() 
+            if st.button("🗑️ Vaciar Pila Proveedores"):
+                st.session_state.lote_pendientes_prov = []
+                st.rerun()
+
+    if st.session_state.resumen_prov:
+        st.divider()
+        df_prov = pd.DataFrame(st.session_state.resumen_prov)
+        st.subheader(f"📋 Planilla de Proveedores ({len(df_prov)} registros)")
+        st.dataframe(df_prov, use_container_width=True)
+        
+        col_ex1, col_ex2 = st.columns(2)
+        buffer = io.BytesIO()
+        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+            df_prov.to_excel(writer, index=False, sheet_name='Proveedores')
+            ws = writer.sheets['Proveedores']
+            for i, col in enumerate(df_prov.columns): ws.column_dimensions[get_column_letter(i + 1)].width = 20
+        
+        if col_ex1.download_button(label="📥 Descargar Excel de Proveedores", data=buffer.getvalue(), file_name=f"Proveedores_{datetime.now().strftime('%d-%m-%Y')}.xlsx", use_container_width=True):
+            st.session_state.resumen_prov = []
+            st.session_state.cola_extracciones_prov = []
+            st.session_state.lote_pendientes_prov = []
+            st.rerun()
+
+        if col_ex2.button("🗑️ Vaciar sin descargar (Proveedores)", use_container_width=True):
+            st.session_state.resumen_prov = []
+            st.rerun()
+
+# ==========================================
+# 5. MANTENIMIENTO
+# ==========================================
 with st.sidebar.expander("🛠️ Mantenimiento"):
     if st.button("🗑️ Limpiar Memoria (Choferes/Clientes)"):
         for arch in [ARCHIVO_DB, ARCHIVO_CHOFERES]:
