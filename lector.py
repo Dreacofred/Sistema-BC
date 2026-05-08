@@ -367,7 +367,7 @@ elif opcion == "📄 Facturas de Proveedores":
                     exito, intentos = False, 3
                     while intentos > 0 and not exito:
                         try:
-                            prompt_proveedores = "Analizá esta factura o ticket de proveedor. Extraé un JSON con las siguientes claves exactas: 'fecha', 'cuit_proveedor', 'razon_social_proveedor', 'nro_factura', 'importe_neto', 'importe_iva', 'importe_total', 'concepto'. Si algún valor no está, dejalo vacío. Solo devolvé formato JSON puro, sin marcadores de código ni texto adicional."
+                            prompt_proveedores = "Analizá esta factura o ticket de proveedor. Extraé un JSON con las siguientes claves exactas: 'fecha', 'cuit_proveedor', 'razon_social_proveedor', 'nro_factura', 'importe_neto', 'importe_iva', 'importe_total', 'concepto'. REGLA VITAL: No uses comillas dobles (\") adentro de los textos extraídos, reemplazalas por comillas simples ('). Solo devolvé formato JSON puro, sin texto adicional."
                             res = cliente_ia.models.generate_content(model='gemini-2.5-pro', contents=[prompt_proveedores, Image.open(io.BytesIO(doc['data']))])
                             raw_text = res.text.strip().replace('```json', '').replace('```', '')
                             start, end = raw_text.find('{'), raw_text.rfind('}') + 1
