@@ -237,8 +237,7 @@ if opcion == "🚛 Ventas a Camiones":
                         try:
                             prompt = "Analizá la imagen. Extraé JSON con: fecha, nro_factura, codigo_cliente (corto, no CUIT), razon_social, litros_factura, importe. Del VALE DE CARGA extraé: chofer (de los casilleros), entidad_pagadora, numero_orden_autorizacion, efectivo (ignorá líneas de diseño), orden_efectivo. Solo JSON puro."
                             res = cliente_ia.models.generate_content(model='gemini-2.5-pro', contents=[prompt, Image.open(io.BytesIO(doc['data']))])
-                            raw_text = res.text.strip().replace('```json', '').replace('
-```', '')
+                            raw_text = res.text.strip().replace('```json', '').replace('```', '')
                             start, end = raw_text.find('{'), raw_text.rfind('}') + 1
                             datos_extraidos = json.loads(raw_text[start:end])
                             datos_extraidos['_origen'] = doc['nombre']
