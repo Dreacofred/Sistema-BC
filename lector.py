@@ -237,7 +237,8 @@ if opcion == "🚛 Ventas a Camiones":
                         try:
                             prompt = "Analizá la imagen. Extraé JSON con: fecha, nro_factura, codigo_cliente (corto, no CUIT), razon_social, litros_factura, importe. Del VALE DE CARGA extraé: chofer (de los casilleros), entidad_pagadora, numero_orden_autorizacion, efectivo (ignorá líneas de diseño), orden_efectivo. Solo JSON puro."
                             res = cliente_ia.models.generate_content(model='gemini-2.5-pro', contents=[prompt, Image.open(io.BytesIO(doc['data']))])
-                            raw_text = res.text.strip().replace('```json', '').replace('```', '')
+                            raw_text = res.text.strip().replace('```json', '').replace('
+```', '')
                             start, end = raw_text.find('{'), raw_text.rfind('}') + 1
                             datos_extraidos = json.loads(raw_text[start:end])
                             datos_extraidos['_origen'] = doc['nombre']
@@ -365,23 +366,56 @@ elif opcion == "📄 Facturas de Proveedores":
                 for i, doc in enumerate(st.session_state.lote_pendientes_prov):
                     status_text.text(f"Analizando {doc['nombre']}...")
                     exito, intentos = False, 3
+                    error_interno = ""
                     while intentos > 0 and not exito:
                         try:
-                            prompt_proveedores = "Analizá esta factura o ticket de proveedor. Extraé un JSON con las siguientes claves exactas: 'fecha', 'cuit_proveedor', 'razon_social_proveedor', 'nro_factura', 'importe_neto', 'importe_iva', 'importe_total', 'concepto'. REGLA VITAL: No uses comillas dobles (\") adentro de los textos extraídos, reemplazalas por comillas simples ('). Solo devolvé formato JSON puro, sin texto adicional."
+                            prompt_proveedores = """Eres un auditor contable automatizado. Tu única tarea es leer esta factura y devolver un JSON puro.
+REGLAS VITALES PARA NO ROMPER EL SISTEMA:
+1. NINGÚN valor debe contener comillas dobles (") ni simples ('). Si un artículo dice 5/16", pon solo 5/16.
+2. Devuelve estrictamente el código JSON, sin texto de saludo ni formato markdown.
+
+MAPA EXACTO DE LA FACTURA PARA LA IA:
+- "razon_social_proveedor": Nombre del emisor principal arriba a la izquierda (Ej: BERGAMINI LUIS). ¡ATENCIÓN! El cliente receptor es BC COMBUSTIBLES S.A., NO lo confundas ni lo pongas como proveedor.
+- "cuit_proveedor": Buscar "CUIT:" en la parte superior central (Ej: 20-22684885-2).
+- "nro_factura": Buscar bajo la palabra FACTURA a la derecha (Ej: 0002-00018226).
+- "fecha": Buscar la fecha de emisión arriba a la derecha (Ej: 30/03/2026).
+- "importe_neto": Buscar "SUBTOTAL" en el pie de página, abajo a la izquierda (Ej: 1122,00).
+- "importe_iva": Buscar el monto del IVA 21% en el pie de página (Ej: 235,62).
+- "importe_total": Monto final total abajo a la derecha (Ej: 1357,62).
+- "concepto": Detalle de los artículos centrales. Resume y QUITA toda comilla (Ej: UNION RECTA PLASTICA 5/16, TUERCA FIJACION).
+
+Estructura requerida:
+{
+  "fecha": "",
+  "cuit_proveedor": "",
+  "razon_social_proveedor": "",
+  "nro_factura": "",
+  "importe_neto": "",
+  "importe_iva": "",
+  "importe_total": "",
+  "concepto": ""
+}"""
                             res = cliente_ia.models.generate_content(model='gemini-2.5-pro', contents=[prompt_proveedores, Image.open(io.BytesIO(doc['data']))])
-                            raw_text = res.text.strip().replace('```json', '').replace('```', '')
+                            
+                            raw_text = res.text.strip().replace('```json', '').replace('```JSON', '').replace('```', '')
                             start, end = raw_text.find('{'), raw_text.rfind('}') + 1
-                            datos_extraidos = json.loads(raw_text[start:end])
+                            if start == -1:
+                                raise ValueError("La IA no devolvió las llaves de formato de datos")
+                            
+                            datos_extraidos = json.loads(raw_text[start:end], strict=False)
                             datos_extraidos['_origen'] = doc['nombre']
                             st.session_state.cola_extracciones_prov.append(datos_extraidos)
                             exito = True
-                        except:
+                        except Exception as e:
+                            error_interno = str(e)
                             intentos -= 1
                             time.sleep(2)
-                    if not exito: st.session_state.cola_extracciones_prov.append({'_origen': f"⚠️ Error en {doc['nombre']}"})
+                    
+                    if not exito: st.session_state.cola_extracciones_prov.append({'_origen': f"⚠️ Error Técnico en {doc['nombre']} | Falla: {error_interno}"})
                     barra_progreso.progress((i + 1) / len(st.session_state.lote_pendientes_prov))
                 st.session_state.lote_pendientes_prov = [] 
                 st.rerun() 
+            
             if st.button("🗑️ Vaciar Pila Proveedores"):
                 st.session_state.lote_pendientes_prov = []
                 st.rerun()
