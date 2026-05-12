@@ -74,16 +74,16 @@ BASE_CHOFERES = cargar_db_lista(ARCHIVO_CHOFERES)
 
 st.set_page_config(page_title="BC Combustibles - Gestión Pro", page_icon="⛽", layout="wide")
 
-st.markdown(f"""
+# --- Dentro del bloque de st.markdown con el CSS ---
+st.markdown("""
     <style>
-        .stApp {{ background-color: white !important; }}
-        h1, h2, h3 {{ color: {COLOR_ROJO} !important; font-family: 'Montserrat', sans-serif; }}
-        .stButton>button {{ background-color: {COLOR_ROJO}; color: white; border-radius: 12px; font-weight: bold; height: 3em; border: none; width: 100%; }}
-        [data-testid="stSidebar"] {{ background-color: #f8f9fa; border-right: 1px solid #e0e0e0; }}
-        .stDataFrame {{ border: 1px solid #e0e0e0; border-radius: 8px; }}
-        [data-testid="stSidebar"] .stTextInput div[data-baseweb="input"] {{ border: 2px solid {COLOR_ROJO} !important; border-radius: 8px !important; background-color: #ffffff !important; }}
-        .alerta-ingreso {{ padding: 20px; border-radius: 15px; background-color: #fff3f3; border-left: 5px solid {COLOR_ROJO}; color: #721c24; font-weight: bold; text-align: center; font-size: 1.2em; }}
-        .bloque-alerta {{ background-color: #fff8e1; padding: 15px; border-radius: 10px; border: 1px solid {COLOR_AMARILLO_ALERTA}; border-left: 4px solid {COLOR_AMARILLO_ALERTA}; margin-bottom: 10px; color: #856404; font-weight: bold; }}
+        /* Ocultar el menú de navegación lateral nativo (Lector, Cheques, etc.) */
+        [data-testid="stSidebarNav"] {display: none !important;}
+
+        /* Tus otros estilos ya existentes... */
+        .main { background-color: #f5f5f5; }
+        .stButton>button { width: 100%; border-radius: 5px; height: 3em; }
+        /* ... etc ... */
     </style>
 """, unsafe_allow_html=True)
 
