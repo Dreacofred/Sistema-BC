@@ -112,6 +112,13 @@ if usuario_app != st.session_state.usuario_actual:
     st.session_state.resumen_ventas = recuperar_cache_ventas(usuario_app)
 
 if not st.session_state.usuario_actual.strip():
+    # Ocultamos el menú lateral nativo de Streamlit ("Lector", "Cheques") mientras no haya login
+    st.markdown("""
+        <style>
+            [data-testid="stSidebarNav"] {display: none !important;}
+        </style>
+    """, unsafe_allow_html=True)
+    
     st.title("⛽ Sistema de Gestión BC Combustibles")
     st.markdown("""<div class="alerta-ingreso">⚠️ ACCESO RESTRINGIDO<br>Ingresá tu nombre en el panel lateral para habilitar el sistema.</div>""", unsafe_allow_html=True)
     st.stop()
