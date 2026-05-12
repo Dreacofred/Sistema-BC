@@ -463,10 +463,66 @@ elif opcion == "🔍 Auditoría de Remitos":
         
         if cliente_sel != "--- Seleccionar ---":
             filtro_cliente = df_audit[df_audit['Cliente'] == cliente_sel]
-            st.subheader(f"Órdenes de {cliente_sel}")
+            
+            # --- CABECERA Y BOTÓN DE ANÁLISIS EN LOTE ---
+            c_head1, c_head2 = st.columns([2, 1])
+            with c_head1:
+                st.subheader(f"Órdenes de {cliente_sel}")
+            with c_head2:
+                if st.button("🚀 Leer todas las fotos con IA", use_container_width=True):
+                    import requests
+                    barra_progreso = st.progress(0)
+                    texto_estado = st.empty()
+                    total = len(filtro_cliente)
+                    
+                    for i, (_, fila) in enumerate(filtro_cliente.iterrows()):
+                        texto_estado.text(f"Analizando orden #{fila['id']} ({i+1}/{total})...")
+                        try:
+                            # 1. Descargamos la foto de Supabase
+                            respuesta_img = requests.get(fila['url_foto'])
+                            img_remito = Image.open(io.BytesIO(respuesta_img.content))
 
+                            # 2. Le pedimos a Gemini que extraiga los datos
+                            prompt_auditoria = """Sos un auditor contable automatizado. Extraé de esta imagen:
+                            1. "litros": El volumen de litros despachados (solo el número, quitá la 'L' o palabras).
+                            2. "comprobante": El número de remito, vale o factura.
+                            Devolvé SOLO un JSON puro, sin formato markdown: {"litros": 0, "comprobante": "..."}"""
+
+                            res = cliente_ia.models.generate_content(model='gemini-2.5-pro', contents=[prompt_auditoria, img_remito])
+                            
+                            # 3. Limpiamos y leemos la respuesta
+                            raw_text = res.text.strip().replace('```json', '').replace('```JSON', '').replace('```', '')
+                            start, end = raw_text.find('{'), raw_text.rfind('}') + 1
+                            datos_ia = json.loads(raw_text[start:end])
+
+                            # 4. Guardamos lo que leyó la IA en la memoria temporal del sistema
+                            st.session_state[f"ia_litros_{fila['id']}"] = float(datos_ia.get('litros', fila['litros_pedidos']))
+                            st.session_state[f"ia_factura_{fila['id']}"] = str(datos_ia.get('comprobante', ''))
+                        
+                        except Exception as e:
+                            # Si la IA falla al leer una foto borrosa, simplemente la salta y deja los datos vacíos
+                            pass
+                        
+                        # Actualizamos la barra y pausamos un segundo para no saturar a Gemini
+                        barra_progreso.progress((i + 1) / total)
+                        time.sleep(1.5) 
+                        
+                    texto_estado.success("✅ ¡Análisis completo! Ya podés revisar los casilleros de abajo.")
+                    time.sleep(2)
+                    st.rerun() # Refresca la pantalla para mostrar los números nuevos
+
+            st.divider()
+
+            # --- LISTA DE ÓRDENES PARA CONFIRMAR ---
             for _, fila in filtro_cliente.iterrows():
                 fecha_disp = fila['fecha_despacho'][:10] if fila['fecha_despacho'] else "Sin fecha"
+                
+                # Memoria por defecto: si la IA no corrió todavía, cargamos los litros pedidos originalmente
+                if f"ia_litros_{fila['id']}" not in st.session_state:
+                    st.session_state[f"ia_litros_{fila['id']}"] = float(fila['litros_pedidos'])
+                if f"ia_factura_{fila['id']}" not in st.session_state:
+                    st.session_state[f"ia_factura_{fila['id']}"] = ""
+
                 with st.expander(f"📦 Orden #{fila['id']} | {fecha_disp} | Chofer: {fila['chofer']}"):
                     c1, c2 = st.columns([1, 1])
                     with c1:
@@ -478,10 +534,13 @@ elif opcion == "🔍 Auditoría de Remitos":
                         if fila['efectivo_pedido'] > 0:
                             st.write(f"💵 Efectivo Entregado: ${fila['efectivo_pedido']}")
                         st.divider()
+
                         st.markdown("**Confirmación Administrativa:**")
                         with st.form(key=f"form_audit_{fila['id']}"):
-                            lts_conf = st.number_input("Litros Reales (según foto)", value=float(fila['litros_pedidos']))
-                            nro_compro = st.text_input("Nº Remito / Factura Final")
+                            # Acá los casilleros se autocompletan solos si la IA ya los analizó
+                            lts_conf = st.number_input("Litros Reales (según foto)", value=st.session_state[f"ia_litros_{fila['id']}"])
+                            nro_compro = st.text_input("Nº Remito / Factura Final", value=st.session_state[f"ia_factura_{fila['id']}"])
+                            
                             if st.form_submit_button("✅ Añadir esta carga al lote"):
                                 item_resumen = {
                                     "Fecha": fecha_disp,
@@ -495,6 +554,7 @@ elif opcion == "🔍 Auditoría de Remitos":
                                 st.session_state.resumen_para_cliente.append(item_resumen)
                                 st.success(f"¡Orden #{fila['id']} añadida al lote de {cliente_sel}!")
 
+    # --- DESCARGA DE EXCEL ---
     if st.session_state.resumen_para_cliente:
         st.divider()
         st.subheader("📊 Lote Auditado (Listo para Excel)")
