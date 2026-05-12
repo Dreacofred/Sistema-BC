@@ -9,7 +9,7 @@ import io
 import difflib
 import time
 from datetime import datetime
-from supabase import create_client, Client  # Nueva importación
+from supabase import create_client, Client
 
 # Herramientas de diseño para el Excel
 from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
@@ -38,7 +38,6 @@ ENTIDADES_OFICIALES = [
     "RUIZ MARCELO"
 ]
 
-# Funciones de base de datos local
 def cargar_db_diccionario(archivo):
     if os.path.exists(archivo):
         with open(archivo, 'r', encoding='utf-8') as f: return json.load(f)
@@ -81,12 +80,9 @@ BASE_CHOFERES = cargar_db_lista(ARCHIVO_CHOFERES)
 
 st.set_page_config(page_title="BC Combustibles - Gestión Pro", page_icon="⛽", layout="wide")
 
-# Estilos CSS Globales
 st.markdown(f"""
     <style>
-        /* Ocultar el menú de navegación lateral nativo (Lector, Cheques, etc.) */
         [data-testid="stSidebarNav"] {{display: none !important;}}
-
         .stApp {{ background-color: white !important; }}
         h1, h2, h3 {{ color: {COLOR_ROJO} !important; font-family: 'Montserrat', sans-serif; }}
         .stButton>button {{ background-color: {COLOR_ROJO}; color: white; border-radius: 12px; font-weight: bold; height: 3em; border: none; width: 100%; }}
@@ -134,7 +130,6 @@ if 'resumen_ventas' not in st.session_state: st.session_state.resumen_ventas = [
 if 'lote_pendientes_prov' not in st.session_state: st.session_state.lote_pendientes_prov = []
 if 'cola_extracciones_prov' not in st.session_state: st.session_state.cola_extracciones_prov = []
 if 'resumen_prov' not in st.session_state: st.session_state.resumen_prov = []
-# Nuevo estado para Auditoría
 if 'resumen_para_cliente' not in st.session_state: st.session_state.resumen_para_cliente = []
 
 opcion = st.sidebar.radio("Seleccioná la tarea:", ["🚛 Ventas a Camiones", "📄 Facturas de Proveedores", "🔍 Auditoría de Remitos"])
@@ -403,12 +398,10 @@ Estructura requerida:
   "concepto": ""
 }"""
                             res = cliente_ia.models.generate_content(model='gemini-2.5-pro', contents=[prompt_proveedores, Image.open(io.BytesIO(doc['data']))])
-                            
                             raw_text = res.text.strip().replace('```json', '').replace('```JSON', '').replace('```', '')
                             start, end = raw_text.find('{'), raw_text.rfind('}') + 1
                             if start == -1:
                                 raise ValueError("La IA no devolvió las llaves de formato de datos")
-                            
                             datos_extraidos = json.loads(raw_text[start:end], strict=False)
                             datos_extraidos['_origen'] = doc['nombre']
                             st.session_state.cola_extracciones_prov.append(datos_extraidos)
@@ -417,12 +410,10 @@ Estructura requerida:
                             error_interno = str(e)
                             intentos -= 1
                             time.sleep(2)
-                    
                     if not exito: st.session_state.cola_extracciones_prov.append({'_origen': f"⚠️ Error Técnico en {doc['nombre']} | Falla: {error_interno}"})
                     barra_progreso.progress((i + 1) / len(st.session_state.lote_pendientes_prov))
                 st.session_state.lote_pendientes_prov = [] 
                 st.rerun() 
-            
             if st.button("🗑️ Vaciar Pila Proveedores"):
                 st.session_state.lote_pendientes_prov = []
                 st.rerun()
@@ -432,32 +423,28 @@ Estructura requerida:
         df_prov = pd.DataFrame(st.session_state.resumen_prov)
         st.subheader(f"📋 Planilla de Proveedores ({len(df_prov)} registros)")
         st.dataframe(df_prov, use_container_width=True)
-        
         col_ex1, col_ex2 = st.columns(2)
         buffer = io.BytesIO()
         with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
             df_prov.to_excel(writer, index=False, sheet_name='Proveedores')
             ws = writer.sheets['Proveedores']
             for i, col in enumerate(df_prov.columns): ws.column_dimensions[get_column_letter(i + 1)].width = 20
-        
         if col_ex1.download_button(label="📥 Descargar Excel de Proveedores", data=buffer.getvalue(), file_name=f"Proveedores_{datetime.now().strftime('%d-%m-%Y')}.xlsx", use_container_width=True):
             st.session_state.resumen_prov = []
             st.session_state.cola_extracciones_prov = []
             st.session_state.lote_pendientes_prov = []
             st.rerun()
-
         if col_ex2.button("🗑️ Vaciar sin descargar (Proveedores)", use_container_width=True):
             st.session_state.resumen_prov = []
             st.rerun()
 
 # ==========================================
-# 5. MÓDULO AUDITORÍA DE REMITOS (NUEVO)
+# 5. MÓDULO AUDITORÍA DE REMITOS
 # ==========================================
 elif opcion == "🔍 Auditoría de Remitos":
     st.title(f"📑 Auditoría de Cargas - {st.session_state.usuario_actual}")
-    st.info("Nancy, acá podés auditar las fotos de los playeros y armar los resúmenes para los clientes.")
+    st.info(f"{st.session_state.usuario_actual}, acá podés auditar las fotos de los playeros y armar los resúmenes para los clientes.")
 
-    # Consultar Supabase: órdenes DESPACHADAS que tienen foto
     try:
         query = supabase.table("ordenes_carga").select("*, clientes(nombre)").eq("estado", "DESPACHADO").not_.is_("url_foto", "null").order("fecha_despacho", desc=True).execute()
         ordenes = query.data
@@ -469,7 +456,6 @@ elif opcion == "🔍 Auditoría de Remitos":
         st.warning("No hay remitos pendientes de auditoría con foto adjunta.")
     else:
         df_audit = pd.DataFrame(ordenes)
-        # Extraer nombre del cliente de la relación JSON
         df_audit['Cliente'] = df_audit['clientes'].apply(lambda x: x['nombre'] if x else "DESCONOCIDO")
         clientes_con_remitos = df_audit['Cliente'].unique()
 
@@ -480,28 +466,22 @@ elif opcion == "🔍 Auditoría de Remitos":
             st.subheader(f"Órdenes de {cliente_sel}")
 
             for _, fila in filtro_cliente.iterrows():
-                # Formatear fecha para el expander
                 fecha_disp = fila['fecha_despacho'][:10] if fila['fecha_despacho'] else "Sin fecha"
                 with st.expander(f"📦 Orden #{fila['id']} | {fecha_disp} | Chofer: {fila['chofer']}"):
                     c1, c2 = st.columns([1, 1])
-                    
                     with c1:
                         st.image(fila['url_foto'], caption=f"Foto del Remito - Orden #{fila['id']}", use_container_width=True)
-                    
                     with c2:
                         st.markdown(f"**Datos Cargados en Playa:**")
                         st.write(f"🔹 Patente: {fila['patente']}")
                         st.write(f"🔹 Litros Pedidos: {fila['litros_pedidos']} L")
                         if fila['efectivo_pedido'] > 0:
                             st.write(f"💵 Efectivo Entregado: ${fila['efectivo_pedido']}")
-                        
                         st.divider()
                         st.markdown("**Confirmación Administrativa:**")
-                        # Formulario para cargar al Excel progresivo
                         with st.form(key=f"form_audit_{fila['id']}"):
                             lts_conf = st.number_input("Litros Reales (según foto)", value=float(fila['litros_pedidos']))
                             nro_compro = st.text_input("Nº Remito / Factura Final")
-                            
                             if st.form_submit_button("✅ Añadir esta carga al lote"):
                                 item_resumen = {
                                     "Fecha": fecha_disp,
@@ -515,23 +495,18 @@ elif opcion == "🔍 Auditoría de Remitos":
                                 st.session_state.resumen_para_cliente.append(item_resumen)
                                 st.success(f"¡Orden #{fila['id']} añadida al lote de {cliente_sel}!")
 
-    # Sección de Generación de Excel del lote auditado
     if st.session_state.resumen_para_cliente:
         st.divider()
         st.subheader("📊 Lote Auditado (Listo para Excel)")
         df_resumen = pd.DataFrame(st.session_state.resumen_para_cliente)
         st.dataframe(df_resumen, use_container_width=True)
-        
         buffer_res = io.BytesIO()
         with pd.ExcelWriter(buffer_res, engine='openpyxl') as writer:
             df_resumen.to_excel(writer, index=False, sheet_name='Resumen_Cargas')
             ws = writer.sheets['Resumen_Cargas']
             for i, col in enumerate(df_resumen.columns): ws.column_dimensions[get_column_letter(i + 1)].width = 18
-        
         ca1, ca2 = st.columns(2)
-        ca1.download_button("📥 Descargar Excel para Cliente", data=buffer_res.getvalue(), 
-                            file_name=f"Resumen_{datetime.now().strftime('%d-%m-%Y')}.xlsx", use_container_width=True)
-        
+        ca1.download_button("📥 Descargar Excel para Cliente", data=buffer_res.getvalue(), file_name=f"Resumen_{datetime.now().strftime('%d-%m-%Y')}.xlsx", use_container_width=True)
         if ca2.button("🗑️ Vaciar Lote Auditado", use_container_width=True):
             st.session_state.resumen_para_cliente = []
             st.rerun()
