@@ -9,18 +9,24 @@ import io
 import difflib
 import time
 from datetime import datetime
+from supabase import create_client, Client  # Nueva importación
 
 # Herramientas de diseño para el Excel
 from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
 # ==========================================
-# 1. IDENTIDAD, BASES Y ARCHIVOS DE SEGURIDAD
+# 1. IDENTIDAD, CONEXIÓN Y SEGURIDAD
 # ==========================================
 COLOR_ROJO = "#C8102E"
 COLOR_AMARILLO_ALERTA = "#FFE082" 
 ARCHIVO_DB = "clientes_db.json"
 ARCHIVO_CHOFERES = "choferes_db.json"
+
+# Credenciales de Supabase
+URL_SB = "https://bjhykcdhafoqpfkpngvw.supabase.co"
+KEY_SB = "sb_publishable_OvXN3LjawazkF5GNpsslUQ_SQOhTakr"
+supabase: Client = create_client(URL_SB, KEY_SB)
 
 ENTIDADES_OFICIALES = [
     "TRANSP HIJOS DE MARIANO FRANCOVIG SH",
@@ -32,6 +38,7 @@ ENTIDADES_OFICIALES = [
     "RUIZ MARCELO"
 ]
 
+# Funciones de base de datos local
 def cargar_db_diccionario(archivo):
     if os.path.exists(archivo):
         with open(archivo, 'r', encoding='utf-8') as f: return json.load(f)
@@ -74,16 +81,18 @@ BASE_CHOFERES = cargar_db_lista(ARCHIVO_CHOFERES)
 
 st.set_page_config(page_title="BC Combustibles - Gestión Pro", page_icon="⛽", layout="wide")
 
-# --- Dentro del bloque de st.markdown con el CSS ---
-st.markdown("""
+# Estilos CSS Globales
+st.markdown(f"""
     <style>
         /* Ocultar el menú de navegación lateral nativo (Lector, Cheques, etc.) */
-        [data-testid="stSidebarNav"] {display: none !important;}
+        [data-testid="stSidebarNav"] {{display: none !important;}}
 
-        /* Tus otros estilos ya existentes... */
-        .main { background-color: #f5f5f5; }
-        .stButton>button { width: 100%; border-radius: 5px; height: 3em; }
-        /* ... etc ... */
+        .stApp {{ background-color: white !important; }}
+        h1, h2, h3 {{ color: {COLOR_ROJO} !important; font-family: 'Montserrat', sans-serif; }}
+        .stButton>button {{ background-color: {COLOR_ROJO}; color: white; border-radius: 12px; font-weight: bold; height: 3em; border: none; width: 100%; }}
+        [data-testid="stSidebar"] {{ background-color: #f8f9fa; border-right: 1px solid #e0e0e0; }}
+        .alerta-ingreso {{ padding: 20px; border-radius: 15px; background-color: #fff3f3; border-left: 5px solid {COLOR_ROJO}; color: #721c24; font-weight: bold; text-align: center; font-size: 1.2em; }}
+        .bloque-alerta {{ background-color: #fff8e1; padding: 15px; border-radius: 10px; border: 1px solid {COLOR_AMARILLO_ALERTA}; border-left: 4px solid {COLOR_AMARILLO_ALERTA}; margin-bottom: 10px; color: #856404; font-weight: bold; }}
     </style>
 """, unsafe_allow_html=True)
 
@@ -94,7 +103,7 @@ ruta_logo = next((v for v in ["Logo.jpeg", "Logo.jpg", "logo.png"] if os.path.ex
 if ruta_logo: st.sidebar.image(ruta_logo, use_container_width=True)
 
 # ==========================================
-# 2. IDENTIFICACIÓN (Lógica unificada)
+# 2. IDENTIFICACIÓN
 # ==========================================
 st.sidebar.subheader("👤 Identificación")
 
@@ -112,30 +121,23 @@ if usuario_app != st.session_state.usuario_actual:
     st.session_state.resumen_ventas = recuperar_cache_ventas(usuario_app)
 
 if not st.session_state.usuario_actual.strip():
-    # Ocultamos el menú lateral nativo de Streamlit ("Lector", "Cheques") mientras no haya login
-    st.markdown("""
-        <style>
-            [data-testid="stSidebarNav"] {display: none !important;}
-        </style>
-    """, unsafe_allow_html=True)
-    
     st.title("⛽ Sistema de Gestión BC Combustibles")
     st.markdown("""<div class="alerta-ingreso">⚠️ ACCESO RESTRINGIDO<br>Ingresá tu nombre en el panel lateral para habilitar el sistema.</div>""", unsafe_allow_html=True)
     st.stop()
 
 st.sidebar.info(f"Operador activo: {st.session_state.usuario_actual}")
 
-# Inicializar estados de Camiones
+# Inicializar estados
 if 'lote_pendientes' not in st.session_state: st.session_state.lote_pendientes = []
 if 'cola_extracciones' not in st.session_state: st.session_state.cola_extracciones = []
 if 'resumen_ventas' not in st.session_state: st.session_state.resumen_ventas = []
-
-# Inicializar estados de Proveedores
 if 'lote_pendientes_prov' not in st.session_state: st.session_state.lote_pendientes_prov = []
 if 'cola_extracciones_prov' not in st.session_state: st.session_state.cola_extracciones_prov = []
 if 'resumen_prov' not in st.session_state: st.session_state.resumen_prov = []
+# Nuevo estado para Auditoría
+if 'resumen_para_cliente' not in st.session_state: st.session_state.resumen_para_cliente = []
 
-opcion = st.sidebar.radio("Seleccioná la tarea:", ["🚛 Ventas a Camiones", "📄 Facturas de Proveedores"])
+opcion = st.sidebar.radio("Seleccioná la tarea:", ["🚛 Ventas a Camiones", "📄 Facturas de Proveedores", "🔍 Auditoría de Remitos"])
 st.sidebar.divider()
 
 # ==========================================
@@ -286,7 +288,6 @@ if opcion == "🚛 Ventas a Camiones":
             st.session_state.resumen_ventas = []
             if os.path.exists(obtener_nombre_cache(st.session_state.usuario_actual)): os.remove(obtener_nombre_cache(st.session_state.usuario_actual))
             st.rerun()
-
 
 # ==========================================
 # 4. MÓDULO FACTURAS DE PROVEEDORES
@@ -450,7 +451,93 @@ Estructura requerida:
             st.rerun()
 
 # ==========================================
-# 5. MANTENIMIENTO
+# 5. MÓDULO AUDITORÍA DE REMITOS (NUEVO)
+# ==========================================
+elif opcion == "🔍 Auditoría de Remitos":
+    st.title(f"📑 Auditoría de Cargas - {st.session_state.usuario_actual}")
+    st.info("Nancy, acá podés auditar las fotos de los playeros y armar los resúmenes para los clientes.")
+
+    # Consultar Supabase: órdenes DESPACHADAS que tienen foto
+    try:
+        query = supabase.table("ordenes_carga").select("*, clientes(nombre)").eq("estado", "DESPACHADO").not_.is_("url_foto", "null").order("fecha_despacho", desc=True).execute()
+        ordenes = query.data
+    except Exception as e:
+        st.error(f"Error al conectar con la base de datos: {e}")
+        ordenes = []
+
+    if not ordenes:
+        st.warning("No hay remitos pendientes de auditoría con foto adjunta.")
+    else:
+        df_audit = pd.DataFrame(ordenes)
+        # Extraer nombre del cliente de la relación JSON
+        df_audit['Cliente'] = df_audit['clientes'].apply(lambda x: x['nombre'] if x else "DESCONOCIDO")
+        clientes_con_remitos = df_audit['Cliente'].unique()
+
+        cliente_sel = st.selectbox("Seleccioná el cliente para auditar y armar resumen:", ["--- Seleccionar ---"] + list(clientes_con_remitos))
+        
+        if cliente_sel != "--- Seleccionar ---":
+            filtro_cliente = df_audit[df_audit['Cliente'] == cliente_sel]
+            st.subheader(f"Órdenes de {cliente_sel}")
+
+            for _, fila in filtro_cliente.iterrows():
+                # Formatear fecha para el expander
+                fecha_disp = fila['fecha_despacho'][:10] if fila['fecha_despacho'] else "Sin fecha"
+                with st.expander(f"📦 Orden #{fila['id']} | {fecha_disp} | Chofer: {fila['chofer']}"):
+                    c1, c2 = st.columns([1, 1])
+                    
+                    with c1:
+                        st.image(fila['url_foto'], caption=f"Foto del Remito - Orden #{fila['id']}", use_container_width=True)
+                    
+                    with c2:
+                        st.markdown(f"**Datos Cargados en Playa:**")
+                        st.write(f"🔹 Patente: {fila['patente']}")
+                        st.write(f"🔹 Litros Pedidos: {fila['litros_pedidos']} L")
+                        if fila['efectivo_pedido'] > 0:
+                            st.write(f"💵 Efectivo Entregado: ${fila['efectivo_pedido']}")
+                        
+                        st.divider()
+                        st.markdown("**Confirmación Administrativa:**")
+                        # Formulario para cargar al Excel progresivo
+                        with st.form(key=f"form_audit_{fila['id']}"):
+                            lts_conf = st.number_input("Litros Reales (según foto)", value=float(fila['litros_pedidos']))
+                            nro_compro = st.text_input("Nº Remito / Factura Final")
+                            
+                            if st.form_submit_button("✅ Añadir esta carga al lote"):
+                                item_resumen = {
+                                    "Fecha": fecha_disp,
+                                    "Cliente": cliente_sel,
+                                    "Patente": fila['patente'],
+                                    "Chofer": fila['chofer'],
+                                    "Litros Reales": lts_conf,
+                                    "Comprobante": nro_compro.upper(),
+                                    "ID Orden": fila['id']
+                                }
+                                st.session_state.resumen_para_cliente.append(item_resumen)
+                                st.success(f"¡Orden #{fila['id']} añadida al lote de {cliente_sel}!")
+
+    # Sección de Generación de Excel del lote auditado
+    if st.session_state.resumen_para_cliente:
+        st.divider()
+        st.subheader("📊 Lote Auditado (Listo para Excel)")
+        df_resumen = pd.DataFrame(st.session_state.resumen_para_cliente)
+        st.dataframe(df_resumen, use_container_width=True)
+        
+        buffer_res = io.BytesIO()
+        with pd.ExcelWriter(buffer_res, engine='openpyxl') as writer:
+            df_resumen.to_excel(writer, index=False, sheet_name='Resumen_Cargas')
+            ws = writer.sheets['Resumen_Cargas']
+            for i, col in enumerate(df_resumen.columns): ws.column_dimensions[get_column_letter(i + 1)].width = 18
+        
+        ca1, ca2 = st.columns(2)
+        ca1.download_button("📥 Descargar Excel para Cliente", data=buffer_res.getvalue(), 
+                            file_name=f"Resumen_{datetime.now().strftime('%d-%m-%Y')}.xlsx", use_container_width=True)
+        
+        if ca2.button("🗑️ Vaciar Lote Auditado", use_container_width=True):
+            st.session_state.resumen_para_cliente = []
+            st.rerun()
+
+# ==========================================
+# 6. MANTENIMIENTO
 # ==========================================
 with st.sidebar.expander("🛠️ Mantenimiento"):
     if st.button("🗑️ Limpiar Memoria (Choferes/Clientes)"):
