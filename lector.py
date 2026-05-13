@@ -495,7 +495,7 @@ elif opcion == "🔍 Auditoría de Remitos":
 
             st.divider()
 
-           for _, fila in filtro_cliente.iterrows():
+            for _, fila in filtro_cliente.iterrows():
                 # Validación segura para fechas nulas
                 fecha_disp = fila['fecha_despacho'][:10] if pd.notna(fila['fecha_despacho']) else "---"
                 
@@ -506,7 +506,7 @@ elif opcion == "🔍 Auditoría de Remitos":
                 with st.expander(f"📦 Orden #{fila['id']} | {fecha_disp} | Chofer: {chofer_txt}"):
                     c1, c2 = st.columns([1, 1])
                     with c1:
-                        # SOLUCIÓN DEL ERROR: Verificamos que no sea NaN y que sea un texto válido
+                        # Verificamos que no sea NaN y que sea un texto válido
                         if pd.notna(fila['url_foto']) and str(fila['url_foto']).strip() != "":
                             st.image(fila['url_foto'], caption="Remito original", use_container_width=True)
                         else:
