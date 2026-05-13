@@ -67,7 +67,7 @@ st.markdown(f"""
 cliente_ia = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
 
 # NOTA: Cuando tengas el logo PNG sin fondo, cambiá este link.
-URL_LOGO_OFICIAL = "https://bjhykcdhafoqpfkpngvw.supabase.co/storage/v1/object/public/remitos/Logo.jpeg"
+URL_LOGO_OFICIAL = "https://bjhykcdhafoqpfkpngvw.supabase.co/storage/v1/object/public/remitos/Logo%20nuevo.png"
 
 # ==========================================
 # 2. SISTEMA DE LOGIN Y AUTENTICACIÓN
