@@ -101,7 +101,7 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 cliente_ia = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
-URL_LOGO_OFICIAL = "https://bjhykcdhafoqpfkpngvw.supabase.co/storage/v1/object/public/remitos/Logo.jpeg
+URL_LOGO_OFICIAL = "https://bjhykcdhafoqpfkpngvw.supabase.co/storage/v1/object/public/remitos/Logo.jpeg"
 
 # ==========================================
 # 2. SISTEMA DE LOGIN Y AUTENTICACIÓN
@@ -141,6 +141,10 @@ if st.session_state.usuario_autenticado is None:
 user = st.session_state.usuario_autenticado
 st.session_state.usuario_actual = user['nombre']
 usuario_app = user['nombre']
+
+# Acá se muestra el logo en la barra lateral una vez que ya ingresó
+st.sidebar.markdown("<br>", unsafe_allow_html=True)
+st.sidebar.image(URL_LOGO_OFICIAL, use_container_width=True)
 
 st.sidebar.subheader("👤 Identificación")
 st.sidebar.info(f"Operador activo: {usuario_app}")
