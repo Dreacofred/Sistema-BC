@@ -101,11 +101,7 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 cliente_ia = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
-
-# Reemplazá el bloque del logo por este:
-st.sidebar.markdown("<br>", unsafe_allow_html=True)
-URL_LOGO_OFICIAL = "https://bjhykcdhafoqpfkpngvw.supabase.co/storage/v1/object/public/remitos/Logo.jpeg"
-st.sidebar.image(URL_LOGO_OFICIAL, use_container_width=True)
+URL_LOGO_OFICIAL = "https://bjhykcdhafoqpfkpngvw.supabase.co/storage/v1/object/public/remitos/Logo.jpeg
 
 # ==========================================
 # 2. SISTEMA DE LOGIN Y AUTENTICACIÓN
