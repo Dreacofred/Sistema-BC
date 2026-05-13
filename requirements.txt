@@ -6,3 +6,4 @@ pandas
 openpyxl
 supabase
 requests
+streamlit-option-menu
