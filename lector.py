@@ -28,6 +28,9 @@ URL_SB = "https://bjhykcdhafoqpfkpngvw.supabase.co"
 KEY_SB = "sb_publishable_OvXN3LjawazkF5GNpsslUQ_SQOhTakr"
 supabase: Client = create_client(URL_SB, KEY_SB)
 
+# Diccionario auxiliar para nombres de sucursales
+NOMBRES_SUCURSALES = {1: "RECONQUISTA", 2: "AVELLANEDA", 3: "FLORENCIA", 4: "RECREO"}
+
 ENTIDADES_OFICIALES = [
     "TRANSP HIJOS DE MARIANO FRANCOVIG SH",
     "MUNICIPALIDAD DE RECREO",
@@ -76,10 +79,8 @@ def recuperar_cache_ventas(usuario):
     return []
 
 def convertir_a_numero(valor):
-    """Convierte cadenas numéricas a enteros para evitar el triángulo verde en Excel"""
     v = str(valor).strip()
-    if v.isdigit():
-        return int(v)
+    if v.isdigit(): return int(v)
     return v
 
 BASE_CLIENTES = cargar_db_diccionario(ARCHIVO_DB)
@@ -107,29 +108,52 @@ URL_LOGO_OFICIAL = "https://bjhykcdhafoqpfkpngvw.supabase.co/storage/v1/object/p
 st.sidebar.image(URL_LOGO_OFICIAL, use_container_width=True)
 
 # ==========================================
-# 2. IDENTIFICACIÓN
+# 2. SISTEMA DE LOGIN Y AUTENTICACIÓN
 # ==========================================
-st.sidebar.subheader("👤 Identificación")
+if 'usuario_autenticado' not in st.session_state:
+    st.session_state.usuario_autenticado = None
 
-if 'usuario_actual' not in st.session_state:
-    st.session_state.usuario_actual = ""
+def mostrar_login():
+    st.markdown("<br><br>", unsafe_allow_html=True)
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        st.markdown(f'<div style="text-align:center;"><img src="{URL_LOGO_OFICIAL}" width="150" style="border-radius:50%; border:3px solid {COLOR_ROJO};"></div>', unsafe_allow_html=True)
+        st.markdown("<h2 style='text-align:center;'>Acceso Administración BC</h2>", unsafe_allow_html=True)
+        
+        with st.container():
+            legajo = st.text_input("Número de Legajo")
+            pin = st.text_input("PIN de Acceso", type="password")
+            
+            if st.button("INGRESAR AL SISTEMA"):
+                try:
+                    res = supabase.table("empleados").select("*").eq("legajo", legajo).eq("pin", pin).execute()
+                    if res.data:
+                        st.session_state.usuario_autenticado = res.data[0]
+                        st.session_state.resumen_ventas = recuperar_cache_ventas(res.data[0]['nombre'])
+                        st.rerun()
+                    else:
+                        st.error("❌ Legajo o PIN incorrectos.")
+                except Exception as e:
+                    st.error(f"Error de conexión: {e}")
 
-usuario_app = st.sidebar.text_input(
-    "Tu nombre para operar:", 
-    value=st.session_state.usuario_actual, 
-    placeholder="Ej: Nancy o Diego"
-)
-
-if usuario_app != st.session_state.usuario_actual:
-    st.session_state.usuario_actual = usuario_app
-    st.session_state.resumen_ventas = recuperar_cache_ventas(usuario_app)
-
-if not st.session_state.usuario_actual.strip():
-    st.title("⛽ Sistema de Gestión BC Combustibles")
-    st.markdown("""<div class="alerta-ingreso">⚠️ ACCESO RESTRINGIDO<br>Ingresá tu nombre en el panel lateral para habilitar el sistema.</div>""", unsafe_allow_html=True)
+# Si no hay nadie logueado, muestro el login y freno la app acá
+if st.session_state.usuario_autenticado is None:
+    mostrar_login()
     st.stop()
 
-st.sidebar.info(f"Operador activo: {st.session_state.usuario_actual}")
+# Si pasamos el login, cargamos al usuario en la app
+user = st.session_state.usuario_autenticado
+st.session_state.usuario_actual = user['nombre']
+usuario_app = user['nombre']
+
+st.sidebar.subheader("👤 Identificación")
+st.sidebar.info(f"Operador activo: {usuario_app}")
+st.sidebar.write(f"📍 Sucursal: **{NOMBRES_SUCURSALES.get(user['sucursal_id'], 'BC')}**")
+st.sidebar.write(f"💼 Rol: {user['puesto']}")
+
+if st.sidebar.button("Cerrar Sesión 🚪"):
+    st.session_state.usuario_autenticado = None
+    st.rerun()
 
 # Inicializar estados
 if 'lote_pendientes' not in st.session_state: st.session_state.lote_pendientes = []
@@ -149,7 +173,7 @@ st.sidebar.divider()
 # ==========================================
 if opcion == "🚛 Ventas a Camiones":
     if len(st.session_state.cola_extracciones) > 0:
-        st.title(f"🔄 Revisión de Cargas - {st.session_state.usuario_actual}")
+        st.title(f"🔄 Revisión de Cargas - {usuario_app}")
         total_restantes = len(st.session_state.cola_extracciones)
         st.warning(f"Tienes {total_restantes} documento(s) esperando tu revisión.")
         
@@ -187,7 +211,7 @@ if opcion == "🚛 Ventas a Camiones":
 
             if es_nuevo_cli: st.info("✨ ¡Atención! Código de cliente nuevo detectado.")
             if chofer_final and chofer_final not in BASE_CHOFERES:
-                st.markdown(f"""<div class="bloque-alerta">⚠️ ATENCIÓN {st.session_state.usuario_actual.upper()}:<br>El chofer no figura en la memoria. Revisá que esté bien escrito.</div>""", unsafe_allow_html=True)
+                st.markdown(f"""<div class="bloque-alerta">⚠️ ATENCIÓN {usuario_app.upper()}:<br>El chofer no figura en la memoria. Revisá que esté bien escrito.</div>""", unsafe_allow_html=True)
 
             c1, c2, c3, c4 = st.columns([1.5, 2, 1, 3])
             fecha = c1.text_input("Fecha", v_fecha)
@@ -215,7 +239,7 @@ if opcion == "🚛 Ventas a Camiones":
                 if chofer_l: guardar_nuevo_item(ARCHIVO_CHOFERES, chofer_l)
                 registro = {"Fecha": fecha.strip(), "Chofer": chofer_l, "Cliente": f"{cod_l} {nom_l}".strip(), "Litros": litros, "Importe": importe, "Factura": factura_nro.strip().upper(), "Entidad pagadora": entidad_l, "Orden Litros": str(o_litros).strip().upper(), "Efectivo": val_efectivo, "Orden Efectivo": str(o_efectivo).strip().upper()}
                 st.session_state.resumen_ventas.append(registro)
-                guardar_cache_ventas(st.session_state.resumen_ventas, st.session_state.usuario_actual)
+                guardar_cache_ventas(st.session_state.resumen_ventas, usuario_app)
                 st.session_state.cola_extracciones.pop(0) 
                 st.rerun()
             
@@ -224,7 +248,7 @@ if opcion == "🚛 Ventas a Camiones":
                 st.rerun()
 
     else:
-        st.title(f"🚛 Registro de Cargas - {st.session_state.usuario_actual}")
+        st.title(f"🚛 Registro de Cargas - {usuario_app}")
         tab1, tab2 = st.tabs(["📁 Subir Archivos", "📸 Cámara"])
         with tab1:
             fotos_disco = st.file_uploader("Seleccionar comprobantes", type=["pdf","jpg","png","jpeg"], accept_multiple_files=True)
@@ -290,13 +314,13 @@ Extraé JSON puro sin markdown."""
             st.session_state.resumen_ventas = []
             st.session_state.cola_extracciones = []
             st.session_state.lote_pendientes = []
-            archivo_usuario = obtener_nombre_cache(st.session_state.usuario_actual)
+            archivo_usuario = obtener_nombre_cache(usuario_app)
             if os.path.exists(archivo_usuario): os.remove(archivo_usuario)
             st.rerun()
 
         if col_ex2.button("🗑️ Vaciar sin descargar", use_container_width=True):
             st.session_state.resumen_ventas = []
-            if os.path.exists(obtener_nombre_cache(st.session_state.usuario_actual)): os.remove(obtener_nombre_cache(st.session_state.usuario_actual))
+            if os.path.exists(obtener_nombre_cache(usuario_app)): os.remove(obtener_nombre_cache(usuario_app))
             st.rerun()
 
 # ==========================================
@@ -304,7 +328,7 @@ Extraé JSON puro sin markdown."""
 # ==========================================
 elif opcion == "📄 Facturas de Proveedores":
     if len(st.session_state.cola_extracciones_prov) > 0:
-        st.title(f"🔄 Revisión de Proveedores - {st.session_state.usuario_actual}")
+        st.title(f"🔄 Revisión de Proveedores - {usuario_app}")
         total_restantes = len(st.session_state.cola_extracciones_prov)
         st.warning(f"Tienes {total_restantes} factura(s) esperando tu revisión.")
         
@@ -361,7 +385,7 @@ elif opcion == "📄 Facturas de Proveedores":
                 st.rerun()
 
     else:
-        st.title(f"📄 Carga de Proveedores - {st.session_state.usuario_actual}")
+        st.title(f"📄 Carga de Proveedores - {usuario_app}")
         tab1, tab2 = st.tabs(["📁 Subir Facturas", "📸 Cámara"])
         with tab1:
             fotos_disco = st.file_uploader("Seleccionar facturas o remitos", type=["pdf","jpg","png","jpeg"], accept_multiple_files=True, key="up_prov")
@@ -433,12 +457,22 @@ Busca CUIT, Fecha, Nº de Factura y Totales. Extraé JSON puro."""
 # 5. MÓDULO AUDITORÍA DE REMITOS
 # ==========================================
 elif opcion == "🔍 Auditoría de Remitos":
-    st.title(f"📑 Auditoría de Cargas - {st.session_state.usuario_actual}")
-    st.info(f"Revisión de movimientos para generar resúmenes externos.")
+    st.title(f"📑 Auditoría de Cargas - {usuario_app}")
+    
+    # 🔒 ACÁ ESTÁ EL FILTRO DE SUCURSAL
+    if user['puesto'] == 'SUPER_ADMIN':
+        st.success("🔓 Acceso TOTAL: Visualizando órdenes de TODAS las sucursales.")
+    else:
+        st.info(f"📍 Acceso FILTRADO: Visualizando solo órdenes de **{NOMBRES_SUCURSALES.get(user['sucursal_id'], 'tu sucursal')}**.")
 
     try:
-        query = supabase.table("ordenes_carga").select("*, clientes(nombre, formato_especial)").eq("estado", "DESPACHADO").order("fecha_despacho", desc=True).execute()
-        ordenes = query.data
+        query = supabase.table("ordenes_carga").select("*, clientes(nombre, formato_especial)")
+        
+        if user['puesto'] != 'SUPER_ADMIN':
+            query = query.eq("sucursal_carga_id", user['sucursal_id'])
+            
+        res_auditoria = query.eq("estado", "DESPACHADO").order("fecha_despacho", desc=True).execute()
+        ordenes = res_auditoria.data
     except Exception as e:
         st.error(f"Error de base de datos: {e}")
         ordenes = []
@@ -493,10 +527,10 @@ Devolvé estrictamente JSON puro."""
                                     st.session_state[f"ia_fac_{fila['id']}"] = str(d_ia.get('comprobante', ''))
                                 except: pass
                                 barra_p.progress((i + 1) / total)
-                            st.session_state[clave_estado_ia] = True
-                            st.success("✅ Análisis completo.")
-                            time.sleep(1)
-                            st.rerun()
+                        st.session_state[clave_estado_ia] = True
+                        st.success("✅ Análisis completo.")
+                        time.sleep(1)
+                        st.rerun()
 
             st.divider()
 
@@ -553,7 +587,6 @@ Devolvé estrictamente JSON puro."""
                                 if st.form_submit_button("✅ Añadir al Excel Final"):
                                     st.session_state.agregados_excel.append(fila['id'])
                                     
-                                    # FUSIÓN DE COLUMNAS APLICADA AQUÍ: 1 SOLA COLUMNA PARA EL NÚMERO DE ORDEN
                                     st.session_state.resumen_para_cliente.append({
                                         "Fecha": fac_fecha.strip(),
                                         "Chofer": chofer_txt.strip(),
