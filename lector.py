@@ -132,7 +132,7 @@ if 'lote_pendientes_prov' not in st.session_state: st.session_state.lote_pendien
 if 'cola_extracciones_prov' not in st.session_state: st.session_state.cola_extracciones_prov = []
 if 'resumen_prov' not in st.session_state: st.session_state.resumen_prov = []
 if 'resumen_para_cliente' not in st.session_state: st.session_state.resumen_para_cliente = []
-if 'agregados_excel' not in st.session_state: st.session_state.agregados_excel = [] # NUEVO: Memoria de procesados
+if 'agregados_excel' not in st.session_state: st.session_state.agregados_excel = []
 
 opcion = st.sidebar.radio("Seleccioná la tarea:", ["🚛 Ventas a Camiones", "📄 Facturas de Proveedores", "🔍 Auditoría de Remitos"])
 st.sidebar.divider()
@@ -448,7 +448,6 @@ elif opcion == "🔍 Auditoría de Remitos":
     st.info(f"Revisión de movimientos para generar resúmenes externos.")
 
     try:
-        # Modificamos la consulta para traer también el formato_especial del cliente
         query = supabase.table("ordenes_carga").select("*, clientes(nombre, formato_especial)").eq("estado", "DESPACHADO").order("fecha_despacho", desc=True).execute()
         ordenes = query.data
     except Exception as e:
@@ -505,22 +504,22 @@ elif opcion == "🔍 Auditoría de Remitos":
                 chofer_txt = fila['chofer'] if pd.notna(fila['chofer']) else "Sin chofer"
                 es_especial = fila['formato_especial']
                 
-                # PUNTO 1: Cambia el estado visual del acordeón si ya fue agregado
                 estado_icono = "✅ [LISTO]" if fila['id'] in st.session_state.agregados_excel else "📦 [PENDIENTE]"
                 
-                # PUNTO 2: Mostrar el cliente en el título del acordeón
                 with st.expander(f"{estado_icono} Orden #{fila['id']} | Cliente: {cliente_sel} | Chofer: {chofer_txt} | Patente: {fila['patente']}"):
-                    # PUNTO 5: Hacemos la columna 1 más ancha para que la foto se vea mejor por defecto
-                    c1, c2 = st.columns([1.5, 1]) 
+                    
+                    # Columna izquierda un poco más ancha para la foto
+                    c1, c2 = st.columns([1.8, 1]) 
                     with c1:
                         if pd.notna(fila['url_foto']) and str(fila['url_foto']).strip() != "":
+                            # SOLUCIÓN DEL ZOOM: Agregamos el link que abre en pestaña nueva para hacer zoom a placer
+                            st.markdown(f"**[🔍 Clic aquí para abrir la foto en tamaño completo (Zoom real)]({fila['url_foto']})**")
                             st.image(fila['url_foto'], caption="Remito / Factura original", use_container_width=True)
                         else:
                             motivo = fila['motivo_sin_foto'] if pd.notna(fila['motivo_sin_foto']) else 'Sin motivo'
                             st.warning(f"⚠️ SIN FOTO: {motivo}")
                             
                     with c2:
-                        # Si ya lo agregamos, mostramos cartel verde en vez del formulario
                         if fila['id'] in st.session_state.agregados_excel:
                             st.success("✅ Esta orden ya fue validada y agregada al Excel final.")
                         else:
@@ -530,27 +529,31 @@ elif opcion == "🔍 Auditoría de Remitos":
                                 fac_fecha = col_f1.text_input("Fecha", value=st.session_state.get(f"ia_fec_{fila['id']}", ""))
                                 fac_rs = col_f2.text_input("Razón Social", value=st.session_state.get(f"ia_rs_{fila['id']}", ""))
                                 
-                                col_f3, col_f4, col_f5 = st.columns(3)
-                                fac_lts = col_f3.number_input("Litros", value=st.session_state.get(f"ia_lts_{fila['id']}", float(fila['litros_pedidos'])))
-                                fac_imp = col_f4.number_input("Importe ($)", value=st.session_state.get(f"ia_imp_{fila['id']}", 0.0))
-                                fac_comp = col_f5.text_input("Nº Factura", value=st.session_state.get(f"ia_fac_{fila['id']}", ""))
+                                col_f3, col_f4 = st.columns(2)
+                                fac_imp = col_f3.number_input("Importe ($)", value=st.session_state.get(f"ia_imp_{fila['id']}", 0.0))
+                                fac_comp = col_f4.text_input("Nº Factura", value=st.session_state.get(f"ia_fac_{fila['id']}", ""))
                                 
-                                st.write("📝 **Datos de Orden Interna / Pista**")
-                                col_o1, col_o2 = st.columns(2)
+                                st.write("📝 **Cantidades y Órdenes**")
                                 efectivo_real_bd = fila.get('efectivo_entregado') if pd.notna(fila.get('efectivo_entregado')) else fila.get('efectivo_pedido', 0)
-                                efectivo_final = col_o1.number_input("Efectivo Entregado ($)", value=float(efectivo_real_bd))
-                                
-                                # PUNTO 4: Lógica para mostrar las cajas correspondientes
                                 nro_ord_gen, nro_ord_lts, nro_ord_efe = "", "", ""
                                 
+                                # SOLUCIÓN DEL ORDEN VISUAL LÓGICO
                                 if es_especial:
-                                    nro_ord_lts = col_o2.text_input("Nº Orden Litros (Esp)", value=fila['nro_orden_litros_interna'] if pd.notna(fila['nro_orden_litros_interna']) else "")
-                                    nro_ord_efe = st.text_input("Nº Orden Efectivo (Esp)", value=fila['nro_orden_efectivo_interna'] if pd.notna(fila['nro_orden_efectivo_interna']) else "")
+                                    col_o1, col_o2 = st.columns(2)
+                                    fac_lts = col_o1.number_input("Litros Reales", value=st.session_state.get(f"ia_lts_{fila['id']}", float(fila['litros_pedidos'])))
+                                    nro_ord_lts = col_o2.text_input("Nº Orden Litros", value=fila['nro_orden_litros_interna'] if pd.notna(fila['nro_orden_litros_interna']) else "")
+                                    
+                                    col_o3, col_o4 = st.columns(2)
+                                    efectivo_final = col_o3.number_input("Efectivo Entregado ($)", value=float(efectivo_real_bd))
+                                    nro_ord_efe = col_o4.text_input("Nº Orden Efectivo", value=fila['nro_orden_efectivo_interna'] if pd.notna(fila['nro_orden_efectivo_interna']) else "")
                                 else:
+                                    col_o1, col_o2 = st.columns(2)
+                                    fac_lts = col_o1.number_input("Litros Reales", value=st.session_state.get(f"ia_lts_{fila['id']}", float(fila['litros_pedidos'])))
                                     nro_ord_gen = col_o2.text_input("Nº Orden (Normal)", value=fila['nro_orden_cliente'] if pd.notna(fila['nro_orden_cliente']) else "")
+                                    
+                                    efectivo_final = st.number_input("Efectivo Entregado ($)", value=float(efectivo_real_bd))
                                 
                                 if st.form_submit_button("✅ Añadir al Excel Final"):
-                                    # Marcamos como procesado
                                     st.session_state.agregados_excel.append(fila['id'])
                                     
                                     st.session_state.resumen_para_cliente.append({
@@ -567,7 +570,7 @@ elif opcion == "🔍 Auditoría de Remitos":
                                         "Numero de orden de efectivo": nro_ord_efe.strip() if es_especial else "-"
                                     })
                                     st.toast("Carga añadida al resumen.")
-                                    st.rerun() # Esto recarga y cierra el acordeón para pasar al siguiente
+                                    st.rerun() 
 
     if st.session_state.resumen_para_cliente:
         st.divider()
@@ -586,7 +589,7 @@ elif opcion == "🔍 Auditoría de Remitos":
         c_ex1.download_button("📥 Descargar Excel para Cliente", data=buf.getvalue(), file_name=f"Resumen_{cliente_sel}.xlsx", use_container_width=True)
         if c_ex2.button("🗑️ Vaciar Lote", use_container_width=True):
             st.session_state.resumen_para_cliente = []
-            st.session_state.agregados_excel = [] # Limpiamos la memoria de los botones verdes también
+            st.session_state.agregados_excel = []
             st.rerun()
 
 # ==========================================
