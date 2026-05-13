@@ -10,6 +10,7 @@ import difflib
 import time
 from datetime import datetime
 from supabase import create_client, Client
+import requests # Agregado para descargar fotos
 
 # Herramientas de diseño para el Excel
 from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
@@ -439,135 +440,114 @@ Estructura requerida:
             st.rerun()
 
 # ==========================================
-# 5. MÓDULO AUDITORÍA DE REMITOS
+# 5. MÓDULO AUDITORÍA DE REMITOS (REFINADO PARA CLIENTES)
 # ==========================================
 elif opcion == "🔍 Auditoría de Remitos":
     st.title(f"📑 Auditoría de Cargas - {st.session_state.usuario_actual}")
-    st.info(f"{st.session_state.usuario_actual}, acá podés auditar las fotos de los playeros y armar los resúmenes para los clientes.")
+    st.info(f"Revisión de movimientos para generar resúmenes externos.")
 
     try:
-        query = supabase.table("ordenes_carga").select("*, clientes(nombre)").eq("estado", "DESPACHADO").not_.is_("url_foto", "null").order("fecha_despacho", desc=True).execute()
+        # Traemos órdenes despachadas
+        query = supabase.table("ordenes_carga").select("*, clientes(nombre)").eq("estado", "DESPACHADO").order("fecha_despacho", desc=True).execute()
         ordenes = query.data
     except Exception as e:
-        st.error(f"Error al conectar con la base de datos: {e}")
+        st.error(f"Error de base de datos: {e}")
         ordenes = []
 
     if not ordenes:
-        st.warning("No hay remitos pendientes de auditoría con foto adjunta.")
+        st.warning("No hay remitos pendientes de auditoría.")
     else:
         df_audit = pd.DataFrame(ordenes)
         df_audit['Cliente'] = df_audit['clientes'].apply(lambda x: x['nombre'] if x else "DESCONOCIDO")
-        clientes_con_remitos = df_audit['Cliente'].unique()
+        
+        # Nancy ve todo lo que sea despachado y requiera auditoría (con foto o con contingencia)
+        df_audit = df_audit[(df_audit['url_foto'].notnull()) | (df_audit['motivo_sin_foto'].notnull())]
 
-        cliente_sel = st.selectbox("Seleccioná el cliente para auditar y armar resumen:", ["--- Seleccionar ---"] + list(clientes_con_remitos))
+        clientes_con_movimientos = df_audit['Cliente'].unique()
+        cliente_sel = st.selectbox("Seleccioná el cliente para armar su resumen:", ["--- Seleccionar ---"] + list(clientes_con_movimientos))
         
         if cliente_sel != "--- Seleccionar ---":
             filtro_cliente = df_audit[df_audit['Cliente'] == cliente_sel]
             
-            # --- CABECERA Y BOTÓN DE ANÁLISIS EN LOTE ---
             c_head1, c_head2 = st.columns([2, 1])
             with c_head1:
-                st.subheader(f"Órdenes de {cliente_sel}")
+                st.subheader(f"Movimientos de {cliente_sel}")
             with c_head2:
-                if st.button("🚀 Leer todas las fotos con IA", use_container_width=True):
-                    import requests
-                    barra_progreso = st.progress(0)
-                    texto_estado = st.empty()
-                    total = len(filtro_cliente)
-                    
-                    for i, (_, fila) in enumerate(filtro_cliente.iterrows()):
-                        texto_estado.text(f"Analizando orden #{fila['id']} ({i+1}/{total})...")
-                        try:
-                            # 1. Descargamos la foto de Supabase
-                            respuesta_img = requests.get(fila['url_foto'])
-                            img_remito = Image.open(io.BytesIO(respuesta_img.content))
-
-                            # 2. Le pedimos a Gemini que extraiga los datos
-                            prompt_auditoria = """Sos un auditor contable automatizado. Extraé de esta imagen:
-                            1. "litros": El volumen de litros despachados (solo el número, quitá la 'L' o palabras).
-                            2. "comprobante": El número de remito, vale o factura.
-                            Devolvé SOLO un JSON puro, sin formato markdown: {"litros": 0, "comprobante": "..."}"""
-
-                            res = cliente_ia.models.generate_content(model='gemini-2.5-pro', contents=[prompt_auditoria, img_remito])
-                            
-                            # 3. Limpiamos y leemos la respuesta
-                            raw_text = res.text.strip().replace('```json', '').replace('```JSON', '').replace('```', '')
-                            start, end = raw_text.find('{'), raw_text.rfind('}') + 1
-                            datos_ia = json.loads(raw_text[start:end])
-
-                            # 4. Guardamos lo que leyó la IA en la memoria temporal del sistema
-                            st.session_state[f"ia_litros_{fila['id']}"] = float(datos_ia.get('litros', fila['litros_pedidos']))
-                            st.session_state[f"ia_factura_{fila['id']}"] = str(datos_ia.get('comprobante', ''))
-                        
-                        except Exception as e:
-                            # Si la IA falla al leer una foto borrosa, simplemente la salta y deja los datos vacíos
-                            pass
-                        
-                        # Actualizamos la barra y pausamos un segundo para no saturar a Gemini
-                        barra_progreso.progress((i + 1) / total)
-                        time.sleep(1.5) 
-                        
-                    texto_estado.success("✅ ¡Análisis completo! Ya podés revisar los casilleros de abajo.")
-                    time.sleep(2)
-                    st.rerun() # Refresca la pantalla para mostrar los números nuevos
+                if st.button("🚀 Procesar fotos con IA", use_container_width=True):
+                    barra_p = st.progress(0)
+                    ordenes_con_foto = filtro_cliente[filtro_cliente['url_foto'].notnull()]
+                    total = len(ordenes_con_foto)
+                    if total > 0:
+                        for i, (_, fila) in enumerate(ordenes_con_foto.iterrows()):
+                            try:
+                                res_img = requests.get(fila['url_foto'])
+                                img_rem = Image.open(io.BytesIO(res_img.content))
+                                prompt_ia = 'Extraé JSON: {"litros": 0, "comprobante": "..."}'
+                                res_ia = cliente_ia.models.generate_content(model='gemini-2.5-pro', contents=[prompt_ia, img_rem])
+                                raw_t = res_ia.text.strip().replace('```json', '').replace('```', '')
+                                d_ia = json.loads(raw_t[raw_t.find('{'):raw_t.rfind('}')+1])
+                                st.session_state[f"ia_lts_{fila['id']}"] = float(d_ia.get('litros', fila['litros_pedidos']))
+                                st.session_state[f"ia_fac_{fila['id']}"] = str(d_ia.get('comprobante', ''))
+                            except: pass
+                            barra_p.progress((i + 1) / total)
+                        st.success("✅ Análisis completo.")
+                        st.rerun()
 
             st.divider()
 
-            # --- LISTA DE ÓRDENES PARA CONFIRMAR ---
             for _, fila in filtro_cliente.iterrows():
-                fecha_disp = fila['fecha_despacho'][:10] if fila['fecha_despacho'] else "Sin fecha"
-                
-                # Memoria por defecto: si la IA no corrió todavía, cargamos los litros pedidos originalmente
-                if f"ia_litros_{fila['id']}" not in st.session_state:
-                    st.session_state[f"ia_litros_{fila['id']}"] = float(fila['litros_pedidos'])
-                if f"ia_factura_{fila['id']}" not in st.session_state:
-                    st.session_state[f"ia_factura_{fila['id']}"] = ""
-
+                fecha_disp = fila['fecha_despacho'][:10] if fila['fecha_despacho'] else "---"
                 with st.expander(f"📦 Orden #{fila['id']} | {fecha_disp} | Chofer: {fila['chofer']}"):
                     c1, c2 = st.columns([1, 1])
                     with c1:
-                        st.image(fila['url_foto'], caption=f"Foto del Remito - Orden #{fila['id']}", use_container_width=True)
+                        if fila['url_foto']:
+                            st.image(fila['url_foto'], caption="Remito original", use_container_width=True)
+                        else:
+                            # Nancy ve esto para saber por qué no hay foto, pero no irá al Excel
+                            st.warning(f"⚠️ SIN FOTO: {fila['motivo_sin_foto'] or 'Sin motivo'}")
                     with c2:
-                        st.markdown(f"**Datos Cargados en Playa:**")
+                        st.markdown(f"**Información de la Orden:**")
                         st.write(f"🔹 Patente: {fila['patente']}")
+                        st.write(f"🔹 Nº Orden Cliente: **{fila['nro_orden_cliente'] or '-'}**")
                         st.write(f"🔹 Litros Pedidos: {fila['litros_pedidos']} L")
-                        if fila['efectivo_pedido'] > 0:
-                            st.write(f"💵 Efectivo Entregado: ${fila['efectivo_pedido']}")
+                        
                         st.divider()
+                        st.markdown("**Confirmación de Datos:**")
+                        if f"ia_lts_{fila['id']}" not in st.session_state: st.session_state[f"ia_lts_{fila['id']}"] = float(fila['litros_pedidos'])
+                        if f"ia_fac_{fila['id']}" not in st.session_state: st.session_state[f"ia_fac_{fila['id']}"] = ""
 
-                        st.markdown("**Confirmación Administrativa:**")
-                        with st.form(key=f"form_audit_{fila['id']}"):
-                            # Acá los casilleros se autocompletan solos si la IA ya los analizó
-                            lts_conf = st.number_input("Litros Reales (según foto)", value=st.session_state[f"ia_litros_{fila['id']}"])
-                            nro_compro = st.text_input("Nº Remito / Factura Final", value=st.session_state[f"ia_factura_{fila['id']}"])
+                        with st.form(key=f"form_aud_{fila['id']}"):
+                            lts_c = st.number_input("Litros Reales", value=st.session_state[f"ia_lts_{fila['id']}"])
+                            fac_c = st.text_input("Nº Comprobante", value=st.session_state[f"ia_fac_{fila['id']}"])
                             
-                            if st.form_submit_button("✅ Añadir esta carga al lote"):
-                                item_resumen = {
+                            if st.form_submit_button("✅ Añadir al Resumen de Cliente"):
+                                # Solo guardamos los datos limpios para el Excel del cliente
+                                st.session_state.resumen_para_cliente.append({
                                     "Fecha": fecha_disp,
-                                    "Cliente": cliente_sel,
+                                    "Nº Orden Cliente": fila['nro_orden_cliente'] or "-",
                                     "Patente": fila['patente'],
                                     "Chofer": fila['chofer'],
-                                    "Litros Reales": lts_conf,
-                                    "Comprobante": nro_compro.upper(),
-                                    "ID Orden": fila['id']
-                                }
-                                st.session_state.resumen_para_cliente.append(item_resumen)
-                                st.success(f"¡Orden #{fila['id']} añadida al lote de {cliente_sel}!")
+                                    "Litros": lts_c,
+                                    "Comprobante": fac_c.upper()
+                                })
+                                st.toast("Carga añadida al resumen.")
 
-    # --- DESCARGA DE EXCEL ---
     if st.session_state.resumen_para_cliente:
         st.divider()
-        st.subheader("📊 Lote Auditado (Listo para Excel)")
-        df_resumen = pd.DataFrame(st.session_state.resumen_para_cliente)
-        st.dataframe(df_resumen, use_container_width=True)
-        buffer_res = io.BytesIO()
-        with pd.ExcelWriter(buffer_res, engine='openpyxl') as writer:
-            df_resumen.to_excel(writer, index=False, sheet_name='Resumen_Cargas')
-            ws = writer.sheets['Resumen_Cargas']
-            for i, col in enumerate(df_resumen.columns): ws.column_dimensions[get_column_letter(i + 1)].width = 18
-        ca1, ca2 = st.columns(2)
-        ca1.download_button("📥 Descargar Excel para Cliente", data=buffer_res.getvalue(), file_name=f"Resumen_{datetime.now().strftime('%d-%m-%Y')}.xlsx", use_container_width=True)
-        if ca2.button("🗑️ Vaciar Lote Auditado", use_container_width=True):
+        df_res = pd.DataFrame(st.session_state.resumen_para_cliente)
+        st.subheader("📊 Vista Previa del Resumen para Cliente")
+        st.dataframe(df_res, use_container_width=True)
+        
+        buf = io.BytesIO()
+        with pd.ExcelWriter(buf, engine='openpyxl') as wr:
+            df_res.to_excel(wr, index=False, sheet_name='Resumen_BC')
+            ws = wr.sheets['Resumen_BC']
+            for i, col in enumerate(df_res.columns):
+                ws.column_dimensions[get_column_letter(i + 1)].width = 20
+        
+        c_ex1, c_ex2 = st.columns(2)
+        c_ex1.download_button("📥 Descargar Excel para Cliente", data=buf.getvalue(), file_name=f"Resumen_Cargas_{cliente_sel}.xlsx", use_container_width=True)
+        if c_ex2.button("🗑️ Vaciar Lote", use_container_width=True):
             st.session_state.resumen_para_cliente = []
             st.rerun()
 
