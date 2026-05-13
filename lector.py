@@ -12,7 +12,7 @@ from datetime import datetime
 from supabase import create_client, Client
 import requests 
 
-# Importamos la nueva botonera PRO (Asegurate de ponerlo en requirements.txt)
+# Importamos la nueva botonera PRO
 try:
     from streamlit_option_menu import option_menu
 except ImportError:
@@ -28,6 +28,7 @@ from openpyxl.utils import get_column_letter
 # ==========================================
 COLOR_ROJO = "#C8102E"
 COLOR_AMARILLO_ALERTA = "#FFE082" 
+COLOR_GRIS_BC = "#3A3A3A" # El gris oscuro de la web oficial
 
 URL_SB = "https://bjhykcdhafoqpfkpngvw.supabase.co"
 KEY_SB = "sb_publishable_OvXN3LjawazkF5GNpsslUQ_SQOhTakr"
@@ -38,7 +39,7 @@ NOMBRES_SUCURSALES = {1: "RECONQUISTA", 2: "AVELLANEDA", 3: "FLORENCIA", 4: "REC
 # Configuramos la página primero
 st.set_page_config(page_title="BC Combustibles - Gestión Pro", page_icon="⛽", layout="wide")
 
-# CSS MEJORADO PARA LOOK PROFESIONAL
+# CSS MEJORADO PARA LOOK PROFESIONAL (AHORA CON GRIS BC)
 st.markdown(f"""
     <style>
         [data-testid="stSidebarNav"] {{display: none !important;}}
@@ -52,8 +53,13 @@ st.markdown(f"""
         }}
         .stButton>button:hover {{ background-color: #900b20; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }}
         
-        /* Sidebar y paneles */
-        [data-testid="stSidebar"] {{ background-color: #ffffff; border-right: 1px solid #e2e8f0; }}
+        /* HEADER Y SIDEBAR GRIS OSCURO */
+        [data-testid="stHeader"] {{ background-color: {COLOR_GRIS_BC} !important; }}
+        [data-testid="stSidebar"] {{ background-color: {COLOR_GRIS_BC} !important; border-right: none; }}
+        
+        /* Forzar texto blanco en la barra lateral */
+        [data-testid="stSidebar"] p, [data-testid="stSidebar"] span, [data-testid="stSidebar"] div {{ color: #ffffff !important; }}
+        
         div[data-testid="stMetricValue"] {{ color: {COLOR_ROJO} !important; }}
         
         /* Contenedores tipo tarjeta */
@@ -66,8 +72,8 @@ st.markdown(f"""
 
 cliente_ia = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
 
-# NOTA: Cuando tengas el logo PNG sin fondo, cambiá este link.
-URL_LOGO_OFICIAL = "https://bjhykcdhafoqpfkpngvw.supabase.co/storage/v1/object/public/remitos/Logo%20nuevo.png"
+# Link al logo oficial
+URL_LOGO_OFICIAL = "https://bjhykcdhafoqpfkpngvw.supabase.co/storage/v1/object/public/remitos/Logo.jpeg"
 
 # ==========================================
 # 2. SISTEMA DE LOGIN Y AUTENTICACIÓN
@@ -110,20 +116,21 @@ if st.session_state.usuario_autenticado is None:
 user = st.session_state.usuario_autenticado
 usuario_app = user['nombre']
 
-# DISEÑO DEL MENÚ LATERAL (SIDEBAR)
+# DISEÑO DEL MENÚ LATERAL (SIDEBAR) CON FONDO OSCURO
 with st.sidebar:
     st.markdown("<br>", unsafe_allow_html=True)
     st.image(URL_LOGO_OFICIAL, use_container_width=True)
     
+    # Tarjeta de operador en tonos oscuros
     st.markdown(f"""
-        <div style="background:#f8f9fa; padding:15px; border-radius:10px; border-left:4px solid {COLOR_ROJO}; margin-bottom:20px;">
-            <p style="margin:0; font-size:13px; color:#666;">Operador activo:</p>
-            <h4 style="margin:0; color:#333;">{usuario_app}</h4>
-            <p style="margin:0; font-size:13px; color:#666; margin-top:5px;">📍 {NOMBRES_SUCURSALES.get(user['sucursal_id'], 'BC')}</p>
+        <div style="background:#2C2C2C; padding:15px; border-radius:10px; border-left:4px solid {COLOR_ROJO}; margin-bottom:20px;">
+            <p style="margin:0; font-size:13px; color:#B0B0B0 !important;">Operador activo:</p>
+            <h4 style="margin:0; color:#FFFFFF !important; padding-top: 5px;">{usuario_app}</h4>
+            <p style="margin:0; font-size:13px; color:#B0B0B0 !important; margin-top:5px;">📍 {NOMBRES_SUCURSALES.get(user['sucursal_id'], 'BC')}</p>
         </div>
     """, unsafe_allow_html=True)
 
-    # ACA ESTA EL NUEVO MENU MODERNO
+    # MENÚ MODERNO ADAPTADO PARA FONDO GRIS
     opcion = option_menu(
         menu_title=None, 
         options=["Generador de Resumen", "Facturas de Proveedores"],
@@ -131,9 +138,9 @@ with st.sidebar:
         menu_icon="cast", 
         default_index=0,
         styles={
-            "container": {"padding": "0!important", "background-color": "#ffffff"},
-            "icon": {"color": COLOR_ROJO, "font-size": "18px"}, 
-            "nav-link": {"font-size": "15px", "text-align": "left", "margin":"5px 0", "--hover-color": "#f4f6f9", "border-radius": "8px"},
+            "container": {"padding": "0!important", "background-color": COLOR_GRIS_BC},
+            "icon": {"color": "#FFFFFF", "font-size": "18px"}, 
+            "nav-link": {"color": "#FFFFFF", "font-size": "15px", "text-align": "left", "margin":"5px 0", "--hover-color": "#4A4A4A", "border-radius": "8px"},
             "nav-link-selected": {"background-color": COLOR_ROJO, "color": "white"},
         }
     )
@@ -143,7 +150,7 @@ with st.sidebar:
         st.session_state.usuario_autenticado = None
         st.rerun()
 
-# Inicializar estados para proveedores y resúmenes
+# Inicializar estados
 if 'lote_pendientes_prov' not in st.session_state: st.session_state.lote_pendientes_prov = []
 if 'cola_extracciones_prov' not in st.session_state: st.session_state.cola_extracciones_prov = []
 if 'resumen_prov' not in st.session_state: st.session_state.resumen_prov = []
