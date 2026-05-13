@@ -551,16 +551,17 @@ Devolvé estrictamente JSON puro."""
                                 
                                 if st.form_submit_button("✅ Añadir al Excel Final"):
                                     st.session_state.agregados_excel.append(fila['id'])
+                                    
+                                    # FUSIÓN DE COLUMNAS APLICADA AQUÍ: 1 SOLA COLUMNA PARA EL NÚMERO DE ORDEN
                                     st.session_state.resumen_para_cliente.append({
                                         "Fecha": fac_fecha.strip(),
                                         "Chofer": chofer_txt.strip(),
                                         "Razón Social": fac_rs.strip(),
                                         "Litros": fac_lts,
-                                        "Nº Orden Litros": convertir_a_numero(nro_ord_lts) if es_especial else "-",
+                                        "Nº Orden": convertir_a_numero(nro_ord_lts) if es_especial else convertir_a_numero(nro_ord_gen),
                                         "Importe": fac_imp,
                                         "Nº Factura": fac_comp.strip(),
                                         "Entidad Pagadora": cliente_sel,
-                                        "Nº Orden": convertir_a_numero(nro_ord_gen) if not es_especial else "-",
                                         "Efectivo": efectivo_final,
                                         "Nº Orden Efectivo": convertir_a_numero(nro_ord_efe) if es_especial else "-"
                                     })
@@ -598,7 +599,6 @@ Devolvé estrictamente JSON puro."""
             fill_total = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
             borde = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
 
-            # Encabezados
             for col_num, col_name in enumerate(df_export.columns, 1):
                 cell = ws.cell(row=1, column=col_num)
                 cell.fill = fill_header
@@ -607,7 +607,6 @@ Devolvé estrictamente JSON puro."""
                 cell.border = borde
                 ws.column_dimensions[get_column_letter(col_num)].width = 18
 
-            # Datos y Totales
             max_row = ws.max_row
             for row in ws.iter_rows(min_row=2, max_row=max_row, min_col=1, max_col=ws.max_column):
                 is_total_row = (row[0].row == max_row)
