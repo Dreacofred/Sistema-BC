@@ -570,19 +570,36 @@ Devolvé estrictamente JSON puro."""
     if st.session_state.resumen_para_cliente:
         st.divider()
         df_res = pd.DataFrame(st.session_state.resumen_para_cliente)
+        
+        # --- SUMATORIA DE TOTALES PARA EL EXCEL ---
+        df_res['Litros'] = pd.to_numeric(df_res['Litros'], errors='coerce').fillna(0)
+        df_res['Importe'] = pd.to_numeric(df_res['Importe'], errors='coerce').fillna(0)
+        df_res['Efectivo'] = pd.to_numeric(df_res['Efectivo'], errors='coerce').fillna(0)
+        
+        total_row = {col: "" for col in df_res.columns}
+        total_row["Razón Social"] = "TOTALES:"
+        total_row["Litros"] = df_res['Litros'].sum()
+        total_row["Importe"] = df_res['Importe'].sum()
+        total_row["Efectivo"] = df_res['Efectivo'].sum()
+        
+        df_export = pd.concat([df_res, pd.DataFrame([total_row])], ignore_index=True)
+
         st.subheader("📊 Vista Previa del Excel")
-        st.dataframe(df_res, use_container_width=True)
+        st.dataframe(df_export, use_container_width=True)
         
         buf = io.BytesIO()
         with pd.ExcelWriter(buf, engine='openpyxl') as wr:
-            df_res.to_excel(wr, index=False, sheet_name='Resumen_BC')
+            df_export.to_excel(wr, index=False, sheet_name='Resumen_BC')
             ws = wr.sheets['Resumen_BC']
             
             fill_header = PatternFill(start_color="C8102E", end_color="C8102E", fill_type="solid")
             font_header = Font(color="FFFFFF", bold=True)
+            font_total = Font(bold=True)
+            fill_total = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
             borde = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
 
-            for col_num, col_name in enumerate(df_res.columns, 1):
+            # Encabezados
+            for col_num, col_name in enumerate(df_export.columns, 1):
                 cell = ws.cell(row=1, column=col_num)
                 cell.fill = fill_header
                 cell.font = font_header
@@ -590,10 +607,18 @@ Devolvé estrictamente JSON puro."""
                 cell.border = borde
                 ws.column_dimensions[get_column_letter(col_num)].width = 18
 
-            for row in ws.iter_rows(min_row=2, max_row=ws.max_row, min_col=1, max_col=ws.max_column):
+            # Datos y Totales
+            max_row = ws.max_row
+            for row in ws.iter_rows(min_row=2, max_row=max_row, min_col=1, max_col=ws.max_column):
+                is_total_row = (row[0].row == max_row)
                 for cell in row:
                     cell.border = borde
                     cell.alignment = Alignment(vertical="center")
+                    
+                    if is_total_row:
+                        cell.font = font_total
+                        cell.fill = fill_total
+                        
                     header = ws.cell(row=1, column=cell.column).value
                     if header in ["Importe", "Efectivo"]: cell.number_format = '"$"#,##0.00'
                     elif header == "Litros": cell.number_format = '#,##0.00'
