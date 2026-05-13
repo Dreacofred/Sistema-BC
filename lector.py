@@ -508,11 +508,9 @@ elif opcion == "🔍 Auditoría de Remitos":
                 
                 with st.expander(f"{estado_icono} Orden #{fila['id']} | Cliente: {cliente_sel} | Chofer: {chofer_txt} | Patente: {fila['patente']}"):
                     
-                    # Columna izquierda un poco más ancha para la foto
                     c1, c2 = st.columns([1.8, 1]) 
                     with c1:
                         if pd.notna(fila['url_foto']) and str(fila['url_foto']).strip() != "":
-                            # SOLUCIÓN DEL ZOOM: Agregamos el link que abre en pestaña nueva para hacer zoom a placer
                             st.markdown(f"**[🔍 Clic aquí para abrir la foto en tamaño completo (Zoom real)]({fila['url_foto']})**")
                             st.image(fila['url_foto'], caption="Remito / Factura original", use_container_width=True)
                         else:
@@ -535,12 +533,16 @@ elif opcion == "🔍 Auditoría de Remitos":
                                 
                                 st.write("📝 **Cantidades y Órdenes**")
                                 efectivo_real_bd = fila.get('efectivo_entregado') if pd.notna(fila.get('efectivo_entregado')) else fila.get('efectivo_pedido', 0)
+                                
+                                # VERIFICAMOS SI HAY FOTO PARA DEFINIR LOS LITROS POR DEFECTO
+                                tiene_foto = pd.notna(fila['url_foto']) and str(fila['url_foto']).strip() != ""
+                                litros_por_defecto = float(fila['litros_pedidos']) if tiene_foto else None
+                                
                                 nro_ord_gen, nro_ord_lts, nro_ord_efe = "", "", ""
                                 
-                                # SOLUCIÓN DEL ORDEN VISUAL LÓGICO
                                 if es_especial:
                                     col_o1, col_o2 = st.columns(2)
-                                    fac_lts = col_o1.number_input("Litros Reales", value=st.session_state.get(f"ia_lts_{fila['id']}", float(fila['litros_pedidos'])))
+                                    fac_lts = col_o1.number_input("Litros", value=st.session_state.get(f"ia_lts_{fila['id']}", litros_por_defecto))
                                     nro_ord_lts = col_o2.text_input("Nº Orden Litros", value=fila['nro_orden_litros_interna'] if pd.notna(fila['nro_orden_litros_interna']) else "")
                                     
                                     col_o3, col_o4 = st.columns(2)
@@ -548,7 +550,7 @@ elif opcion == "🔍 Auditoría de Remitos":
                                     nro_ord_efe = col_o4.text_input("Nº Orden Efectivo", value=fila['nro_orden_efectivo_interna'] if pd.notna(fila['nro_orden_efectivo_interna']) else "")
                                 else:
                                     col_o1, col_o2 = st.columns(2)
-                                    fac_lts = col_o1.number_input("Litros Reales", value=st.session_state.get(f"ia_lts_{fila['id']}", float(fila['litros_pedidos'])))
+                                    fac_lts = col_o1.number_input("Litros", value=st.session_state.get(f"ia_lts_{fila['id']}", litros_por_defecto))
                                     nro_ord_gen = col_o2.text_input("Nº Orden (Normal)", value=fila['nro_orden_cliente'] if pd.notna(fila['nro_orden_cliente']) else "")
                                     
                                     efectivo_final = st.number_input("Efectivo Entregado ($)", value=float(efectivo_real_bd))
