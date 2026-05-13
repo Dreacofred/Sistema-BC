@@ -534,7 +534,6 @@ elif opcion == "🔍 Auditoría de Remitos":
                                 st.write("📝 **Cantidades y Órdenes**")
                                 efectivo_real_bd = fila.get('efectivo_entregado') if pd.notna(fila.get('efectivo_entregado')) else fila.get('efectivo_pedido', 0)
                                 
-                                # VERIFICAMOS SI HAY FOTO PARA DEFINIR LOS LITROS POR DEFECTO
                                 tiene_foto = pd.notna(fila['url_foto']) and str(fila['url_foto']).strip() != ""
                                 litros_por_defecto = float(fila['litros_pedidos']) if tiene_foto else None
                                 
@@ -589,9 +588,28 @@ elif opcion == "🔍 Auditoría de Remitos":
         
         c_ex1, c_ex2 = st.columns(2)
         c_ex1.download_button("📥 Descargar Excel para Cliente", data=buf.getvalue(), file_name=f"Resumen_{cliente_sel}.xlsx", use_container_width=True)
-        if c_ex2.button("🗑️ Vaciar Lote", use_container_width=True):
+        
+        if c_ex2.button("🗑️ Vaciar Lote (Sin Auditar)", use_container_width=True):
             st.session_state.resumen_para_cliente = []
             st.session_state.agregados_excel = []
+            st.rerun()
+            
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown("### 🔒 Cierre Definitivo del Lote")
+        
+        # Checkbox de seguridad
+        confirmar_cierre = st.checkbox("Confirmo que ya descargué el Excel y deseo marcar estas órdenes como AUDITADAS en la base de datos.")
+        
+        # Botón que solo se activa si tildan la casilla
+        if st.button("✅ Marcar Auditadas y Cerrar Lote", disabled=not confirmar_cierre, use_container_width=True):
+            if st.session_state.agregados_excel:
+                for ord_id in st.session_state.agregados_excel:
+                    supabase.table("ordenes_carga").update({"estado": "AUDITADO"}).eq("id", ord_id).execute()
+            
+            st.session_state.resumen_para_cliente = []
+            st.session_state.agregados_excel = []
+            st.success("¡Órdenes marcadas como auditadas con éxito!")
+            time.sleep(1.5) # Pausa cortita para que lea el mensaje de éxito
             st.rerun()
 
 # ==========================================
