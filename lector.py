@@ -495,20 +495,29 @@ elif opcion == "🔍 Auditoría de Remitos":
 
             st.divider()
 
-            for _, fila in filtro_cliente.iterrows():
-                fecha_disp = fila['fecha_despacho'][:10] if fila['fecha_despacho'] else "---"
-                with st.expander(f"📦 Orden #{fila['id']} | {fecha_disp} | Chofer: {fila['chofer']}"):
+           for _, fila in filtro_cliente.iterrows():
+                # Validación segura para fechas nulas
+                fecha_disp = fila['fecha_despacho'][:10] if pd.notna(fila['fecha_despacho']) else "---"
+                
+                # Validación segura para textos nulos
+                chofer_txt = fila['chofer'] if pd.notna(fila['chofer']) else "Sin chofer"
+                nro_orden_cli = fila['nro_orden_cliente'] if pd.notna(fila['nro_orden_cliente']) else "-"
+                
+                with st.expander(f"📦 Orden #{fila['id']} | {fecha_disp} | Chofer: {chofer_txt}"):
                     c1, c2 = st.columns([1, 1])
                     with c1:
-                        if fila['url_foto']:
+                        # SOLUCIÓN DEL ERROR: Verificamos que no sea NaN y que sea un texto válido
+                        if pd.notna(fila['url_foto']) and str(fila['url_foto']).strip() != "":
                             st.image(fila['url_foto'], caption="Remito original", use_container_width=True)
                         else:
-                            # Nancy ve esto para saber por qué no hay foto, pero no irá al Excel
-                            st.warning(f"⚠️ SIN FOTO: {fila['motivo_sin_foto'] or 'Sin motivo'}")
+                            # Si es contingencia sin foto, validamos el motivo
+                            motivo = fila['motivo_sin_foto'] if pd.notna(fila['motivo_sin_foto']) else 'Sin motivo'
+                            st.warning(f"⚠️ SIN FOTO: {motivo}")
+                            
                     with c2:
                         st.markdown(f"**Información de la Orden:**")
                         st.write(f"🔹 Patente: {fila['patente']}")
-                        st.write(f"🔹 Nº Orden Cliente: **{fila['nro_orden_cliente'] or '-'}**")
+                        st.write(f"🔹 Nº Orden Cliente: **{nro_orden_cli}**")
                         st.write(f"🔹 Litros Pedidos: {fila['litros_pedidos']} L")
                         
                         st.divider()
@@ -521,12 +530,11 @@ elif opcion == "🔍 Auditoría de Remitos":
                             fac_c = st.text_input("Nº Comprobante", value=st.session_state[f"ia_fac_{fila['id']}"])
                             
                             if st.form_submit_button("✅ Añadir al Resumen de Cliente"):
-                                # Solo guardamos los datos limpios para el Excel del cliente
                                 st.session_state.resumen_para_cliente.append({
                                     "Fecha": fecha_disp,
-                                    "Nº Orden Cliente": fila['nro_orden_cliente'] or "-",
+                                    "Nº Orden Cliente": nro_orden_cli,
                                     "Patente": fila['patente'],
-                                    "Chofer": fila['chofer'],
+                                    "Chofer": chofer_txt,
                                     "Litros": lts_c,
                                     "Comprobante": fac_c.upper()
                                 })
