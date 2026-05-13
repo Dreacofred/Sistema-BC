@@ -137,10 +137,9 @@ opcion = st.sidebar.radio("Seleccioná la tarea:", ["🚛 Ventas a Camiones", "�
 st.sidebar.divider()
 
 # ==========================================
-# 3. MÓDULO VENTAS A CAMIONES (PROMPT MEJORADO)
+# 3. MÓDULO VENTAS A CAMIONES
 # ==========================================
 if opcion == "🚛 Ventas a Camiones":
-    # ... (Lógica de revisión igual a la anterior)
     if len(st.session_state.cola_extracciones) > 0:
         st.title(f"🔄 Revisión de Cargas - {st.session_state.usuario_actual}")
         total_restantes = len(st.session_state.cola_extracciones)
@@ -267,7 +266,6 @@ Extraé JSON puro sin markdown."""
                 st.rerun()
 
     if st.session_state.resumen_ventas:
-        # ... (Tabla y descarga igual)
         st.divider()
         df = pd.DataFrame(st.session_state.resumen_ventas)
         st.subheader(f"📋 Planilla Final ({len(df)} registros)")
@@ -294,10 +292,9 @@ Extraé JSON puro sin markdown."""
             st.rerun()
 
 # ==========================================
-# 4. MÓDULO FACTURAS DE PROVEEDORES (PROMPT CORREGIDO)
+# 4. MÓDULO FACTURAS DE PROVEEDORES 
 # ==========================================
 elif opcion == "📄 Facturas de Proveedores":
-    # ... (Revisión igual)
     if len(st.session_state.cola_extracciones_prov) > 0:
         st.title(f"🔄 Revisión de Proveedores - {st.session_state.usuario_actual}")
         total_restantes = len(st.session_state.cola_extracciones_prov)
@@ -378,9 +375,9 @@ elif opcion == "📄 Facturas de Proveedores":
                 for i, doc in enumerate(st.session_state.lote_pendientes_prov):
                     status_text.text(f"Analizando {doc['nombre']}...")
                     exito, intentos = False, 3
+                    error_interno = ""
                     while intentos > 0 and not exito:
                         try:
-                            # PROMPT PROVEEDORES CORREGIDO
                             prompt_prov = """Eres un auditor contable. Tu objetivo es leer una FACTURA DE COMPRA.
 BC COMBUSTIBLES es el RECEPTOR (está abajo). NO lo pongas como proveedor.
 El 'razon_social_proveedor' es el emisor arriba a la izquierda.
@@ -400,7 +397,7 @@ Busca CUIT, Fecha, Nº de Factura y Totales. Extraé JSON puro."""
                 st.rerun() 
 
 # ==========================================
-# 5. MÓDULO AUDITORÍA DE REMITOS (EL JEFE FINAL: PROMPT REFORZADO)
+# 5. MÓDULO AUDITORÍA DE REMITOS
 # ==========================================
 elif opcion == "🔍 Auditoría de Remitos":
     st.title(f"📑 Auditoría de Cargas - {st.session_state.usuario_actual}")
@@ -441,10 +438,6 @@ elif opcion == "🔍 Auditoría de Remitos":
                             try:
                                 res_img = requests.get(fila['url_foto'])
                                 img_rem = Image.open(io.BytesIO(res_img.content))
-                                
-                                # ==========================================
-                                # NUEVO PROMPT ULTRA-REFORZADO (EL CLAVE)
-                                # ==========================================
                                 prompt_auditoria = """Eres un experto en auditoría fiscal argentina. 
 Analizá este documento (puede ser Factura, Nota de Crédito, Nota de Débito o Remito).
 
@@ -484,7 +477,6 @@ Devolvé estrictamente JSON puro:
             st.divider()
 
             for _, fila in filtro_cliente.iterrows():
-                # ... (Lógica visual y formulario igual al anterior)
                 fecha_disp = fila['fecha_despacho'][:10] if pd.notna(fila['fecha_despacho']) else "---"
                 chofer_txt = fila['chofer'] if pd.notna(fila['chofer']) else "Sin chofer"
                 es_especial = fila['formato_especial']
@@ -536,27 +528,64 @@ Devolvé estrictamente JSON puro:
                                 
                                 if st.form_submit_button("✅ Añadir al Excel Final"):
                                     st.session_state.agregados_excel.append(fila['id'])
+                                    # Armado del diccionario EXACTO para respetar el orden de columnas del Excel
                                     st.session_state.resumen_para_cliente.append({
-                                        "Fecha": fac_fecha.strip(), "Chofer": chofer_txt.strip(), "Razon social": fac_rs.strip(),
-                                        "Litros": fac_lts, "Numero de orden de litros": nro_ord_lts.strip() if es_especial else "-",
-                                        "Importe": fac_imp, "Numero de Fcatura": fac_comp.strip(), "Entidad Pagadora": cliente_sel,
-                                        "Numero de orden": nro_ord_gen.strip() if not es_especial else "-",
-                                        "Efectivo": efectivo_final, "Numero de orden de efectivo": nro_ord_efe.strip() if es_especial else "-"
+                                        "Fecha": fac_fecha.strip(),
+                                        "Chofer": chofer_txt.strip(),
+                                        "Razón Social": fac_rs.strip(),
+                                        "Litros": fac_lts,
+                                        "Nº Orden Litros": nro_ord_lts.strip() if es_especial else "-",
+                                        "Importe": fac_imp,
+                                        "Nº Factura": fac_comp.strip(),
+                                        "Entidad Pagadora": cliente_sel,
+                                        "Nº Orden": nro_ord_gen.strip() if not es_especial else "-",
+                                        "Efectivo": efectivo_final,
+                                        "Nº Orden Efectivo": nro_ord_efe.strip() if es_especial else "-"
                                     })
                                     st.toast("Carga añadida.")
                                     st.rerun() 
 
     if st.session_state.resumen_para_cliente:
-        # ... (Descarga y Cierre de Lote igual)
         st.divider()
         df_res = pd.DataFrame(st.session_state.resumen_para_cliente)
         st.subheader("📊 Vista Previa del Excel")
         st.dataframe(df_res, use_container_width=True)
+        
+        # --- GENERACIÓN DEL EXCEL CON FORMATO PROFESIONAL ---
         buf = io.BytesIO()
         with pd.ExcelWriter(buf, engine='openpyxl') as wr:
             df_res.to_excel(wr, index=False, sheet_name='Resumen_BC')
             ws = wr.sheets['Resumen_BC']
-            for i, col in enumerate(df_res.columns): ws.column_dimensions[get_column_letter(i + 1)].width = 20
+            
+            # Definir estilos estéticos
+            fill_header = PatternFill(start_color="C8102E", end_color="C8102E", fill_type="solid")
+            font_header = Font(color="FFFFFF", bold=True)
+            borde = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+
+            # Aplicar estilos a los encabezados
+            for col_num, col_name in enumerate(df_res.columns, 1):
+                cell = ws.cell(row=1, column=col_num)
+                cell.fill = fill_header
+                cell.font = font_header
+                cell.alignment = Alignment(horizontal="center", vertical="center")
+                cell.border = borde
+                # Ancho de columna predeterminado
+                ws.column_dimensions[get_column_letter(col_num)].width = 18
+
+            # Aplicar formato de moneda y bordes a los datos
+            for row in ws.iter_rows(min_row=2, max_row=ws.max_row, min_col=1, max_col=ws.max_column):
+                for cell in row:
+                    cell.border = borde
+                    cell.alignment = Alignment(vertical="center")
+                    
+                    header = ws.cell(row=1, column=cell.column).value
+                    # Formato contable para dinero
+                    if header in ["Importe", "Efectivo"]:
+                        cell.number_format = '"$"#,##0.00'
+                    # Formato numérico para litros
+                    elif header == "Litros":
+                        cell.number_format = '#,##0.00'
+
         c_ex1, c_ex2 = st.columns(2)
         c_ex1.download_button("📥 Descargar Excel", data=buf.getvalue(), file_name=f"Resumen_{cliente_sel}.xlsx", use_container_width=True)
         if c_ex2.button("🗑️ Vaciar Lote (Sin Auditar)", use_container_width=True):
