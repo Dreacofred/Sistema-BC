@@ -75,6 +75,13 @@ def recuperar_cache_ventas(usuario):
         with open(archivo, 'r', encoding='utf-8') as f: return json.load(f)
     return []
 
+def convertir_a_numero(valor):
+    """Convierte cadenas numéricas a enteros para evitar el triángulo verde en Excel"""
+    v = str(valor).strip()
+    if v.isdigit():
+        return int(v)
+    return v
+
 BASE_CLIENTES = cargar_db_diccionario(ARCHIVO_DB)
 BASE_CHOFERES = cargar_db_lista(ARCHIVO_CHOFERES)
 
@@ -292,7 +299,7 @@ Extraé JSON puro sin markdown."""
             st.rerun()
 
 # ==========================================
-# 4. MÓDULO FACTURAS DE PROVEEDORES 
+# 4. MÓDULO FACTURAS DE PROVEEDORES
 # ==========================================
 elif opcion == "📄 Facturas de Proveedores":
     if len(st.session_state.cola_extracciones_prov) > 0:
@@ -389,12 +396,37 @@ Busca CUIT, Fecha, Nº de Factura y Totales. Extraé JSON puro."""
                             datos_extraidos['_origen'] = doc['nombre']
                             st.session_state.cola_extracciones_prov.append(datos_extraidos)
                             exito = True
-                        except:
+                        except Exception as e:
+                            error_interno = str(e)
                             intentos -= 1
                             time.sleep(2)
+                    if not exito: st.session_state.cola_extracciones_prov.append({'_origen': f"⚠️ Error Técnico en {doc['nombre']} | Falla: {error_interno}"})
                     barra_progreso.progress((i + 1) / len(st.session_state.lote_pendientes_prov))
                 st.session_state.lote_pendientes_prov = [] 
                 st.rerun() 
+            if st.button("🗑️ Vaciar Pila Proveedores"):
+                st.session_state.lote_pendientes_prov = []
+                st.rerun()
+
+    if st.session_state.resumen_prov:
+        st.divider()
+        df_prov = pd.DataFrame(st.session_state.resumen_prov)
+        st.subheader(f"📋 Planilla de Proveedores ({len(df_prov)} registros)")
+        st.dataframe(df_prov, use_container_width=True)
+        col_ex1, col_ex2 = st.columns(2)
+        buffer = io.BytesIO()
+        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+            df_prov.to_excel(writer, index=False, sheet_name='Proveedores')
+            ws = writer.sheets['Proveedores']
+            for i, col in enumerate(df_prov.columns): ws.column_dimensions[get_column_letter(i + 1)].width = 20
+        if col_ex1.download_button(label="📥 Descargar Excel de Proveedores", data=buffer.getvalue(), file_name=f"Proveedores_{datetime.now().strftime('%d-%m-%Y')}.xlsx", use_container_width=True):
+            st.session_state.resumen_prov = []
+            st.session_state.cola_extracciones_prov = []
+            st.session_state.lote_pendientes_prov = []
+            st.rerun()
+        if col_ex2.button("🗑️ Vaciar sin descargar (Proveedores)", use_container_width=True):
+            st.session_state.resumen_prov = []
+            st.rerun()
 
 # ==========================================
 # 5. MÓDULO AUDITORÍA DE REMITOS
@@ -429,50 +461,41 @@ elif opcion == "🔍 Auditoría de Remitos":
             with c_head1:
                 st.subheader(f"Movimientos de {cliente_sel}")
             with c_head2:
-                if st.button("🚀 Procesar fotos con IA", use_container_width=True):
-                    barra_p = st.progress(0)
-                    ordenes_con_foto = filtro_cliente[filtro_cliente['url_foto'].notnull()]
-                    total = len(ordenes_con_foto)
-                    if total > 0:
-                        for i, (_, fila) in enumerate(ordenes_con_foto.iterrows()):
-                            try:
-                                res_img = requests.get(fila['url_foto'])
-                                img_rem = Image.open(io.BytesIO(res_img.content))
-                                prompt_auditoria = """Eres un experto en auditoría fiscal argentina. 
-Analizá este documento (puede ser Factura, Nota de Crédito, Nota de Débito o Remito).
-
-REGLA DE ORO VITAL: 
-'BC COMBUSTIBLES S.A.' es el EMISOR del documento (sus datos están arriba de todo). 
-NUNCA pongas 'BC COMBUSTIBLES' como razon_social. Tu misión es buscar al CLIENTE (Receptor).
-
-DÓNDE BUSCAR AL CLIENTE:
-1. Localizá los datos del receptor que están debajo de la mitad del encabezado.
-2. Buscá el NOMBRE COMPLETO que figura al lado de etiquetas como 'CLIENTE:', 'SEÑOR/ES:', o justo arriba de 'CUIT:' y 'DOMICILIO:'.
-3. Extraé el nombre legal completo sin abreviaciones.
-
-DATOS A EXTRAER:
-- "fecha": Fecha de emisión (Ej: 12/05/2026).
-- "razon_social": Nombre COMPLETO del cliente receptor.
-- "litros": Cantidad de litros despachados (Ej: 298.10).
-- "importe": Monto total con IVA incluido (Ej: 719613.40).
-- "comprobante": El número del documento (Ej: 0024-00020152).
-
-Devolvé estrictamente JSON puro:
-{"fecha": "", "razon_social": "", "litros": 0.0, "importe": 0.0, "comprobante": ""}"""
-
-                                res_ia = cliente_ia.models.generate_content(model='gemini-2.5-pro', contents=[prompt_auditoria, img_rem])
-                                raw_t = res_ia.text.strip().replace('```json', '').replace('```', '')
-                                d_ia = json.loads(raw_t[raw_t.find('{'):raw_t.rfind('}')+1])
-                                
-                                st.session_state[f"ia_fec_{fila['id']}"] = str(d_ia.get('fecha', ''))
-                                st.session_state[f"ia_rs_{fila['id']}"] = str(d_ia.get('razon_social', ''))
-                                st.session_state[f"ia_lts_{fila['id']}"] = float(d_ia.get('litros', 0.0))
-                                st.session_state[f"ia_imp_{fila['id']}"] = float(d_ia.get('importe', 0.0))
-                                st.session_state[f"ia_fac_{fila['id']}"] = str(d_ia.get('comprobante', ''))
-                            except: pass
-                            barra_p.progress((i + 1) / total)
-                        st.success("✅ Análisis completo.")
-                        st.rerun()
+                clave_estado_ia = f"ia_procesada_{cliente_sel}"
+                ya_procesado = st.session_state.get(clave_estado_ia, False)
+                
+                if ya_procesado:
+                    st.button("✅ Fotos procesadas por IA", disabled=True, use_container_width=True)
+                else:
+                    if st.button("🚀 Procesar fotos con IA", use_container_width=True):
+                        barra_p = st.progress(0)
+                        ordenes_con_foto = filtro_cliente[filtro_cliente['url_foto'].notnull()]
+                        total = len(ordenes_con_foto)
+                        if total > 0:
+                            for i, (_, fila) in enumerate(ordenes_con_foto.iterrows()):
+                                try:
+                                    res_img = requests.get(fila['url_foto'])
+                                    img_rem = Image.open(io.BytesIO(res_img.content))
+                                    prompt_auditoria = """Eres un experto en auditoría fiscal argentina. 
+Analizá este documento. REGLA DE ORO: 'BC COMBUSTIBLES S.A.' es el EMISOR. NO lo pongas como razon_social. 
+Buscá al CLIENTE (Receptor) debajo del encabezado principal. Extraé el nombre legal completo.
+Extraé: fecha, razon_social, litros, importe, comprobante.
+Devolvé estrictamente JSON puro."""
+                                    res_ia = cliente_ia.models.generate_content(model='gemini-2.5-pro', contents=[prompt_auditoria, img_rem])
+                                    raw_t = res_ia.text.strip().replace('```json', '').replace('```', '')
+                                    d_ia = json.loads(raw_t[raw_t.find('{'):raw_t.rfind('}')+1])
+                                    
+                                    st.session_state[f"ia_fec_{fila['id']}"] = str(d_ia.get('fecha', ''))
+                                    st.session_state[f"ia_rs_{fila['id']}"] = str(d_ia.get('razon_social', ''))
+                                    st.session_state[f"ia_lts_{fila['id']}"] = float(d_ia.get('litros', 0.0))
+                                    st.session_state[f"ia_imp_{fila['id']}"] = float(d_ia.get('importe', 0.0))
+                                    st.session_state[f"ia_fac_{fila['id']}"] = str(d_ia.get('comprobante', ''))
+                                except: pass
+                                barra_p.progress((i + 1) / total)
+                            st.session_state[clave_estado_ia] = True
+                            st.success("✅ Análisis completo.")
+                            time.sleep(1)
+                            st.rerun()
 
             st.divider()
 
@@ -528,19 +551,18 @@ Devolvé estrictamente JSON puro:
                                 
                                 if st.form_submit_button("✅ Añadir al Excel Final"):
                                     st.session_state.agregados_excel.append(fila['id'])
-                                    # Armado del diccionario EXACTO para respetar el orden de columnas del Excel
                                     st.session_state.resumen_para_cliente.append({
                                         "Fecha": fac_fecha.strip(),
                                         "Chofer": chofer_txt.strip(),
                                         "Razón Social": fac_rs.strip(),
                                         "Litros": fac_lts,
-                                        "Nº Orden Litros": nro_ord_lts.strip() if es_especial else "-",
+                                        "Nº Orden Litros": convertir_a_numero(nro_ord_lts) if es_especial else "-",
                                         "Importe": fac_imp,
                                         "Nº Factura": fac_comp.strip(),
                                         "Entidad Pagadora": cliente_sel,
-                                        "Nº Orden": nro_ord_gen.strip() if not es_especial else "-",
+                                        "Nº Orden": convertir_a_numero(nro_ord_gen) if not es_especial else "-",
                                         "Efectivo": efectivo_final,
-                                        "Nº Orden Efectivo": nro_ord_efe.strip() if es_especial else "-"
+                                        "Nº Orden Efectivo": convertir_a_numero(nro_ord_efe) if es_especial else "-"
                                     })
                                     st.toast("Carga añadida.")
                                     st.rerun() 
@@ -551,47 +573,40 @@ Devolvé estrictamente JSON puro:
         st.subheader("📊 Vista Previa del Excel")
         st.dataframe(df_res, use_container_width=True)
         
-        # --- GENERACIÓN DEL EXCEL CON FORMATO PROFESIONAL ---
         buf = io.BytesIO()
         with pd.ExcelWriter(buf, engine='openpyxl') as wr:
             df_res.to_excel(wr, index=False, sheet_name='Resumen_BC')
             ws = wr.sheets['Resumen_BC']
             
-            # Definir estilos estéticos
             fill_header = PatternFill(start_color="C8102E", end_color="C8102E", fill_type="solid")
             font_header = Font(color="FFFFFF", bold=True)
             borde = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
 
-            # Aplicar estilos a los encabezados
             for col_num, col_name in enumerate(df_res.columns, 1):
                 cell = ws.cell(row=1, column=col_num)
                 cell.fill = fill_header
                 cell.font = font_header
                 cell.alignment = Alignment(horizontal="center", vertical="center")
                 cell.border = borde
-                # Ancho de columna predeterminado
                 ws.column_dimensions[get_column_letter(col_num)].width = 18
 
-            # Aplicar formato de moneda y bordes a los datos
             for row in ws.iter_rows(min_row=2, max_row=ws.max_row, min_col=1, max_col=ws.max_column):
                 for cell in row:
                     cell.border = borde
                     cell.alignment = Alignment(vertical="center")
-                    
                     header = ws.cell(row=1, column=cell.column).value
-                    # Formato contable para dinero
-                    if header in ["Importe", "Efectivo"]:
-                        cell.number_format = '"$"#,##0.00'
-                    # Formato numérico para litros
-                    elif header == "Litros":
-                        cell.number_format = '#,##0.00'
+                    if header in ["Importe", "Efectivo"]: cell.number_format = '"$"#,##0.00'
+                    elif header == "Litros": cell.number_format = '#,##0.00'
 
         c_ex1, c_ex2 = st.columns(2)
         c_ex1.download_button("📥 Descargar Excel", data=buf.getvalue(), file_name=f"Resumen_{cliente_sel}.xlsx", use_container_width=True)
+        
         if c_ex2.button("🗑️ Vaciar Lote (Sin Auditar)", use_container_width=True):
             st.session_state.resumen_para_cliente = []
             st.session_state.agregados_excel = []
+            st.session_state.pop(f"ia_procesada_{cliente_sel}", None) 
             st.rerun()
+            
         st.markdown("### 🔒 Cierre Definitivo")
         confirmar_cierre = st.checkbox("Confirmo que ya descargué el Excel.")
         if st.button("✅ Marcar Auditadas y Cerrar Lote", disabled=not confirmar_cierre, use_container_width=True):
@@ -599,6 +614,7 @@ Devolvé estrictamente JSON puro:
                 for ord_id in st.session_state.agregados_excel: supabase.table("ordenes_carga").update({"estado": "AUDITADO"}).eq("id", ord_id).execute()
             st.session_state.resumen_para_cliente = []
             st.session_state.agregados_excel = []
+            st.session_state.pop(f"ia_procesada_{cliente_sel}", None) 
             st.success("¡Lote cerrado!")
             time.sleep(1.5)
             st.rerun()
