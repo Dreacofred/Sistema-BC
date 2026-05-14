@@ -365,7 +365,9 @@ elif opcion == "Generador de Resumen":
                 es_especial = fila['formato_especial']
                 estado_icono = "🟢 LISTO" if fila['id'] in st.session_state.agregados_excel else "🟠 PENDIENTE"
                 
-                with st.expander(f"{estado_icono} | Camión: {fila['patente']} | Chofer: {chofer_txt}"):
+                # ACA HACEMOS EL CAMBIO PARA MOSTRAR "Sin Patente" SI ESTA VACIA
+                patente_txt = fila['patente'] if pd.notna(fila['patente']) and str(fila['patente']).strip() != "" else "Sin Patente"
+                with st.expander(f"{estado_icono} | Camión: {patente_txt} | Chofer: {chofer_txt}"):
                     c1, c2 = st.columns([1.5, 1]) 
                     with c1:
                         if pd.notna(fila['url_foto']) and str(fila['url_foto']).strip() != "":
@@ -512,7 +514,8 @@ elif opcion == "Verificación BCRA":
             import urllib3
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
             
-            response = requests.get(url_puente, headers=headers, verify=False, timeout=15)
+            # ¡CLAVE! Subimos el tiempo límite de 15 a 30 segundos
+            response = requests.get(url_puente, headers=headers, verify=False, timeout=30)
             
             if response.status_code == 200:
                 # AllOrigins devuelve el JSON del BCRA dentro de una propiedad 'contents'
@@ -553,8 +556,12 @@ elif opcion == "Verificación BCRA":
                 st.error(f"Error en Puente: {response.status_code}")
                 return None
                 
+        except requests.exceptions.Timeout:
+            # Si tarda más de 30 segundos, mostramos un cartel amable en vez de un error rojo
+            st.warning("⏱️ El puente gratuito está saturado y tardó demasiado. Volvé a intentar en unos segundos.")
+            return None
         except Exception as e:
-            st.error(f"Error de parsing: {str(e)}")
+            st.error(f"Error interno: {str(e)}")
             return None
 
     def guardar_cuit_afectado(cuit, situacion, nombre):
