@@ -497,39 +497,50 @@ elif opcion == "Verificación BCRA":
     st.markdown('<p style="color:#666; font-size:16px;">Consultá el estado crediticio en la base interna y en el BCRA.</p>', unsafe_allow_html=True)
     
     def consultar_bcra(cuit):
-        url = f"https://api.bcra.ar/estadisticas/v1.0/Deudores/Consultar/{cuit}"
+        # URL oficial corregida de la API del BCRA
+        url = f"https://api.bcra.gob.ar/centraldedeudores/v1.0/Deudas/{cuit}"
         
-        # Le ponemos un "disfraz" para que el BCRA crea que somos un navegador Chrome normal
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0"
         }
         
         try:
-            # Agregamos los headers y verify=False para que no lo bloqueen los certificados del gobierno
             import urllib3
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
             
             response = requests.get(url, headers=headers, verify=False, timeout=10)
             
-            # Si responde "200" es que entró perfecto
             if response.status_code == 200:
-                return response.json()
+                data = response.json()
+                # Extraemos la data según el formato real del Banco Central
+                if data.get('status') == 200 and 'results' in data and 'periodos' in data['results']:
+                    periodos = data['results']['periodos']
+                    if periodos and 'entidades' in periodos[0] and periodos[0]['entidades']:
+                        # Tomamos la entidad informante principal
+                        entidad_info = periodos[0]['entidades'][0]
+                        return {
+                            "situacion": entidad_info.get("situacion", 1),
+                            "entidad": entidad_info.get("entidad", "Entidad Financiera"),
+                            "denominacion": data['results'].get('denominacion', 'Cliente')
+                        }
+                return None
+            elif response.status_code == 404:
+                # Si el BCRA devuelve 404, significa que la persona NO tiene deudas registradas
+                return "SIN_DEUDAS"
             else:
-                # Si lo rebota, ahora nos va a decir exactamente qué código de error tira (ej: 403, 404, 500)
                 st.warning(f"El BCRA rechazó la conexión. Código de error: {response.status_code}")
                 return None
                 
         except Exception as e:
-            # Si se corta internet o hay una falla grave, nos muestra el error técnico
             st.error(f"Falla técnica de conexión con el BCRA: {e}")
             return None
 
-    def guardar_cuit_afectado(cuit, situacion):
+    def guardar_cuit_afectado(cuit, situacion, nombre):
         try:
             supabase.table("cuits_afectados").insert({
                 "cuit": cuit, 
                 "situacion_bcra": situacion,
-                "observaciones": "Registrado automáticamente por mal historial"
+                "observaciones": f"Titular: {nombre} - Registrado Automáticamente"
             }).execute()
         except Exception as e:
             st.error(f"Error guardando en BD local: {e}")
@@ -541,8 +552,8 @@ elif opcion == "Verificación BCRA":
         if len(cuit_input) != 11 or not cuit_input.isdigit():
             st.error("❌ Por favor, ingresá un CUIT válido de 11 dígitos.")
         else:
-            # PASO 1: Revisar nuestra base de datos interna primero
             try:
+                # PASO 1: Revisar nuestra base interna
                 registro_interno = supabase.table("cuits_afectados").select("*").eq("cuit", cuit_input).execute()
                 
                 if registro_interno.data:
@@ -550,27 +561,32 @@ elif opcion == "Verificación BCRA":
                     st.warning(f"Situación registrada anteriormente: Nivel {registro_interno.data[0]['situacion_bcra']}")
                     st.info("No hace falta consultar al BCRA, ya tenemos antecedentes negativos internos.")
                 else:
-                    # PASO 2: Si no lo conocemos, consultamos al BCRA
-                    with st.spinner('Consultando base de datos del BCRA...'):
+                    # PASO 2: Consultamos al BCRA
+                    with st.spinner('Consultando base de datos oficial del BCRA...'):
                         datos_bcra = consultar_bcra(cuit_input)
                         
-                        if datos_bcra and 'results' in datos_bcra:
-                            situacion = datos_bcra['results'][0]['situacion']
-                            entidad = datos_bcra['results'][0]['entidad']
+                        if datos_bcra == "SIN_DEUDAS":
+                            st.success("✅ Cliente Limpio. No registra deudas en el sistema financiero (Situación 1). Operación segura.")
+                        
+                        elif isinstance(datos_bcra, dict):
+                            situacion = datos_bcra['situacion']
+                            entidad = datos_bcra['entidad']
+                            nombre = datos_bcra['denominacion']
                             
+                            st.markdown(f"**Titular:** {nombre}")
                             col1, col2 = st.columns(2)
                             with col1:
                                 st.metric("Situación Actual", f"Nivel {situacion}")
                             
                             if situacion == 1:
-                                st.success(f"✅ Cliente Limpio (Situación 1 en {entidad}). Operación sugerida.")
+                                st.success(f"✅ Cliente Limpio (Situación 1 principal en {entidad}). Operación segura.")
                             else:
-                                # PASO 3: Si es negativo (Situación 2 o más), lo guardamos
+                                # PASO 3: Si es negativo, a la lista negra
                                 st.error(f"🚨 RIESGO DETECTADO: Situación {situacion} en {entidad}.")
                                 st.warning("El CUIT ha sido ingresado en nuestra base de datos de historial negativo.")
-                                guardar_cuit_afectado(cuit_input, situacion)
-                        elif datos_bcra is not None:
-                            st.warning("No se encontraron registros para este CUIT en el BCRA.")
+                                guardar_cuit_afectado(cuit_input, situacion, nombre)
+                        elif datos_bcra is None:
+                            st.warning("El servicio del BCRA no respondió correctamente. Verifique el CUIT o intente más tarde.")
             except Exception as e:
-                st.error(f"Error consultando la base de datos: {e}")
+                st.error(f"Error de sistema: {e}")
     st.markdown('</div>', unsafe_allow_html=True)
