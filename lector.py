@@ -133,8 +133,8 @@ with st.sidebar:
     # MENÚ MODERNO ADAPTADO PARA FONDO GRIS
     opcion = option_menu(
         menu_title=None, 
-        options=["Generador de Resumen", "Facturas de Proveedores"],
-        icons=["file-earmark-spreadsheet", "receipt"], 
+        options=["Generador de Resumen", "Facturas de Proveedores", "Verificación BCRA"],
+        icons=["file-earmark-spreadsheet", "receipt", "shield-check"], 
         menu_icon="cast", 
         default_index=0,
         styles={
@@ -488,3 +488,69 @@ elif opcion == "Generador de Resumen":
             time.sleep(1.5)
             st.rerun()
         st.markdown("</div>", unsafe_allow_html=True)
+
+# ==========================================
+# 5. MÓDULO: VERIFICACIÓN BCRA
+# ==========================================
+elif opcion == "Verificación BCRA":
+    st.title("🛡️ Verificación Blindada de CUIT")
+    st.markdown('<p style="color:#666; font-size:16px;">Consultá el estado crediticio en la base interna y en el BCRA.</p>', unsafe_allow_html=True)
+    
+    def consultar_bcra(cuit):
+        url = f"https://api.bcra.ar/estadisticas/v1.0/Deudores/Consultar/{cuit}"
+        try:
+            response = requests.get(url, timeout=10)
+            return response.json() if response.status_code == 200 else None
+        except:
+            return None
+
+    def guardar_cuit_afectado(cuit, situacion):
+        try:
+            supabase.table("cuits_afectados").insert({
+                "cuit": cuit, 
+                "situacion_bcra": situacion,
+                "observaciones": "Registrado automáticamente por mal historial"
+            }).execute()
+        except Exception as e:
+            st.error(f"Error guardando en BD local: {e}")
+
+    st.markdown('<div class="tarjeta-pro">', unsafe_allow_html=True)
+    cuit_input = st.text_input("Ingresá el CUIT a verificar (solo números)", max_chars=11, placeholder="Ej: 30123456789")
+
+    if st.button("Validar Riesgo"):
+        if len(cuit_input) != 11 or not cuit_input.isdigit():
+            st.error("❌ Por favor, ingresá un CUIT válido de 11 dígitos.")
+        else:
+            # PASO 1: Revisar nuestra base de datos interna primero
+            try:
+                registro_interno = supabase.table("cuits_afectados").select("*").eq("cuit", cuit_input).execute()
+                
+                if registro_interno.data:
+                    st.error(f"⚠️ ¡ATENCIÓN! Este CUIT ya está en nuestra lista de AFECTADOS.")
+                    st.warning(f"Situación registrada anteriormente: Nivel {registro_interno.data[0]['situacion_bcra']}")
+                    st.info("No hace falta consultar al BCRA, ya tenemos antecedentes negativos internos.")
+                else:
+                    # PASO 2: Si no lo conocemos, consultamos al BCRA
+                    with st.spinner('Consultando base de datos del BCRA...'):
+                        datos_bcra = consultar_bcra(cuit_input)
+                        
+                        if datos_bcra and 'results' in datos_bcra:
+                            situacion = datos_bcra['results'][0]['situacion']
+                            entidad = datos_bcra['results'][0]['entidad']
+                            
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                st.metric("Situación Actual", f"Nivel {situacion}")
+                            
+                            if situacion == 1:
+                                st.success(f"✅ Cliente Limpio (Situación 1 en {entidad}). Operación sugerida.")
+                            else:
+                                # PASO 3: Si es negativo (Situación 2 o más), lo guardamos
+                                st.error(f"🚨 RIESGO DETECTADO: Situación {situacion} en {entidad}.")
+                                st.warning("El CUIT ha sido ingresado en nuestra base de datos de historial negativo.")
+                                guardar_cuit_afectado(cuit_input, situacion)
+                        else:
+                            st.warning("No se pudo obtener respuesta del BCRA y no tenemos registros previos para este CUIT.")
+            except Exception as e:
+                st.error(f"Error consultando la base de datos: {e}")
+    st.markdown('</div>', unsafe_allow_html=True)
