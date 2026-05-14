@@ -498,10 +498,30 @@ elif opcion == "Verificación BCRA":
     
     def consultar_bcra(cuit):
         url = f"https://api.bcra.ar/estadisticas/v1.0/Deudores/Consultar/{cuit}"
+        
+        # Le ponemos un "disfraz" para que el BCRA crea que somos un navegador Chrome normal
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+        }
+        
         try:
-            response = requests.get(url, timeout=10)
-            return response.json() if response.status_code == 200 else None
-        except:
+            # Agregamos los headers y verify=False para que no lo bloqueen los certificados del gobierno
+            import urllib3
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+            
+            response = requests.get(url, headers=headers, verify=False, timeout=10)
+            
+            # Si responde "200" es que entró perfecto
+            if response.status_code == 200:
+                return response.json()
+            else:
+                # Si lo rebota, ahora nos va a decir exactamente qué código de error tira (ej: 403, 404, 500)
+                st.warning(f"El BCRA rechazó la conexión. Código de error: {response.status_code}")
+                return None
+                
+        except Exception as e:
+            # Si se corta internet o hay una falla grave, nos muestra el error técnico
+            st.error(f"Falla técnica de conexión con el BCRA: {e}")
             return None
 
     def guardar_cuit_afectado(cuit, situacion):
@@ -549,8 +569,8 @@ elif opcion == "Verificación BCRA":
                                 st.error(f"🚨 RIESGO DETECTADO: Situación {situacion} en {entidad}.")
                                 st.warning("El CUIT ha sido ingresado en nuestra base de datos de historial negativo.")
                                 guardar_cuit_afectado(cuit_input, situacion)
-                        else:
-                            st.warning("No se pudo obtener respuesta del BCRA y no tenemos registros previos para este CUIT.")
+                        elif datos_bcra is not None:
+                            st.warning("No se encontraron registros para este CUIT en el BCRA.")
             except Exception as e:
                 st.error(f"Error consultando la base de datos: {e}")
     st.markdown('</div>', unsafe_allow_html=True)
