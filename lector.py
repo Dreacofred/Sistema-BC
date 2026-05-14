@@ -490,50 +490,71 @@ elif opcion == "Generador de Resumen":
         st.markdown("</div>", unsafe_allow_html=True)
 
 # ==========================================
-# 5. MÓDULO: VERIFICACIÓN BCRA (CON API PUENTE)
+# 5. MÓDULO: VERIFICACIÓN BCRA (VÍA PUENTE ROBUSTO)
 # ==========================================
 elif opcion == "Verificación BCRA":
     st.title("🛡️ Verificación Blindada de CUIT")
-    st.markdown('<p style="color:#666; font-size:16px;">Consultá el estado crediticio oficial del BCRA.</p>', unsafe_allow_html=True)
+    st.markdown('<p style="color:#666; font-size:16px;">Consultá el estado crediticio en la base interna y en el BCRA.</p>', unsafe_allow_html=True)
     
     def consultar_bcra(cuit):
-        # 1. Definimos la URL real del Banco Central
+        # Limpiamos el CUIT por seguridad
+        cuit = str(cuit).strip()
         url_oficial = f"https://api.bcra.gob.ar/centraldedeudores/v1.0/Deudas/{cuit}"
         
-        # 2. Envolvemos la URL oficial en la API Puente (AllOrigins) para saltar el bloqueo geográfico
-        url_puente = f"https://api.allorigins.win/raw?url={url_oficial}"
+        # Usamos el endpoint normal de AllOrigins para obtener un objeto JSON envuelto (Sugerencia del Gem)
+        url_puente = f"https://api.allorigins.win/get?url={requests.utils.quote(url_oficial)}"
         
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) BC-Combustibles/1.0"
         }
         
         try:
             import urllib3
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
             
-            # Ahora le pegamos a la API puente en vez de ir directo
             response = requests.get(url_puente, headers=headers, verify=False, timeout=15)
             
             if response.status_code == 200:
-                data = response.json()
-                if data.get('status') == 200 and 'results' in data and 'periodos' in data['results']:
-                    periodos = data['results']['periodos']
+                # AllOrigins devuelve el JSON del BCRA dentro de una propiedad 'contents'
+                wrapper_data = response.json()
+                inner_content = wrapper_data.get('contents')
+                
+                if not inner_content:
+                    return None
+
+                # El contenido interno viene como String, hay que parsearlo a JSON
+                import json
+                data = json.loads(inner_content)
+                
+                # Chequeamos el status del BCRA (puede estar dentro del JSON)
+                if data.get('status') == 200 and 'results' in data:
+                    res = data['results']
+                    periodos = res.get('periodos', [])
+                    
                     if periodos and 'entidades' in periodos[0] and periodos[0]['entidades']:
                         entidad_info = periodos[0]['entidades'][0]
                         return {
                             "situacion": entidad_info.get("situacion", 1),
                             "entidad": entidad_info.get("entidad", "Entidad Financiera"),
-                            "denominacion": data['results'].get('denominacion', 'Cliente')
+                            "denominacion": res.get('denominacion', 'Cliente')
                         }
+                    else:
+                        # Si no hay periodos con deudas, se considera Limpio
+                        return "SIN_DEUDAS"
+                elif data.get('status') == 404:
+                    # El BCRA tira 404 si el CUIT no tiene deudas registradas
+                    return "SIN_DEUDAS"
+                
                 return None
+                
             elif response.status_code == 404:
                 return "SIN_DEUDAS"
             else:
-                st.warning(f"El BCRA rechazó la conexión a través del puente. Código: {response.status_code}")
+                st.error(f"Error en Puente: {response.status_code}")
                 return None
                 
         except Exception as e:
-            st.error(f"Falla de conexión con la API Puente: {e}")
+            st.error(f"Error de parsing: {str(e)}")
             return None
 
     def guardar_cuit_afectado(cuit, situacion, nombre):
@@ -559,8 +580,8 @@ elif opcion == "Verificación BCRA":
                 
                 if registro_interno.data:
                     st.error(f"⚠️ ¡ATENCIÓN! Este CUIT ya está en nuestra lista de AFECTADOS.")
-                    st.warning(f"Situación registrada: Nivel {registro_interno.data[0]['situacion_bcra']}")
-                    st.info("No hace falta consultar al BCRA, ya lo tenemos marcado internamente.")
+                    st.warning(f"Situación registrada anteriormente: Nivel {registro_interno.data[0]['situacion_bcra']}")
+                    st.info("No hace falta consultar al BCRA, ya tenemos antecedentes negativos internos.")
                 else:
                     # 2. Consulta al BCRA Oficial vía Puente
                     with st.spinner('Consultando base oficial del Banco Central vía API Puente...'):
