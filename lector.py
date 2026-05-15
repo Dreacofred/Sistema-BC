@@ -344,18 +344,44 @@ elif opcion == "Generador de Resumen":
                                     img_rem = Image.open(io.BytesIO(res_img.content))
                                     prompt_auditoria = """Experto auditor. Emisor es 'BC COMBUSTIBLES'. Buscá al CLIENTE Receptor. Extraé fecha, razon_social, litros, importe, comprobante en JSON puro."""
                                     res_ia = cliente_ia.models.generate_content(model='gemini-2.5-pro', contents=[prompt_auditoria, img_rem])
+                                    
                                     raw_t = res_ia.text.strip().replace('```json', '').replace('```', '')
-                                    d_ia = json.loads(raw_t[raw_t.find('{'):raw_t.rfind('}')+1])
-                                    st.session_state[f"ia_fec_{fila['id']}"] = str(d_ia.get('fecha', ''))
-                                    st.session_state[f"ia_rs_{fila['id']}"] = str(d_ia.get('razon_social', ''))
-                                    st.session_state[f"ia_lts_{fila['id']}"] = float(d_ia.get('litros', 0.0))
-                                    st.session_state[f"ia_imp_{fila['id']}"] = float(d_ia.get('importe', 0.0))
-                                    st.session_state[f"ia_fac_{fila['id']}"] = str(d_ia.get('comprobante', ''))
-                                except: pass
+                                    
+                                    # Intentamos extraer el JSON de forma segura
+                                    start = raw_t.find('{')
+                                    end = raw_t.rfind('}') + 1
+                                    if start != -1 and end != 0:
+                                        d_ia = json.loads(raw_t[start:end])
+                                        
+                                        # Función para procesar números con comas y puntos (estilo Argentino)
+                                        def limpiar_num(v):
+                                            try:
+                                                txt = str(v).replace('$', '').replace(' ', '').strip()
+                                                if ',' in txt and '.' in txt:
+                                                    txt = txt.replace('.', '').replace(',', '.')
+                                                elif ',' in txt:
+                                                    txt = txt.replace(',', '.')
+                                                return float(txt) if txt else 0.0
+                                            except:
+                                                return 0.0
+                                                
+                                        st.session_state[f"ia_fec_{fila['id']}"] = str(d_ia.get('fecha', ''))
+                                        st.session_state[f"ia_rs_{fila['id']}"] = str(d_ia.get('razon_social', ''))
+                                        st.session_state[f"ia_lts_{fila['id']}"] = limpiar_num(d_ia.get('litros', 0.0))
+                                        st.session_state[f"ia_imp_{fila['id']}"] = limpiar_num(d_ia.get('importe', 0.0))
+                                        st.session_state[f"ia_fac_{fila['id']}"] = str(d_ia.get('comprobante', ''))
+                                    else:
+                                        st.warning(f"La IA no devolvió un formato válido para la orden #{fila['id']}")
+                                        
+                                except Exception as e:
+                                    # AHORA SÍ VEMOS EL ERROR EN PANTALLA EN LUGAR DE IGNORARLO
+                                    st.error(f"Falla técnica en orden #{fila['id']}: {e}")
+                                    
                                 barra_p.progress((i + 1) / total)
+                                
                         st.session_state[clave_estado_ia] = True
                         st.success("✅ Extracción completa.")
-                        time.sleep(1)
+                        time.sleep(2) # Le damos 2 segundos para que puedas leer si hubo algún error rojo
                         st.rerun()
 
             st.markdown("<br>", unsafe_allow_html=True)
@@ -365,7 +391,6 @@ elif opcion == "Generador de Resumen":
                 es_especial = fila['formato_especial']
                 estado_icono = "🟢 LISTO" if fila['id'] in st.session_state.agregados_excel else "🟠 PENDIENTE"
                 
-                # ACA HACEMOS EL CAMBIO PARA MOSTRAR "Sin Patente" SI ESTA VACIA
                 patente_txt = fila['patente'] if pd.notna(fila['patente']) and str(fila['patente']).strip() != "" else "Sin Patente"
                 with st.expander(f"{estado_icono} | Camión: {patente_txt} | Chofer: {chofer_txt}"):
                     c1, c2 = st.columns([1.5, 1]) 
