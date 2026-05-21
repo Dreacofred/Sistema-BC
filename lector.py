@@ -433,8 +433,7 @@ elif opcion == "Generador de Resumen":
                                     fac_lts = c_o1.number_input("Litros", value=st.session_state.get(f"ia_lts_{fila['id']}", lts_def))
                                     nro_ord_gen = c_o2.text_input("Nº Orden (Normal)", value=fila['nro_orden_cliente'] if pd.notna(fila['nro_orden_cliente']) else "")
                                     efectivo_final = st.number_input("Efectivo Entregado", value=float(efectivo_real_bd))
-                                
-                               if st.form_submit_button("✅ Guardar Fila"):
+                                if st.form_submit_button("✅ Guardar Fila"):
                                     st.session_state.agregados_excel.append(fila['id'])
                                     st.session_state.resumen_para_cliente.append({
                                         "id_orden": int(fila['id']), # ACÁ ESTÁ LA MAGIA: Guardamos el ID para usarlo al final
