@@ -506,7 +506,7 @@ elif opcion == "Generador de Resumen":
             
         st.markdown("<div class='tarjeta-pro' style='margin-top: 30px; text-align:center;'>", unsafe_allow_html=True)
         confirmar_cierre = st.checkbox("Confirmo que ya descargué el Excel y deseo cerrar estas órdenes.")
-       if st.button("✅ MARCAR COMO AUDITADAS", disabled=not confirmar_cierre, use_container_width=True):
+        if st.button("✅ MARCAR COMO AUDITADAS", disabled=not confirmar_cierre, use_container_width=True):
             if st.session_state.agregados_excel:
                 # Recorremos la memoria para sacar los datos reales y enviarlos a la BD
                 for item in st.session_state.resumen_para_cliente:
