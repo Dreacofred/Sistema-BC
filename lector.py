@@ -434,15 +434,16 @@ elif opcion == "Generador de Resumen":
                                     nro_ord_gen = c_o2.text_input("Nº Orden (Normal)", value=fila['nro_orden_cliente'] if pd.notna(fila['nro_orden_cliente']) else "")
                                     efectivo_final = st.number_input("Efectivo Entregado", value=float(efectivo_real_bd))
                                 
-                                if st.form_submit_button("✅ Guardar Fila"):
+                               if st.form_submit_button("✅ Guardar Fila"):
                                     st.session_state.agregados_excel.append(fila['id'])
                                     st.session_state.resumen_para_cliente.append({
+                                        "id_orden": int(fila['id']), # ACÁ ESTÁ LA MAGIA: Guardamos el ID para usarlo al final
                                         "Fecha": fac_fecha.strip(), "Chofer": chofer_txt.strip(), "Razón Social": fac_rs.strip(),
                                         "Litros": fac_lts, "Nº Orden": convertir_a_numero(nro_ord_lts) if es_especial else convertir_a_numero(nro_ord_gen),
                                         "Importe": fac_imp, "Nº Factura": fac_comp.strip(), "Entidad Pagadora": cliente_sel,
                                         "Efectivo": efectivo_final, "Nº Orden Efectivo": convertir_a_numero(nro_ord_efe) if es_especial else "-"
                                     })
-                                    st.rerun() 
+                                    st.rerun()
 
     if st.session_state.resumen_para_cliente:
         st.markdown("<hr>", unsafe_allow_html=True)
@@ -506,12 +507,21 @@ elif opcion == "Generador de Resumen":
             
         st.markdown("<div class='tarjeta-pro' style='margin-top: 30px; text-align:center;'>", unsafe_allow_html=True)
         confirmar_cierre = st.checkbox("Confirmo que ya descargué el Excel y deseo cerrar estas órdenes.")
-        if st.button("✅ MARCAR COMO AUDITADAS", disabled=not confirmar_cierre, use_container_width=True):
+       if st.button("✅ MARCAR COMO AUDITADAS", disabled=not confirmar_cierre, use_container_width=True):
             if st.session_state.agregados_excel:
-                for ord_id in st.session_state.agregados_excel: supabase.table("ordenes_carga").update({"estado": "AUDITADO"}).eq("id", ord_id).execute()
+                # Recorremos la memoria para sacar los datos reales y enviarlos a la BD
+                for item in st.session_state.resumen_para_cliente:
+                    if "id_orden" in item:
+                        supabase.table("ordenes_carga").update({
+                            "estado": "AUDITADO",
+                            "litros_reales": item["Litros"],
+                            "numero_factura": item["Nº Factura"],
+                            "monto_factura": item["Importe"]
+                        }).eq("id", item["id_orden"]).execute()
+                        
             st.session_state.resumen_para_cliente, st.session_state.agregados_excel = [], []
             st.session_state.pop(f"ia_procesada_{cliente_sel}", None) 
-            st.success("¡Lote cerrado exitosamente!")
+            st.success("¡Lote cerrado exitosamente y guardado en la base de datos!")
             time.sleep(1.5)
             st.rerun()
         st.markdown("</div>", unsafe_allow_html=True)
