@@ -355,8 +355,14 @@ elif opcion == "Generador de Resumen":
                                     - "importe": Monto total en números.
                                     - "comprobante": Número de comprobante.
                                     - "litros": Sumá la cantidad de litros. NO sumes aceites o aditivos, solo combustibles.
-                                    - "producto_ia": Identificá el combustible usando ESTRICTAMENTE uno de estos 4: 'Nafta Super G2', 'Nafta Premium G3', 'Gas Oil 500 G2', 'Euro Diesel G3'. Si hay varios combustibles, poné el de mayor volumen. Si no podés identificarlo, devolvé ''.
-                                    - "observaciones_ia": Si encontrás artículos adicionales que no son combustible (ej. bidón de aceite, refrigerante), detallalos brevemente aquí. Si no, devolvé "".
+                                    - "producto_ia": Identificá el combustible principal usando ESTRICTAMENTE uno de estos 4: 'Nafta Super G2', 'Nafta Premium G3', 'Gas Oil 500 G2', 'Euro Diesel G3'. Si hay varios, poné el de mayor volumen.
+                                    - "observaciones_ia": Evaluá TODOS los ítems facturados y aplicá ESTA REGLA ESTRICTA:
+                                      1. Si SOLO cargó 'Gas Oil 500 G2' (Gasoil), devolvé "". (Vacío, sin texto).
+                                      2. Si cargó SOLO Euro, devolvé "Atención. El producto cargado es Euro, verifique."
+                                      3. Si cargó Gasoil mezclado con Euro, devolvé "Atención. La factura tiene Euro además de Gasoil Grado 2."
+                                      4. Si cargó Gasoil y artículos extra (aceites, etc.), devolvé "Atención. La factura contiene Gasoil Grado 2 y estos artículos: [detallar los extra]."
+                                      5. Si SOLO cargó Nafta, devolvé "Atención. La factura contiene Nafta."
+                                      6. Si SOLO cargó artículos extra (aceites, filtros), devolvé "Atención. La factura contiene solo: [detallar artículos]."
                                     """).strip()
                                     
                                     res_ia = cliente_ia.models.generate_content(model='gemini-2.5-pro', contents=[prompt_auditoria, img_rem])
@@ -440,9 +446,7 @@ elif opcion == "Generador de Resumen":
                                 obs_ia_val = st.session_state.get(f"ia_obs_{fila['id']}", "")
                                 
                                 if obs_ia_val:
-                                    st.warning(f"⚠️ **Atención - Artículos extra detectados:** {obs_ia_val}")
-                                else:
-                                    st.info("⛽ Carga estándar detectada (Solo Combustible).")
+                                    st.warning(f"⚠️ **{obs_ia_val}**")
 
                                 c_p1, c_p2 = st.columns(2)
                                 opciones_combustibles = ["---", "Nafta Super G2", "Nafta Premium G3", "Gas Oil 500 G2", "Euro Diesel G3", "OTRO"]
