@@ -8,6 +8,7 @@ import os
 import io
 import difflib
 import time
+import textwrap # IMPORTANTE: Agregado para formatear el prompt
 from datetime import datetime
 from supabase import create_client, Client
 import requests 
@@ -342,7 +343,22 @@ elif opcion == "Generador de Resumen":
                                 try:
                                     res_img = requests.get(fila['url_foto'])
                                     img_rem = Image.open(io.BytesIO(res_img.content))
-                                    prompt_auditoria = """Experto auditor. Emisor es 'BC COMBUSTIBLES'. Buscá al CLIENTE Receptor. Extraé fecha, razon_social, litros, importe, comprobante en JSON puro."""
+                                    
+                                    # ==========================================
+                                    # CAMBIO 1: NUEVO PROMPT INTELIGENTE
+                                    # ==========================================
+                                    prompt_auditoria = textwrap.dedent("""
+                                    Sos un auditor experto. El Emisor es 'BC COMBUSTIBLES'. Buscá al CLIENTE Receptor y los datos de la carga. 
+                                    Devolvé ÚNICAMENTE un JSON puro, sin texto adicional ni formato markdown (sin ```json), con estas claves exactas:
+                                    - "fecha": Fecha del comprobante.
+                                    - "razon_social": Cliente receptor.
+                                    - "importe": Monto total en números.
+                                    - "comprobante": Número de comprobante.
+                                    - "litros": Sumá la cantidad de litros. NO sumes aceites o aditivos, solo combustibles.
+                                    - "producto_ia": Identificá el combustible usando ESTRICTAMENTE uno de estos 4: 'Nafta Super G2', 'Nafta Premium G3', 'Gas Oil 500 G2', 'Euro Diesel G3'. Si hay varios combustibles, poné el de mayor volumen. Si no podés identificarlo, devolvé ''.
+                                    - "observaciones_ia": Si encontrás artículos adicionales que no son combustible (ej. bidón de aceite, refrigerante), detallalos brevemente aquí. Si no, devolvé "".
+                                    """).strip()
+                                    
                                     res_ia = cliente_ia.models.generate_content(model='gemini-2.5-pro', contents=[prompt_auditoria, img_rem])
                                     
                                     raw_t = res_ia.text.strip().replace('```json', '').replace('```', '')
@@ -353,7 +369,6 @@ elif opcion == "Generador de Resumen":
                                     if start != -1 and end != 0:
                                         d_ia = json.loads(raw_t[start:end])
                                         
-                                        # Función para procesar números con comas y puntos (estilo Argentino)
                                         def limpiar_num(v):
                                             try:
                                                 txt = str(v).replace('$', '').replace(' ', '').strip()
@@ -370,18 +385,20 @@ elif opcion == "Generador de Resumen":
                                         st.session_state[f"ia_lts_{fila['id']}"] = limpiar_num(d_ia.get('litros', 0.0))
                                         st.session_state[f"ia_imp_{fila['id']}"] = limpiar_num(d_ia.get('importe', 0.0))
                                         st.session_state[f"ia_fac_{fila['id']}"] = str(d_ia.get('comprobante', ''))
+                                        # Recibimos los nuevos datos
+                                        st.session_state[f"ia_prod_{fila['id']}"] = str(d_ia.get('producto_ia', ''))
+                                        st.session_state[f"ia_obs_{fila['id']}"] = str(d_ia.get('observaciones_ia', ''))
                                     else:
                                         st.warning(f"La IA no devolvió un formato válido para la orden #{fila['id']}")
                                         
                                 except Exception as e:
-                                    # AHORA SÍ VEMOS EL ERROR EN PANTALLA EN LUGAR DE IGNORARLO
                                     st.error(f"Falla técnica en orden #{fila['id']}: {e}")
                                     
                                 barra_p.progress((i + 1) / total)
                                 
                         st.session_state[clave_estado_ia] = True
                         st.success("✅ Extracción completa.")
-                        time.sleep(2) # Le damos 2 segundos para que puedas leer si hubo algún error rojo
+                        time.sleep(2) 
                         st.rerun()
 
             st.markdown("<br>", unsafe_allow_html=True)
@@ -415,6 +432,25 @@ elif opcion == "Generador de Resumen":
                                 fac_comp = col_f4.text_input("Nº Factura", value=st.session_state.get(f"ia_fac_{fila['id']}", ""))
                                 
                                 st.markdown("---")
+                                
+                                # ==========================================
+                                # CAMBIO 2: ALERTAS VISUALES Y SELECCIÓN DE PRODUCTO
+                                # ==========================================
+                                prod_ia_val = st.session_state.get(f"ia_prod_{fila['id']}", "")
+                                obs_ia_val = st.session_state.get(f"ia_obs_{fila['id']}", "")
+                                
+                                if obs_ia_val:
+                                    st.warning(f"⚠️ **Atención - Artículos extra detectados:** {obs_ia_val}")
+                                else:
+                                    st.info("⛽ Carga estándar detectada (Solo Combustible).")
+
+                                c_p1, c_p2 = st.columns(2)
+                                opciones_combustibles = ["---", "Nafta Super G2", "Nafta Premium G3", "Gas Oil 500 G2", "Euro Diesel G3", "OTRO"]
+                                idx_prod = opciones_combustibles.index(prod_ia_val) if prod_ia_val in opciones_combustibles else 0
+                                fac_prod = c_p1.selectbox("Producto Principal", opciones_combustibles, index=idx_prod)
+                                fac_obs = c_p2.text_input("Observaciones (Aceites, etc.)", value=obs_ia_val)
+                                
+                                st.markdown("---")
                                 efectivo_real_bd = fila.get('efectivo_entregado') if pd.notna(fila.get('efectivo_entregado')) else fila.get('efectivo_pedido', 0)
                                 tiene_foto = pd.notna(fila['url_foto']) and str(fila['url_foto']).strip() != ""
                                 lts_def = float(fila['litros_pedidos']) if tiene_foto else None
@@ -433,12 +469,16 @@ elif opcion == "Generador de Resumen":
                                     fac_lts = c_o1.number_input("Litros", value=st.session_state.get(f"ia_lts_{fila['id']}", lts_def))
                                     nro_ord_gen = c_o2.text_input("Nº Orden (Normal)", value=fila['nro_orden_cliente'] if pd.notna(fila['nro_orden_cliente']) else "")
                                     efectivo_final = st.number_input("Efectivo Entregado", value=float(efectivo_real_bd))
+                                    
                                 if st.form_submit_button("✅ Guardar Fila"):
                                     st.session_state.agregados_excel.append(fila['id'])
                                     st.session_state.resumen_para_cliente.append({
-                                        "id_orden": int(fila['id']), # ACÁ ESTÁ LA MAGIA: Guardamos el ID para usarlo al final
+                                        "id_orden": int(fila['id']), 
                                         "Fecha": fac_fecha.strip(), "Chofer": chofer_txt.strip(), "Razón Social": fac_rs.strip(),
-                                        "Litros": fac_lts, "Nº Orden": convertir_a_numero(nro_ord_lts) if es_especial else convertir_a_numero(nro_ord_gen),
+                                        "Litros": fac_lts, 
+                                        "Producto": fac_prod if fac_prod != "---" else "",
+                                        "Observaciones": fac_obs.strip(),
+                                        "Nº Orden": convertir_a_numero(nro_ord_lts) if es_especial else convertir_a_numero(nro_ord_gen),
                                         "Importe": fac_imp, "Nº Factura": fac_comp.strip(), "Entidad Pagadora": cliente_sel,
                                         "Efectivo": efectivo_final, "Nº Orden Efectivo": convertir_a_numero(nro_ord_efe) if es_especial else "-"
                                     })
@@ -461,11 +501,14 @@ elif opcion == "Generador de Resumen":
         df_export = pd.concat([df_res, pd.DataFrame([total_row])], ignore_index=True)
 
         st.subheader("📊 Resumen Final")
-        st.dataframe(df_export, use_container_width=True)
+        # Escondemos el id_orden de la tabla visual para no confundir, pero lo dejamos en el dataframe base
+        cols_mostrar = [c for c in df_export.columns if c != "id_orden"]
+        st.dataframe(df_export[cols_mostrar], use_container_width=True)
         
         buf = io.BytesIO()
         with pd.ExcelWriter(buf, engine='openpyxl') as wr:
-            df_export.to_excel(wr, index=False, sheet_name='Resumen_BC')
+            # Exportamos solo las columnas visuales (sin el id interno)
+            df_export[cols_mostrar].to_excel(wr, index=False, sheet_name='Resumen_BC')
             ws = wr.sheets['Resumen_BC']
             
             fill_header = PatternFill(start_color="C8102E", end_color="C8102E", fill_type="solid")
@@ -474,7 +517,7 @@ elif opcion == "Generador de Resumen":
             fill_total = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
             borde = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
 
-            for col_num, col_name in enumerate(df_export.columns, 1):
+            for col_num, col_name in enumerate(cols_mostrar, 1):
                 cell = ws.cell(row=1, column=col_num)
                 cell.fill = fill_header
                 cell.font = font_header
@@ -508,14 +551,18 @@ elif opcion == "Generador de Resumen":
         confirmar_cierre = st.checkbox("Confirmo que ya descargué el Excel y deseo cerrar estas órdenes.")
         if st.button("✅ MARCAR COMO AUDITADAS", disabled=not confirmar_cierre, use_container_width=True):
             if st.session_state.agregados_excel:
-                # Recorremos la memoria para sacar los datos reales y enviarlos a la BD
+                # ==========================================
+                # CAMBIO 3: GUARDADO EN SUPABASE DE LOS NUEVOS DATOS
+                # ==========================================
                 for item in st.session_state.resumen_para_cliente:
                     if "id_orden" in item:
                         supabase.table("ordenes_carga").update({
                             "estado": "AUDITADO",
                             "litros_reales": item["Litros"],
                             "numero_factura": item["Nº Factura"],
-                            "monto_factura": item["Importe"]
+                            "monto_factura": item["Importe"],
+                            "producto_ia": item["Producto"],
+                            "observaciones_ia": item["Observaciones"]
                         }).eq("id", item["id_orden"]).execute()
                         
             st.session_state.resumen_para_cliente, st.session_state.agregados_excel = [], []
@@ -533,12 +580,10 @@ elif opcion == "Verificación BCRA":
     st.markdown('<p style="color:#666; font-size:16px;">Consultá el estado crediticio en la base interna y en el BCRA.</p>', unsafe_allow_html=True)
     
     def consultar_bcra(cuit):
-        # Limpiamos el CUIT por seguridad
         cuit = str(cuit).strip()
-        url_oficial = f"https://api.bcra.gob.ar/centraldedeudores/v1.0/Deudas/{cuit}"
+        url_oficial = f"[https://api.bcra.gob.ar/centraldedeudores/v1.0/Deudas/](https://api.bcra.gob.ar/centraldedeudores/v1.0/Deudas/){cuit}"
         
-        # Usamos el endpoint normal de AllOrigins para obtener un objeto JSON envuelto (Sugerencia del Gem)
-        url_puente = f"https://api.allorigins.win/get?url={requests.utils.quote(url_oficial)}"
+        url_puente = f"[https://api.allorigins.win/get?url=](https://api.allorigins.win/get?url=){requests.utils.quote(url_oficial)}"
         
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) BC-Combustibles/1.0"
@@ -548,22 +593,18 @@ elif opcion == "Verificación BCRA":
             import urllib3
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
             
-            # ¡CLAVE! Subimos el tiempo límite de 15 a 30 segundos
             response = requests.get(url_puente, headers=headers, verify=False, timeout=30)
             
             if response.status_code == 200:
-                # AllOrigins devuelve el JSON del BCRA dentro de una propiedad 'contents'
                 wrapper_data = response.json()
                 inner_content = wrapper_data.get('contents')
                 
                 if not inner_content:
                     return None
 
-                # El contenido interno viene como String, hay que parsearlo a JSON
                 import json
                 data = json.loads(inner_content)
                 
-                # Chequeamos el status del BCRA (puede estar dentro del JSON)
                 if data.get('status') == 200 and 'results' in data:
                     res = data['results']
                     periodos = res.get('periodos', [])
@@ -576,10 +617,8 @@ elif opcion == "Verificación BCRA":
                             "denominacion": res.get('denominacion', 'Cliente')
                         }
                     else:
-                        # Si no hay periodos con deudas, se considera Limpio
                         return "SIN_DEUDAS"
                 elif data.get('status') == 404:
-                    # El BCRA tira 404 si el CUIT no tiene deudas registradas
                     return "SIN_DEUDAS"
                 
                 return None
@@ -591,7 +630,6 @@ elif opcion == "Verificación BCRA":
                 return None
                 
         except requests.exceptions.Timeout:
-            # Si tarda más de 30 segundos, mostramos un cartel amable en vez de un error rojo
             st.warning("⏱️ El puente gratuito está saturado y tardó demasiado. Volvé a intentar en unos segundos.")
             return None
         except Exception as e:
@@ -616,7 +654,6 @@ elif opcion == "Verificación BCRA":
             st.error("❌ Por favor, ingresá un CUIT válido de 11 dígitos.")
         else:
             try:
-                # 1. Base interna (Supabase)
                 registro_interno = supabase.table("cuits_afectados").select("*").eq("cuit", cuit_input).execute()
                 
                 if registro_interno.data:
@@ -624,7 +661,6 @@ elif opcion == "Verificación BCRA":
                     st.warning(f"Situación registrada anteriormente: Nivel {registro_interno.data[0]['situacion_bcra']}")
                     st.info("No hace falta consultar al BCRA, ya tenemos antecedentes negativos internos.")
                 else:
-                    # 2. Consulta al BCRA Oficial vía Puente
                     with st.spinner('Consultando base oficial del Banco Central vía API Puente...'):
                         datos_bcra = consultar_bcra(cuit_input)
                         
