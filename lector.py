@@ -381,18 +381,15 @@ elif opcion == "Generador de Resumen":
                                     else:
                                         st.warning(f"La IA no devolvió un formato válido para la orden #{fila['id']}")
                                         
-                                        except Exception as e:
-                                            st.error(f"Falla técnica en orden #{fila['id']}: {e}")
-                                            
-                                        barra_p.progress((i + 1) / total)
-                                        
-                                        # 🟢 NUEVO: Esta pausa TIENE que ir acá adentro (alineada con la barra)
-                                        # para que frene 2 segundos ENTRE cada factura del bucle.
-                                        time.sleep(2) 
+                                except Exception as e:
+                                    st.error(f"Falla técnica en orden #{fila['id']}: {e}")
                                     
+                                barra_p.progress((i + 1) / total)
+                                time.sleep(2)
+                                
                         st.session_state[clave_estado_ia] = True
                         st.success("✅ Extracción completa.")
-                        time.sleep(2) # Este es el que ya tenías y lo dejamos acá al final.
+                        time.sleep(2)
                         st.rerun()
 
             st.markdown("<br>", unsafe_allow_html=True)
