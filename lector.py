@@ -10,6 +10,7 @@ import difflib
 import time
 import textwrap 
 import re 
+import gc # IMPORTANTE: Recolector de basura para limpiar la memoria RAM
 from datetime import datetime
 from supabase import create_client, Client
 import requests 
@@ -234,16 +235,23 @@ if opcion == "Facturas de Proveedores":
                     while intentos > 0 and not exito:
                         try:
                             prompt_prov = """Eres auditor contable. Objetivo: leer FACTURA DE COMPRA. BC COMBUSTIBLES es RECEPTOR. Buscá CUIT, Fecha, Nº de Factura y Totales. Extraé JSON puro."""
-                            
-                            # Fallback para Proveedores también
                             modelo_actual = 'gemini-2.5-pro' if intentos > 1 else 'gemini-2.5-flash'
                             
-                            res = cliente_ia.models.generate_content(model=modelo_actual, contents=[prompt_prov, Image.open(io.BytesIO(doc['data']))])
+                            img_rem = Image.open(io.BytesIO(doc['data']))
+                            res = cliente_ia.models.generate_content(model=modelo_actual, contents=[prompt_prov, img_rem])
                             raw_text = res.text.strip().replace('```json', '').replace('```', '')
                             start, end = raw_text.find('{'), raw_text.rfind('}') + 1
                             datos_extraidos = json.loads(raw_text[start:end])
                             datos_extraidos['_origen'] = doc['nombre']
                             st.session_state.cola_extracciones_prov.append(datos_extraidos)
+                            
+                            # ==========================================
+                            # 🧹 LIMPIEZA DE MEMORIA PROVEEDORES
+                            # ==========================================
+                            try: img_rem.close()
+                            except: pass
+                            gc.collect()
+                            
                             exito = True
                         except Exception as e:
                             error_interno = str(e)
@@ -360,9 +368,6 @@ elif opcion == "Generador de Resumen":
                                         res_img = requests.get(fila['url_foto'])
                                         img_rem = Image.open(io.BytesIO(res_img.content))
                                         
-                                        # ==========================================
-                                        # ENRUTAMIENTO INTELIGENTE (FALLBACK PLAN B)
-                                        # ==========================================
                                         modelo_actual = 'gemini-2.5-pro' if intentos_restantes > 1 else 'gemini-2.5-flash'
                                         
                                         res_ia = cliente_ia.models.generate_content(model=modelo_actual, contents=[PROMPT_AUDITORIA, img_rem])
@@ -393,6 +398,14 @@ elif opcion == "Generador de Resumen":
                                         else:
                                             st.warning(f"La IA no devolvió un formato JSON válido para la orden #{fila['id']}")
                                             
+                                        # ==========================================
+                                        # 🧹 LIMPIEZA DE MEMORIA OBLIGATORIA (OOM FIX)
+                                        # ==========================================
+                                        try: img_rem.close()
+                                        except: pass
+                                        del res_img     
+                                        gc.collect()    
+                                        
                                         exito_extraccion = True 
                                         
                                     except Exception as e:
@@ -452,7 +465,6 @@ elif opcion == "Generador de Resumen":
                                     
                                     while intentos_restantes_manual > 0 and not exito_extraccion_manual:
                                         try:
-                                            # Subida a BD
                                             timestamp = int(time.time())
                                             nombre_archivo = f"ADMIN_Orden{fila['id']}_{timestamp}_remito.jpg"
                                             file_bytes = foto_nueva.getvalue()
@@ -469,9 +481,6 @@ elif opcion == "Generador de Resumen":
                                                 "motivo_sin_foto": "Corregido por Auditoría"
                                             }).eq("id", fila['id']).execute()
                                             
-                                            # ==========================================
-                                            # ENRUTAMIENTO INTELIGENTE (BOTÓN MANUAL)
-                                            # ==========================================
                                             modelo_actual_manual = 'gemini-2.5-pro' if intentos_restantes_manual > 1 else 'gemini-2.5-flash'
                                             
                                             img_rem = Image.open(io.BytesIO(file_bytes))
@@ -498,6 +507,13 @@ elif opcion == "Generador de Resumen":
                                                 st.session_state[f"ia_fac_{fila['id']}"] = str(d_ia.get('comprobante', ''))
                                                 st.session_state[f"ia_prod_{fila['id']}"] = str(d_ia.get('detalle_productos', ''))
                                                 st.session_state[f"ia_obs_{fila['id']}"] = str(d_ia.get('observaciones_ia', ''))
+                                            
+                                            # ==========================================
+                                            # 🧹 LIMPIEZA DE MEMORIA BOTON MANUAL
+                                            # ==========================================
+                                            try: img_rem.close()
+                                            except: pass
+                                            gc.collect()
                                             
                                             exito_extraccion_manual = True
                                             st.success("✅ ¡Foto actualizada y leída por IA! Recargando...")
