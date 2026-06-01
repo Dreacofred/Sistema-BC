@@ -311,10 +311,17 @@ elif opcion == "Generador de Resumen":
       5. Si encontrás artículos extra (aceites, filtros, etc.), devolvé "Atención. La factura contiene artículos extra: [detallar los extra]."
     """).strip()
 
+   # ==========================================
+    # MODIFICACIÓN: FILTRO POR SUCURSAL MADRE DEL CLIENTE
+    # ==========================================
     try:
-        query = supabase.table("ordenes_carga").select("*, clientes(nombre, formato_especial)")
+        # Seleccionamos las órdenes y hacemos "join" con clientes para acceder a su sucursal_madre_id
+        query = supabase.table("ordenes_carga").select("*, clientes(nombre, formato_especial, sucursal_madre_id)")
+        
+        # Si no es Super Admin, filtramos por la sucursal madre del CLIENTE
         if user['puesto'] != 'SUPER_ADMIN':
-            query = query.eq("sucursal_carga_id", user['sucursal_id'])
+            # Filtramos en la tabla unida (clientes) por la sucursal madre
+            query = query.eq("clientes.sucursal_madre_id", user['sucursal_id'])
             
         res_auditoria = query.eq("estado", "DESPACHADO").order("fecha_despacho", desc=True).execute()
         ordenes = res_auditoria.data
