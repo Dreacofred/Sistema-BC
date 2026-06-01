@@ -8,7 +8,8 @@ import os
 import io
 import difflib
 import time
-import textwrap # IMPORTANTE: Agregado para formatear el prompt
+import textwrap 
+import re # IMPORTANTE: Agregado para el desglosador de excel
 from datetime import datetime
 from supabase import create_client, Client
 import requests 
@@ -345,7 +346,7 @@ elif opcion == "Generador de Resumen":
                                     img_rem = Image.open(io.BytesIO(res_img.content))
                                     
                                     # ==========================================
-                                    # CAMBIO 1: NUEVO PROMPT INTELIGENTE
+                                    # NUEVO PROMPT INTELIGENTE (DETALLE EXACTO)
                                     # ==========================================
                                     prompt_auditoria = textwrap.dedent("""
                                     Sos un auditor experto. El Emisor es 'BC COMBUSTIBLES'. Buscá al CLIENTE Receptor y los datos de la carga. 
@@ -354,22 +355,20 @@ elif opcion == "Generador de Resumen":
                                     - "razon_social": Cliente receptor.
                                     - "importe": Monto total en números.
                                     - "comprobante": Número de comprobante.
-                                    - "litros": Sumá la cantidad de litros. NO sumes aceites o aditivos, solo combustibles.
-                                    - "producto_ia": Identificá el combustible principal usando ESTRICTAMENTE uno de estos 4: 'Nafta Super G2', 'Nafta Premium G3', 'Gas Oil 500 G2', 'Euro Diesel G3'. Si hay varios, poné el de mayor volumen.
+                                    - "litros": Sumá la cantidad TOTAL de litros de combustible. NO sumes aceites o aditivos, solo combustibles.
+                                    - "detalle_productos": Hacé un resumen de los combustibles y sus litros exactos. Ejemplo: 'Euro Diesel G3: 201 L | Gas Oil 500 G2: 81.5 L'. Si es un solo producto, poné solo ese.
                                     - "observaciones_ia": Evaluá TODOS los ítems facturados y aplicá ESTA REGLA ESTRICTA:
-                                      1. Si SOLO cargó 'Gas Oil 500 G2' (Gasoil), devolvé "". (Vacío, sin texto).
-                                      2. Si cargó SOLO Euro, devolvé "Atención. El producto cargado es Euro, verifique."
-                                      3. Si cargó Gasoil mezclado con Euro, devolvé "Atención. La factura tiene Euro además de Gasoil Grado 2."
-                                      4. Si cargó Gasoil y artículos extra (aceites, etc.), devolvé "Atención. La factura contiene Gasoil Grado 2 y estos artículos: [detallar los extra]."
-                                      5. Si SOLO cargó Nafta, devolvé "Atención. La factura contiene Nafta."
-                                      6. Si SOLO cargó artículos extra (aceites, filtros), devolvé "Atención. La factura contiene solo: [detallar artículos]."
+                                      1. Si SOLO cargó 'Gas Oil 500 G2' (Gasoil normal), devolvé "". (Vacío).
+                                      2. Si detectás 2 o más combustibles diferentes, devolvé "Atención. La factura tiene varios productos."
+                                      3. Si cargó SOLO Euro, devolvé "Atención. El producto cargado es Euro, verifique."
+                                      4. Si SOLO cargó Nafta, devolvé "Atención. La factura contiene Nafta."
+                                      5. Si encontrás artículos extra (aceites, filtros, etc.), devolvé "Atención. La factura contiene artículos extra: [detallar los extra]."
                                     """).strip()
                                     
                                     res_ia = cliente_ia.models.generate_content(model='gemini-2.5-pro', contents=[prompt_auditoria, img_rem])
                                     
                                     raw_t = res_ia.text.strip().replace('```json', '').replace('```', '')
                                     
-                                    # Intentamos extraer el JSON de forma segura
                                     start = raw_t.find('{')
                                     end = raw_t.rfind('}') + 1
                                     if start != -1 and end != 0:
@@ -385,14 +384,14 @@ elif opcion == "Generador de Resumen":
                                                 return float(txt) if txt else 0.0
                                             except:
                                                 return 0.0
-                                                
+                                        
                                         st.session_state[f"ia_fec_{fila['id']}"] = str(d_ia.get('fecha', ''))
                                         st.session_state[f"ia_rs_{fila['id']}"] = str(d_ia.get('razon_social', ''))
                                         st.session_state[f"ia_lts_{fila['id']}"] = limpiar_num(d_ia.get('litros', 0.0))
                                         st.session_state[f"ia_imp_{fila['id']}"] = limpiar_num(d_ia.get('importe', 0.0))
                                         st.session_state[f"ia_fac_{fila['id']}"] = str(d_ia.get('comprobante', ''))
-                                        # Recibimos los nuevos datos
-                                        st.session_state[f"ia_prod_{fila['id']}"] = str(d_ia.get('producto_ia', ''))
+                                        # Recibimos el detalle exacto de la IA
+                                        st.session_state[f"ia_prod_{fila['id']}"] = str(d_ia.get('detalle_productos', ''))
                                         st.session_state[f"ia_obs_{fila['id']}"] = str(d_ia.get('observaciones_ia', ''))
                                     else:
                                         st.warning(f"La IA no devolvió un formato válido para la orden #{fila['id']}")
@@ -429,6 +428,31 @@ elif opcion == "Generador de Resumen":
                             st.success("✅ Añadido al reporte.")
                         else:
                             with st.form(key=f"form_aud_{fila['id']}"):
+                                
+                                # ==========================================
+                                # AVISO: LO QUE PIDIÓ EL CLIENTE ORIGINALMENTE
+                                # ==========================================
+                                detalles_bd = fila.get('detalle_combustibles')
+                                if isinstance(detalles_bd, str):
+                                    try: detalles_bd = json.loads(detalles_bd)
+                                    except: detalles_bd = None
+                                        
+                                texto_pedido_cliente = ""
+                                if detalles_bd and isinstance(detalles_bd, dict):
+                                    texto_pedido_cliente = " | ".join([f"{k}: {v} L" if str(v).replace('.','',1).isdigit() else f"{k}: {v}" for k, v in detalles_bd.items()])
+                                elif fila.get('litros_pedidos'):
+                                    texto_pedido_cliente = f"Gas Oil 500 G2: {fila.get('litros_pedidos')} L"
+                                else:
+                                    texto_pedido_cliente = "Tanque Lleno / No especificado"
+                                    
+                                extras_bd = fila.get('articulos_extra')
+                                if extras_bd and str(extras_bd).strip() and str(extras_bd).lower() != "nan":
+                                    texto_pedido_cliente += f" 📦 Extras: {extras_bd}"
+                                    
+                                st.info(f"🛒 **Pedido original del cliente:**\n{texto_pedido_cliente}")
+                                st.markdown("---")
+                                # ==========================================
+
                                 col_f1, col_f2 = st.columns(2)
                                 fac_fecha = col_f1.text_input("Fecha", value=st.session_state.get(f"ia_fec_{fila['id']}", ""))
                                 fac_rs = col_f2.text_input("Razón Social", value=st.session_state.get(f"ia_rs_{fila['id']}", ""))
@@ -439,20 +463,15 @@ elif opcion == "Generador de Resumen":
                                 
                                 st.markdown("---")
                                 
-                                # ==========================================
-                                # CAMBIO 2: ALERTAS VISUALES Y SELECCIÓN DE PRODUCTO
-                                # ==========================================
                                 prod_ia_val = st.session_state.get(f"ia_prod_{fila['id']}", "")
                                 obs_ia_val = st.session_state.get(f"ia_obs_{fila['id']}", "")
                                 
                                 if obs_ia_val:
                                     st.warning(f"⚠️ **{obs_ia_val}**")
 
-                                c_p1, c_p2 = st.columns(2)
-                                opciones_combustibles = ["---", "Nafta Super G2", "Nafta Premium G3", "Gas Oil 500 G2", "Euro Diesel G3", "OTRO"]
-                                idx_prod = opciones_combustibles.index(prod_ia_val) if prod_ia_val in opciones_combustibles else 0
-                                fac_prod = c_p1.selectbox("Producto Principal", opciones_combustibles, index=idx_prod)
-                                fac_obs = c_p2.text_input("Observaciones (Aceites, etc.)", value=obs_ia_val)
+                                # Cajas de texto a lo ancho reemplazando el selectbox
+                                fac_prod = st.text_input("Detalle de Combustibles (Leído por IA)", value=prod_ia_val)
+                                fac_obs = st.text_input("Observaciones Adicionales (Leído por IA)", value=obs_ia_val)
                                 
                                 st.markdown("---")
                                 efectivo_real_bd = fila.get('efectivo_entregado') if pd.notna(fila.get('efectivo_entregado')) else fila.get('efectivo_pedido', 0)
@@ -463,29 +482,59 @@ elif opcion == "Generador de Resumen":
                                 
                                 if es_especial:
                                     c_o1, c_o2 = st.columns(2)
-                                    fac_lts = c_o1.number_input("Litros", value=st.session_state.get(f"ia_lts_{fila['id']}", lts_def))
+                                    fac_lts = c_o1.number_input("Total de Litros", value=st.session_state.get(f"ia_lts_{fila['id']}", lts_def))
                                     nro_ord_lts = c_o2.text_input("Nº Orden Litros", value=fila['nro_orden_litros_interna'] if pd.notna(fila['nro_orden_litros_interna']) else "")
                                     c_o3, c_o4 = st.columns(2)
                                     efectivo_final = c_o3.number_input("Efectivo Entregado", value=float(efectivo_real_bd))
                                     nro_ord_efe = c_o4.text_input("Nº Orden Efectivo", value=fila['nro_orden_efectivo_interna'] if pd.notna(fila['nro_orden_efectivo_interna']) else "")
                                 else:
                                     c_o1, c_o2 = st.columns(2)
-                                    fac_lts = c_o1.number_input("Litros", value=st.session_state.get(f"ia_lts_{fila['id']}", lts_def))
+                                    fac_lts = c_o1.number_input("Total de Litros", value=st.session_state.get(f"ia_lts_{fila['id']}", lts_def))
                                     nro_ord_gen = c_o2.text_input("Nº Orden (Normal)", value=fila['nro_orden_cliente'] if pd.notna(fila['nro_orden_cliente']) else "")
                                     efectivo_final = st.number_input("Efectivo Entregado", value=float(efectivo_real_bd))
                                     
                                 if st.form_submit_button("✅ Guardar Fila"):
                                     st.session_state.agregados_excel.append(fila['id'])
-                                    st.session_state.resumen_para_cliente.append({
-                                        "id_orden": int(fila['id']), 
-                                        "Fecha": fac_fecha.strip(), "Chofer": chofer_txt.strip(), "Razón Social": fac_rs.strip(),
-                                        "Litros": fac_lts, 
-                                        "Producto": fac_prod if fac_prod != "---" else "",
-                                        "Observaciones": fac_obs.strip(),
-                                        "Nº Orden": convertir_a_numero(nro_ord_lts) if es_especial else convertir_a_numero(nro_ord_gen),
-                                        "Importe": fac_imp, "Nº Factura": fac_comp.strip(), "Entidad Pagadora": cliente_sel,
-                                        "Efectivo": efectivo_final, "Nº Orden Efectivo": convertir_a_numero(nro_ord_efe) if es_especial else "-"
-                                    })
+                                    
+                                    # ==========================================
+                                    # MAGIA DE SEPARACIÓN PARA EXCEL
+                                    # ==========================================
+                                    productos_a_guardar = []
+                                    
+                                    if "|" in fac_prod or ":" in fac_prod:
+                                        partes = fac_prod.split("|")
+                                        for p in partes:
+                                            if ":" in p:
+                                                nombre, lts_str = p.split(":", 1)
+                                                lts_str = lts_str.replace(',', '.') 
+                                                numeros = re.findall(r"[-+]?\d*\.\d+|\d+", lts_str)
+                                                lts_indiv = float(numeros[0]) if numeros else 0.0
+                                                productos_a_guardar.append({"nombre": nombre.strip(), "litros": lts_indiv})
+                                            else:
+                                                productos_a_guardar.append({"nombre": p.strip(), "litros": 0.0})
+                                    else:
+                                        productos_a_guardar.append({"nombre": fac_prod.strip(), "litros": fac_lts})
+                                    
+                                    producto_mayor = max(productos_a_guardar, key=lambda x: x['litros']) if productos_a_guardar else None
+
+                                    for prod in productos_a_guardar:
+                                        es_el_mayor = (prod == producto_mayor)
+                                        
+                                        efectivo_asignar = efectivo_final if es_el_mayor else 0.0
+                                        importe_asignar = fac_imp if es_el_mayor else 0.0
+                                        obs_asignar = fac_obs.strip() if es_el_mayor else ""
+                                        
+                                        st.session_state.resumen_para_cliente.append({
+                                            "id_orden": int(fila['id']), 
+                                            "Fecha": fac_fecha.strip(), "Chofer": chofer_txt.strip(), "Razón Social": fac_rs.strip(),
+                                            "Litros": prod['litros'], 
+                                            "Producto": prod['nombre'],
+                                            "Observaciones": obs_asignar,
+                                            "Nº Orden": convertir_a_numero(nro_ord_lts) if es_especial else convertir_a_numero(nro_ord_gen),
+                                            "Importe": importe_asignar, "Nº Factura": fac_comp.strip(), "Entidad Pagadora": cliente_sel,
+                                            "Efectivo": efectivo_asignar, "Nº Orden Efectivo": convertir_a_numero(nro_ord_efe) if es_especial else "-"
+                                        })
+                                        
                                     st.rerun()
 
     if st.session_state.resumen_para_cliente:
@@ -505,13 +554,11 @@ elif opcion == "Generador de Resumen":
         df_export = pd.concat([df_res, pd.DataFrame([total_row])], ignore_index=True)
 
         st.subheader("📊 Resumen Final")
-        # Escondemos el id_orden de la tabla visual para no confundir, pero lo dejamos en el dataframe base
         cols_mostrar = [c for c in df_export.columns if c != "id_orden"]
         st.dataframe(df_export[cols_mostrar], use_container_width=True)
         
         buf = io.BytesIO()
         with pd.ExcelWriter(buf, engine='openpyxl') as wr:
-            # Exportamos solo las columnas visuales (sin el id interno)
             df_export[cols_mostrar].to_excel(wr, index=False, sheet_name='Resumen_BC')
             ws = wr.sheets['Resumen_BC']
             
@@ -555,19 +602,35 @@ elif opcion == "Generador de Resumen":
         confirmar_cierre = st.checkbox("Confirmo que ya descargué el Excel y deseo cerrar estas órdenes.")
         if st.button("✅ MARCAR COMO AUDITADAS", disabled=not confirmar_cierre, use_container_width=True):
             if st.session_state.agregados_excel:
+                
                 # ==========================================
-                # CAMBIO 3: GUARDADO EN SUPABASE DE LOS NUEVOS DATOS
+                # GUARDADO AGRUPADO EN SUPABASE
                 # ==========================================
+                ordenes_procesadas_db = []
                 for item in st.session_state.resumen_para_cliente:
-                    if "id_orden" in item:
+                    id_actual = item.get("id_orden")
+                    
+                    if id_actual and id_actual not in ordenes_procesadas_db:
+                        filas_este_remito = [x for x in st.session_state.resumen_para_cliente if x.get("id_orden") == id_actual]
+                        
+                        litros_totales = sum(float(x["Litros"]) for x in filas_este_remito)
+                        importe_total = sum(float(x["Importe"]) for x in filas_este_remito)
+                        
+                        texto_productos = " | ".join([f"{x['Producto']}: {x['Litros']}L" for x in filas_este_remito])
+                        
+                        todas_obs = [x["Observaciones"] for x in filas_este_remito if x["Observaciones"].strip() != ""]
+                        texto_obs = " | ".join(todas_obs)
+                        
                         supabase.table("ordenes_carga").update({
                             "estado": "AUDITADO",
-                            "litros_reales": item["Litros"],
+                            "litros_reales": litros_totales,
                             "numero_factura": item["Nº Factura"],
-                            "monto_factura": item["Importe"],
-                            "producto_ia": item["Producto"],
-                            "observaciones_ia": item["Observaciones"]
-                        }).eq("id", item["id_orden"]).execute()
+                            "monto_factura": importe_total,
+                            "producto_ia": texto_productos,
+                            "observaciones_ia": texto_obs
+                        }).eq("id", id_actual).execute()
+                        
+                        ordenes_procesadas_db.append(id_actual)
                         
             st.session_state.resumen_para_cliente, st.session_state.agregados_excel = [], []
             st.session_state.pop(f"ia_procesada_{cliente_sel}", None) 
@@ -586,7 +649,6 @@ elif opcion == "Verificación BCRA":
     def consultar_bcra(cuit):
         cuit = str(cuit).strip()
         url_oficial = f"[https://api.bcra.gob.ar/centraldedeudores/v1.0/Deudas/](https://api.bcra.gob.ar/centraldedeudores/v1.0/Deudas/){cuit}"
-        
         url_puente = f"[https://api.allorigins.win/get?url=](https://api.allorigins.win/get?url=){requests.utils.quote(url_oficial)}"
         
         headers = {
@@ -603,10 +665,8 @@ elif opcion == "Verificación BCRA":
                 wrapper_data = response.json()
                 inner_content = wrapper_data.get('contents')
                 
-                if not inner_content:
-                    return None
+                if not inner_content: return None
 
-                import json
                 data = json.loads(inner_content)
                 
                 if data.get('status') == 200 and 'results' in data:
@@ -627,8 +687,7 @@ elif opcion == "Verificación BCRA":
                 
                 return None
                 
-            elif response.status_code == 404:
-                return "SIN_DEUDAS"
+            elif response.status_code == 404: return "SIN_DEUDAS"
             else:
                 st.error(f"Error en Puente: {response.status_code}")
                 return None
@@ -677,8 +736,7 @@ elif opcion == "Verificación BCRA":
                             
                             st.markdown(f"**Titular:** {nombre}")
                             col1, col2 = st.columns(2)
-                            with col1:
-                                st.metric("Situación Actual", f"Nivel {situacion}")
+                            with col1: st.metric("Situación Actual", f"Nivel {situacion}")
                             
                             if situacion == 1:
                                 st.success(f"✅ Cliente Limpio (Situación 1 en {entidad}). Operación segura.")
