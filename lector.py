@@ -346,46 +346,68 @@ elif opcion == "Generador de Resumen":
                         barra_p = st.progress(0)
                         ordenes_con_foto = filtro_cliente[filtro_cliente['url_foto'].notnull()]
                         total = len(ordenes_con_foto)
+                        
                         if total > 0:
                             for i, (_, fila) in enumerate(ordenes_con_foto.iterrows()):
-                                try:
-                                    res_img = requests.get(fila['url_foto'])
-                                    img_rem = Image.open(io.BytesIO(res_img.content))
-                                    
-                                    res_ia = cliente_ia.models.generate_content(model='gemini-2.5-pro', contents=[PROMPT_AUDITORIA, img_rem])
-                                    raw_t = res_ia.text.strip().replace('```json', '').replace('```', '')
-                                    
-                                    start = raw_t.find('{')
-                                    end = raw_t.rfind('}') + 1
-                                    if start != -1 and end != 0:
-                                        d_ia = json.loads(raw_t[start:end])
+                                exito_extraccion = False
+                                intentos_restantes = 3
+                                tiempo_espera = 4  # Segundos base para el primer reintento
+                                
+                                while intentos_restantes > 0 and not exito_extraccion:
+                                    try:
+                                        res_img = requests.get(fila['url_foto'])
+                                        img_rem = Image.open(io.BytesIO(res_img.content))
                                         
-                                        def limpiar_num(v):
-                                            try:
-                                                txt = str(v).replace('$', '').replace(' ', '').strip()
-                                                if ',' in txt and '.' in txt:
-                                                    txt = txt.replace('.', '').replace(',', '.')
-                                                elif ',' in txt:
-                                                    txt = txt.replace(',', '.')
-                                                return float(txt) if txt else 0.0
-                                            except:
-                                                return 0.0
+                                        # Llamada a la IA
+                                        res_ia = cliente_ia.models.generate_content(model='gemini-2.5-pro', contents=[PROMPT_AUDITORIA, img_rem])
+                                        raw_t = res_ia.text.strip().replace('```json', '').replace('```', '')
                                         
-                                        st.session_state[f"ia_fec_{fila['id']}"] = str(d_ia.get('fecha', ''))
-                                        st.session_state[f"ia_rs_{fila['id']}"] = str(d_ia.get('razon_social', ''))
-                                        st.session_state[f"ia_lts_{fila['id']}"] = limpiar_num(d_ia.get('litros', 0.0))
-                                        st.session_state[f"ia_imp_{fila['id']}"] = limpiar_num(d_ia.get('importe', 0.0))
-                                        st.session_state[f"ia_fac_{fila['id']}"] = str(d_ia.get('comprobante', ''))
-                                        st.session_state[f"ia_prod_{fila['id']}"] = str(d_ia.get('detalle_productos', ''))
-                                        st.session_state[f"ia_obs_{fila['id']}"] = str(d_ia.get('observaciones_ia', ''))
-                                    else:
-                                        st.warning(f"La IA no devolvió un formato válido para la orden #{fila['id']}")
+                                        start = raw_t.find('{')
+                                        end = raw_t.rfind('}') + 1
                                         
-                                except Exception as e:
-                                    st.error(f"Falla técnica en orden #{fila['id']}: {e}")
-                                    
+                                        if start != -1 and end != 0:
+                                            d_ia = json.loads(raw_t[start:end])
+                                            
+                                            def limpiar_num(v):
+                                                try:
+                                                    txt = str(v).replace('$', '').replace(' ', '').strip()
+                                                    if ',' in txt and '.' in txt: txt = txt.replace('.', '').replace(',', '.')
+                                                    elif ',' in txt: txt = txt.replace(',', '.')
+                                                    return float(txt) if txt else 0.0
+                                                except:
+                                                    return 0.0
+                                            
+                                            st.session_state[f"ia_fec_{fila['id']}"] = str(d_ia.get('fecha', ''))
+                                            st.session_state[f"ia_rs_{fila['id']}"] = str(d_ia.get('razon_social', ''))
+                                            st.session_state[f"ia_lts_{fila['id']}"] = limpiar_num(d_ia.get('litros', 0.0))
+                                            st.session_state[f"ia_imp_{fila['id']}"] = limpiar_num(d_ia.get('importe', 0.0))
+                                            st.session_state[f"ia_fac_{fila['id']}"] = str(d_ia.get('comprobante', ''))
+                                            st.session_state[f"ia_prod_{fila['id']}"] = str(d_ia.get('detalle_productos', ''))
+                                            st.session_state[f"ia_obs_{fila['id']}"] = str(d_ia.get('observaciones_ia', ''))
+                                        else:
+                                            st.warning(f"La IA no devolvió un formato JSON válido para la orden #{fila['id']}")
+                                            
+                                        exito_extraccion = True # Marcamos éxito para salir del while
+                                        
+                                    except Exception as e:
+                                        error_msg = str(e)
+                                        # Detectamos si es un error de congestión de Google
+                                        if "503" in error_msg or "429" in error_msg or "UNAVAILABLE" in error_msg:
+                                            intentos_restantes -= 1
+                                            if intentos_restantes > 0:
+                                                st.warning(f"⏳ Servidores de Google saturados. Reintentando orden #{fila['id']} en {tiempo_espera} segundos...")
+                                                time.sleep(tiempo_espera)
+                                                tiempo_espera *= 2  # Aplicamos el Backoff Exponencial
+                                            else:
+                                                st.error(f"❌ Falló la orden #{fila['id']} tras 3 intentos. El servicio de Google está caído. Intentá más tarde.")
+                                        else:
+                                            # Si es un error distinto (ej. base de datos), fallamos de una para no enmascarar bugs
+                                            st.error(f"❌ Falla técnica inesperada en orden #{fila['id']}: {error_msg}")
+                                            break 
+                                
+                                # Actualizamos barra y aplicamos un delay preventivo entre facturas exitosas (Rate Limiting)
                                 barra_p.progress((i + 1) / total)
-                                time.sleep(2)
+                                time.sleep(3)
                                 
                         st.session_state[clave_estado_ia] = True
                         st.success("✅ Extracción completa.")
