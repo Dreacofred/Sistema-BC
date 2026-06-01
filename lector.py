@@ -234,7 +234,11 @@ if opcion == "Facturas de Proveedores":
                     while intentos > 0 and not exito:
                         try:
                             prompt_prov = """Eres auditor contable. Objetivo: leer FACTURA DE COMPRA. BC COMBUSTIBLES es RECEPTOR. Buscá CUIT, Fecha, Nº de Factura y Totales. Extraé JSON puro."""
-                            res = cliente_ia.models.generate_content(model='gemini-2.5-pro', contents=[prompt_prov, Image.open(io.BytesIO(doc['data']))])
+                            
+                            # Fallback para Proveedores también
+                            modelo_actual = 'gemini-2.5-pro' if intentos > 1 else 'gemini-2.5-flash'
+                            
+                            res = cliente_ia.models.generate_content(model=modelo_actual, contents=[prompt_prov, Image.open(io.BytesIO(doc['data']))])
                             raw_text = res.text.strip().replace('```json', '').replace('```', '')
                             start, end = raw_text.find('{'), raw_text.rfind('}') + 1
                             datos_extraidos = json.loads(raw_text[start:end])
@@ -282,7 +286,6 @@ elif opcion == "Generador de Resumen":
     else:
         st.markdown(f'<div class="tarjeta-pro" style="border-left: 5px solid {COLOR_ROJO}; padding:15px;">📍 <strong>Acceso Zonal:</strong> Visualizando solo órdenes de la sucursal <strong>{NOMBRES_SUCURSALES.get(user['sucursal_id'])}</strong>.</div>', unsafe_allow_html=True)
 
-    # Definimos el Prompt Inteligente acá arriba para usarlo tanto en el botón masivo como en el de subir foto manual
     PROMPT_AUDITORIA = textwrap.dedent("""
     Sos un auditor experto. El Emisor es 'BC COMBUSTIBLES'. Buscá al CLIENTE Receptor y los datos de la carga. 
     Devolvé ÚNICAMENTE un JSON puro, sin texto adicional ni formato markdown (sin ```json), con estas claves exactas:
@@ -317,7 +320,6 @@ elif opcion == "Generador de Resumen":
         df_audit = pd.DataFrame(ordenes)
         df_audit['Cliente'] = df_audit['clientes'].apply(lambda x: x['nombre'] if x else "DESCONOCIDO")
         df_audit['formato_especial'] = df_audit['clientes'].apply(lambda x: x.get('formato_especial', False) if x else False)
-        # Mostramos todas las despachadas (tengan o no tengan foto, porque ahora Nancy puede subirla)
         df_audit = df_audit[(df_audit['url_foto'].notnull()) | (df_audit['motivo_sin_foto'].notnull())]
 
         col_k1, col_k2, col_k3 = st.columns(3)
@@ -351,15 +353,19 @@ elif opcion == "Generador de Resumen":
                             for i, (_, fila) in enumerate(ordenes_con_foto.iterrows()):
                                 exito_extraccion = False
                                 intentos_restantes = 3
-                                tiempo_espera = 4  # Segundos base para el primer reintento
+                                tiempo_espera = 4  
                                 
                                 while intentos_restantes > 0 and not exito_extraccion:
                                     try:
                                         res_img = requests.get(fila['url_foto'])
                                         img_rem = Image.open(io.BytesIO(res_img.content))
                                         
-                                        # Llamada a la IA
-                                        res_ia = cliente_ia.models.generate_content(model='gemini-2.5-pro', contents=[PROMPT_AUDITORIA, img_rem])
+                                        # ==========================================
+                                        # ENRUTAMIENTO INTELIGENTE (FALLBACK PLAN B)
+                                        # ==========================================
+                                        modelo_actual = 'gemini-2.5-pro' if intentos_restantes > 1 else 'gemini-2.5-flash'
+                                        
+                                        res_ia = cliente_ia.models.generate_content(model=modelo_actual, contents=[PROMPT_AUDITORIA, img_rem])
                                         raw_t = res_ia.text.strip().replace('```json', '').replace('```', '')
                                         
                                         start = raw_t.find('{')
@@ -387,25 +393,26 @@ elif opcion == "Generador de Resumen":
                                         else:
                                             st.warning(f"La IA no devolvió un formato JSON válido para la orden #{fila['id']}")
                                             
-                                        exito_extraccion = True # Marcamos éxito para salir del while
+                                        exito_extraccion = True 
                                         
                                     except Exception as e:
                                         error_msg = str(e)
-                                        # Detectamos si es un error de congestión de Google
                                         if "503" in error_msg or "429" in error_msg or "UNAVAILABLE" in error_msg:
                                             intentos_restantes -= 1
-                                            if intentos_restantes > 0:
-                                                st.warning(f"⏳ Servidores de Google saturados. Reintentando orden #{fila['id']} en {tiempo_espera} segundos...")
+                                            
+                                            if intentos_restantes > 1:
+                                                st.warning(f"⏳ Google (Pro) saturado. Reintentando orden #{fila['id']} en {tiempo_espera} seg...")
                                                 time.sleep(tiempo_espera)
-                                                tiempo_espera *= 2  # Aplicamos el Backoff Exponencial
+                                                tiempo_espera *= 2 
+                                            elif intentos_restantes == 1:
+                                                st.warning(f"⚠️ Google (Pro) sigue caído. Cambiando a modelo Flash (Respaldo) para la orden #{fila['id']}...")
+                                                time.sleep(2) 
                                             else:
-                                                st.error(f"❌ Falló la orden #{fila['id']} tras 3 intentos. El servicio de Google está caído. Intentá más tarde.")
+                                                st.error(f"❌ Falló la orden #{fila['id']} incluso con el modelo de respaldo. Intentá más tarde.")
                                         else:
-                                            # Si es un error distinto (ej. base de datos), fallamos de una para no enmascarar bugs
                                             st.error(f"❌ Falla técnica inesperada en orden #{fila['id']}: {error_msg}")
                                             break 
                                 
-                                # Actualizamos barra y aplicamos un delay preventivo entre facturas exitosas (Rate Limiting)
                                 barra_p.progress((i + 1) / total)
                                 time.sleep(3)
                                 
@@ -425,16 +432,12 @@ elif opcion == "Generador de Resumen":
                 with st.expander(f"{estado_icono} | Camión: {patente_txt} | Chofer: {chofer_txt}"):
                     c1, c2 = st.columns([1.5, 1]) 
                     with c1:
-                        # 1. MOSTRAR FOTO O AVISO
                         if pd.notna(fila['url_foto']) and str(fila['url_foto']).strip() != "":
                             st.image(fila['url_foto'], use_container_width=True)
                             st.markdown(f"*[Ver foto en tamaño completo]({fila['url_foto']})*")
                         else:
                             st.warning(f"⚠️ SIN FOTO: {fila.get('motivo_sin_foto', 'No se indicó motivo')}")
                         
-                        # ==========================================
-                        # NUEVO: REEMPLAZAR FOTO + LECTURA IA INDIVIDUAL
-                        # ==========================================
                         st.markdown("<hr style='margin: 10px 0; border-top: 1px dashed #ccc;'>", unsafe_allow_html=True)
                         st.markdown("**🔄 Reemplazar o Subir remito correcto:**")
                         foto_nueva = st.file_uploader("", type=["jpg", "png", "jpeg"], key=f"up_{fila['id']}", label_visibility="collapsed")
@@ -442,58 +445,82 @@ elif opcion == "Generador de Resumen":
                         if foto_nueva:
                             if st.button("💾 Guardar y Analizar Nueva Foto", key=f"btn_up_{fila['id']}", type="primary"):
                                 with st.spinner("Subiendo imagen y analizando con IA..."):
-                                    try:
-                                        # 1. Subimos a Supabase
-                                        timestamp = int(time.time())
-                                        nombre_archivo = f"ADMIN_Orden{fila['id']}_{timestamp}_remito.jpg"
-                                        file_bytes = foto_nueva.getvalue()
-                                        
-                                        supabase.storage.from_("remitos").upload(
-                                            path=nombre_archivo,
-                                            file=file_bytes,
-                                            file_options={"content-type": foto_nueva.type}
-                                        )
-                                        
-                                        # Obtenemos URL y actualizamos base de datos
-                                        url_publica = supabase.storage.from_("remitos").get_public_url(nombre_archivo)
-                                        supabase.table("ordenes_carga").update({
-                                            "url_foto": url_publica,
-                                            "motivo_sin_foto": "Corregido por Auditoría"
-                                        }).eq("id", fila['id']).execute()
-                                        
-                                        # 2. Análisis con IA INMEDIATO para esta sola foto
-                                        img_rem = Image.open(io.BytesIO(file_bytes))
-                                        res_ia = cliente_ia.models.generate_content(model='gemini-2.5-pro', contents=[PROMPT_AUDITORIA, img_rem])
-                                        
-                                        raw_t = res_ia.text.strip().replace('```json', '').replace('```', '')
-                                        start = raw_t.find('{')
-                                        end = raw_t.rfind('}') + 1
-                                        if start != -1 and end != 0:
-                                            d_ia = json.loads(raw_t[start:end])
+                                    
+                                    exito_extraccion_manual = False
+                                    intentos_restantes_manual = 3
+                                    tiempo_espera_manual = 4
+                                    
+                                    while intentos_restantes_manual > 0 and not exito_extraccion_manual:
+                                        try:
+                                            # Subida a BD
+                                            timestamp = int(time.time())
+                                            nombre_archivo = f"ADMIN_Orden{fila['id']}_{timestamp}_remito.jpg"
+                                            file_bytes = foto_nueva.getvalue()
                                             
-                                            def limpiar_num(v):
-                                                try:
-                                                    txt = str(v).replace('$', '').replace(' ', '').strip()
-                                                    if ',' in txt and '.' in txt: txt = txt.replace('.', '').replace(',', '.')
-                                                    elif ',' in txt: txt = txt.replace(',', '.')
-                                                    return float(txt) if txt else 0.0
-                                                except: return 0.0
+                                            supabase.storage.from_("remitos").upload(
+                                                path=nombre_archivo,
+                                                file=file_bytes,
+                                                file_options={"content-type": foto_nueva.type}
+                                            )
                                             
-                                            st.session_state[f"ia_fec_{fila['id']}"] = str(d_ia.get('fecha', ''))
-                                            st.session_state[f"ia_rs_{fila['id']}"] = str(d_ia.get('razon_social', ''))
-                                            st.session_state[f"ia_lts_{fila['id']}"] = limpiar_num(d_ia.get('litros', 0.0))
-                                            st.session_state[f"ia_imp_{fila['id']}"] = limpiar_num(d_ia.get('importe', 0.0))
-                                            st.session_state[f"ia_fac_{fila['id']}"] = str(d_ia.get('comprobante', ''))
-                                            st.session_state[f"ia_prod_{fila['id']}"] = str(d_ia.get('detalle_productos', ''))
-                                            st.session_state[f"ia_obs_{fila['id']}"] = str(d_ia.get('observaciones_ia', ''))
-                                        
-                                        # NO borramos la sesión general, para no reiniciar el lote de las otras 14 facturas
-                                        st.success("✅ ¡Foto actualizada y leída por IA! Recargando...")
-                                        time.sleep(1.5)
-                                        st.rerun()
-                                    except Exception as e:
-                                        st.error(f"Error al procesar: {e}")
-                        # ==========================================
+                                            url_publica = supabase.storage.from_("remitos").get_public_url(nombre_archivo)
+                                            supabase.table("ordenes_carga").update({
+                                                "url_foto": url_publica,
+                                                "motivo_sin_foto": "Corregido por Auditoría"
+                                            }).eq("id", fila['id']).execute()
+                                            
+                                            # ==========================================
+                                            # ENRUTAMIENTO INTELIGENTE (BOTÓN MANUAL)
+                                            # ==========================================
+                                            modelo_actual_manual = 'gemini-2.5-pro' if intentos_restantes_manual > 1 else 'gemini-2.5-flash'
+                                            
+                                            img_rem = Image.open(io.BytesIO(file_bytes))
+                                            res_ia = cliente_ia.models.generate_content(model=modelo_actual_manual, contents=[PROMPT_AUDITORIA, img_rem])
+                                            
+                                            raw_t = res_ia.text.strip().replace('```json', '').replace('```', '')
+                                            start = raw_t.find('{')
+                                            end = raw_t.rfind('}') + 1
+                                            if start != -1 and end != 0:
+                                                d_ia = json.loads(raw_t[start:end])
+                                                
+                                                def limpiar_num(v):
+                                                    try:
+                                                        txt = str(v).replace('$', '').replace(' ', '').strip()
+                                                        if ',' in txt and '.' in txt: txt = txt.replace('.', '').replace(',', '.')
+                                                        elif ',' in txt: txt = txt.replace(',', '.')
+                                                        return float(txt) if txt else 0.0
+                                                    except: return 0.0
+                                                
+                                                st.session_state[f"ia_fec_{fila['id']}"] = str(d_ia.get('fecha', ''))
+                                                st.session_state[f"ia_rs_{fila['id']}"] = str(d_ia.get('razon_social', ''))
+                                                st.session_state[f"ia_lts_{fila['id']}"] = limpiar_num(d_ia.get('litros', 0.0))
+                                                st.session_state[f"ia_imp_{fila['id']}"] = limpiar_num(d_ia.get('importe', 0.0))
+                                                st.session_state[f"ia_fac_{fila['id']}"] = str(d_ia.get('comprobante', ''))
+                                                st.session_state[f"ia_prod_{fila['id']}"] = str(d_ia.get('detalle_productos', ''))
+                                                st.session_state[f"ia_obs_{fila['id']}"] = str(d_ia.get('observaciones_ia', ''))
+                                            
+                                            exito_extraccion_manual = True
+                                            st.success("✅ ¡Foto actualizada y leída por IA! Recargando...")
+                                            time.sleep(1.5)
+                                            st.rerun()
+                                            
+                                        except Exception as e:
+                                            error_msg_manual = str(e)
+                                            if "503" in error_msg_manual or "429" in error_msg_manual or "UNAVAILABLE" in error_msg_manual:
+                                                intentos_restantes_manual -= 1
+                                                
+                                                if intentos_restantes_manual > 1:
+                                                    st.warning(f"⏳ Google (Pro) saturado. Reintentando en {tiempo_espera_manual} seg...")
+                                                    time.sleep(tiempo_espera_manual)
+                                                    tiempo_espera_manual *= 2 
+                                                elif intentos_restantes_manual == 1:
+                                                    st.warning(f"⚠️ Google (Pro) sigue caído. Cambiando a modelo Flash (Respaldo)...")
+                                                    time.sleep(2) 
+                                                else:
+                                                    st.error(f"❌ Falló incluso con el modelo de respaldo. Intentá más tarde.")
+                                            else:
+                                                st.error(f"❌ Falla técnica inesperada: {error_msg_manual}")
+                                                break
                             
                     with c2:
                         if fila['id'] in st.session_state.agregados_excel:
