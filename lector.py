@@ -324,7 +324,7 @@ elif opcion == "Generador de Resumen":
             
         res_auditoria = query.eq("estado", "DESPACHADO").order("fecha_despacho", desc=True).execute()
         ordenes = res_auditoria.data
-    except Exception as e:
+        except Exception as e:
         st.error(f"Error de base de datos: {e}")
         ordenes = []
 
