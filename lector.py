@@ -314,19 +314,19 @@ elif opcion == "Generador de Resumen":
    # ==========================================
     # MODIFICACIÓN: FILTRO POR SUCURSAL MADRE DEL CLIENTE
     # ==========================================
-   try:
-        # La magia está en agregar !inner pegado a la palabra clientes
-        query = supabase.table("ordenes_carga").select("*, clientes!inner(nombre, formato_especial, sucursal_madre_id)")
-        
-        # Si no es Super Admin, filtramos por la sucursal madre del CLIENTE
-        if user['puesto'] != 'SUPER_ADMIN':
-            query = query.eq("clientes.sucursal_madre_id", user['sucursal_id'])
+       try:
+            # La magia está en agregar !inner pegado a la palabra clientes
+            query = supabase.table("ordenes_carga").select("*, clientes!inner(nombre, formato_especial, sucursal_madre_id)")
             
-        res_auditoria = query.eq("estado", "DESPACHADO").order("fecha_despacho", desc=True).execute()
-        ordenes = res_auditoria.data
-        except Exception as e:
-        st.error(f"Error de base de datos: {e}")
-        ordenes = []
+            # Si no es Super Admin, filtramos por la sucursal madre del CLIENTE
+            if user['puesto'] != 'SUPER_ADMIN':
+                query = query.eq("clientes.sucursal_madre_id", user['sucursal_id'])
+                
+            res_auditoria = query.eq("estado", "DESPACHADO").order("fecha_despacho", desc=True).execute()
+            ordenes = res_auditoria.data
+            except Exception as e:
+            st.error(f"Error de base de datos: {e}")
+            ordenes = []
 
     if not ordenes:
         st.info("👍 Todo al día. No hay remitos pendientes para tu sucursal.")
