@@ -314,13 +314,12 @@ elif opcion == "Generador de Resumen":
    # ==========================================
     # MODIFICACIÓN: FILTRO POR SUCURSAL MADRE DEL CLIENTE
     # ==========================================
-    try:
-        # Seleccionamos las órdenes y hacemos "join" con clientes para acceder a su sucursal_madre_id
-        query = supabase.table("ordenes_carga").select("*, clientes(nombre, formato_especial, sucursal_madre_id)")
+   try:
+        # La magia está en agregar !inner pegado a la palabra clientes
+        query = supabase.table("ordenes_carga").select("*, clientes!inner(nombre, formato_especial, sucursal_madre_id)")
         
         # Si no es Super Admin, filtramos por la sucursal madre del CLIENTE
         if user['puesto'] != 'SUPER_ADMIN':
-            # Filtramos en la tabla unida (clientes) por la sucursal madre
             query = query.eq("clientes.sucursal_madre_id", user['sucursal_id'])
             
         res_auditoria = query.eq("estado", "DESPACHADO").order("fecha_despacho", desc=True).execute()
