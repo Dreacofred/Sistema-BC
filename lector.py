@@ -9,7 +9,7 @@ import io
 import difflib
 import time
 import textwrap 
-import re # IMPORTANTE: Agregado para el desglosador de excel
+import re 
 from datetime import datetime
 from supabase import create_client, Client
 import requests 
@@ -30,7 +30,7 @@ from openpyxl.utils import get_column_letter
 # ==========================================
 COLOR_ROJO = "#C8102E"
 COLOR_AMARILLO_ALERTA = "#FFE082" 
-COLOR_GRIS_BC = "#3A3A3A" # El gris oscuro de la web oficial
+COLOR_GRIS_BC = "#3A3A3A" 
 
 URL_SB = "https://bjhykcdhafoqpfkpngvw.supabase.co"
 KEY_SB = "sb_publishable_OvXN3LjawazkF5GNpsslUQ_SQOhTakr"
@@ -38,33 +38,27 @@ supabase: Client = create_client(URL_SB, KEY_SB)
 
 NOMBRES_SUCURSALES = {1: "RECONQUISTA", 2: "AVELLANEDA", 3: "FLORENCIA", 4: "RECREO"}
 
-# Configuramos la página primero
 st.set_page_config(page_title="BC Combustibles - Gestión Pro", page_icon="⛽", layout="wide")
 
-# CSS MEJORADO PARA LOOK PROFESIONAL (AHORA CON GRIS BC)
 st.markdown(f"""
     <style>
         [data-testid="stSidebarNav"] {{display: none !important;}}
         .stApp {{ background-color: #f4f6f9 !important; }}
         h1, h2, h3 {{ color: {COLOR_ROJO} !important; font-family: 'Montserrat', sans-serif; font-weight: 700; }}
         
-        /* Estilo de botones principales */
         .stButton>button {{ 
             background-color: {COLOR_ROJO}; color: white; border-radius: 8px; 
             font-weight: 600; height: 2.8em; border: none; width: 100%; transition: all 0.3s;
         }}
         .stButton>button:hover {{ background-color: #900b20; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }}
         
-        /* HEADER Y SIDEBAR GRIS OSCURO */
         [data-testid="stHeader"] {{ background-color: {COLOR_GRIS_BC} !important; }}
         [data-testid="stSidebar"] {{ background-color: {COLOR_GRIS_BC} !important; border-right: none; }}
         
-        /* Forzar texto blanco en la barra lateral */
         [data-testid="stSidebar"] p, [data-testid="stSidebar"] span, [data-testid="stSidebar"] div {{ color: #ffffff !important; }}
         
         div[data-testid="stMetricValue"] {{ color: {COLOR_ROJO} !important; }}
         
-        /* Contenedores tipo tarjeta */
         .tarjeta-pro {{
             background: white; padding: 20px; border-radius: 12px;
             box-shadow: 0 4px 6px rgba(0,0,0,0.05); border: 1px solid #e2e8f0; margin-bottom: 20px;
@@ -74,7 +68,6 @@ st.markdown(f"""
 
 cliente_ia = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
 
-# Link al logo oficial
 URL_LOGO_OFICIAL = "https://bjhykcdhafoqpfkpngvw.supabase.co/storage/v1/object/public/remitos/Logo%20nuevo.png"
 
 # ==========================================
@@ -118,12 +111,10 @@ if st.session_state.usuario_autenticado is None:
 user = st.session_state.usuario_autenticado
 usuario_app = user['nombre']
 
-# DISEÑO DEL MENÚ LATERAL (SIDEBAR) CON FONDO OSCURO
 with st.sidebar:
     st.markdown("<br>", unsafe_allow_html=True)
     st.image(URL_LOGO_OFICIAL, use_container_width=True)
     
-    # Tarjeta de operador en tonos oscuros
     st.markdown(f"""
         <div style="background:#2C2C2C; padding:15px; border-radius:10px; border-left:4px solid {COLOR_ROJO}; margin-bottom:20px;">
             <p style="margin:0; font-size:13px; color:#B0B0B0 !important;">Operador activo:</p>
@@ -132,7 +123,6 @@ with st.sidebar:
         </div>
     """, unsafe_allow_html=True)
 
-    # MENÚ MODERNO ADAPTADO PARA FONDO GRIS
     opcion = option_menu(
         menu_title=None, 
         options=["Generador de Resumen", "Facturas de Proveedores", "Verificación BCRA"],
@@ -152,7 +142,6 @@ with st.sidebar:
         st.session_state.usuario_autenticado = None
         st.rerun()
 
-# Inicializar estados
 if 'lote_pendientes_prov' not in st.session_state: st.session_state.lote_pendientes_prov = []
 if 'cola_extracciones_prov' not in st.session_state: st.session_state.cola_extracciones_prov = []
 if 'resumen_prov' not in st.session_state: st.session_state.resumen_prov = []
@@ -293,6 +282,24 @@ elif opcion == "Generador de Resumen":
     else:
         st.markdown(f'<div class="tarjeta-pro" style="border-left: 5px solid {COLOR_ROJO}; padding:15px;">📍 <strong>Acceso Zonal:</strong> Visualizando solo órdenes de la sucursal <strong>{NOMBRES_SUCURSALES.get(user['sucursal_id'])}</strong>.</div>', unsafe_allow_html=True)
 
+    # Definimos el Prompt Inteligente acá arriba para usarlo tanto en el botón masivo como en el de subir foto manual
+    PROMPT_AUDITORIA = textwrap.dedent("""
+    Sos un auditor experto. El Emisor es 'BC COMBUSTIBLES'. Buscá al CLIENTE Receptor y los datos de la carga. 
+    Devolvé ÚNICAMENTE un JSON puro, sin texto adicional ni formato markdown (sin ```json), con estas claves exactas:
+    - "fecha": Fecha del comprobante.
+    - "razon_social": Cliente receptor.
+    - "importe": Monto total en números.
+    - "comprobante": Número de comprobante.
+    - "litros": Sumá la cantidad TOTAL de litros de combustible. NO sumes aceites o aditivos, solo combustibles.
+    - "detalle_productos": Hacé un resumen de los combustibles y sus litros exactos. Ejemplo: 'Euro Diesel G3: 201 L | Gas Oil 500 G2: 81.5 L'. Si es un solo producto, poné solo ese.
+    - "observaciones_ia": Evaluá TODOS los ítems facturados y aplicá ESTA REGLA ESTRICTA:
+      1. Si SOLO cargó 'Gas Oil 500 G2' (Gasoil normal), devolvé "". (Vacío).
+      2. Si detectás 2 o más combustibles diferentes, devolvé "Atención. La factura tiene varios productos."
+      3. Si cargó SOLO Euro, devolvé "Atención. El producto cargado es Euro, verifique."
+      4. Si SOLO cargó Nafta, devolvé "Atención. La factura contiene Nafta."
+      5. Si encontrás artículos extra (aceites, filtros, etc.), devolvé "Atención. La factura contiene artículos extra: [detallar los extra]."
+    """).strip()
+
     try:
         query = supabase.table("ordenes_carga").select("*, clientes(nombre, formato_especial)")
         if user['puesto'] != 'SUPER_ADMIN':
@@ -310,9 +317,9 @@ elif opcion == "Generador de Resumen":
         df_audit = pd.DataFrame(ordenes)
         df_audit['Cliente'] = df_audit['clientes'].apply(lambda x: x['nombre'] if x else "DESCONOCIDO")
         df_audit['formato_especial'] = df_audit['clientes'].apply(lambda x: x.get('formato_especial', False) if x else False)
+        # Mostramos todas las despachadas (tengan o no tengan foto, porque ahora Nancy puede subirla)
         df_audit = df_audit[(df_audit['url_foto'].notnull()) | (df_audit['motivo_sin_foto'].notnull())]
 
-        # KPIs Rápidos
         col_k1, col_k2, col_k3 = st.columns(3)
         col_k1.metric("Clientes con pendientes", len(df_audit['Cliente'].unique()))
         col_k2.metric("Remitos a procesar", len(df_audit))
@@ -345,28 +352,7 @@ elif opcion == "Generador de Resumen":
                                     res_img = requests.get(fila['url_foto'])
                                     img_rem = Image.open(io.BytesIO(res_img.content))
                                     
-                                    # ==========================================
-                                    # NUEVO PROMPT INTELIGENTE (DETALLE EXACTO)
-                                    # ==========================================
-                                    prompt_auditoria = textwrap.dedent("""
-                                    Sos un auditor experto. El Emisor es 'BC COMBUSTIBLES'. Buscá al CLIENTE Receptor y los datos de la carga. 
-                                    Devolvé ÚNICAMENTE un JSON puro, sin texto adicional ni formato markdown (sin ```json), con estas claves exactas:
-                                    - "fecha": Fecha del comprobante.
-                                    - "razon_social": Cliente receptor.
-                                    - "importe": Monto total en números.
-                                    - "comprobante": Número de comprobante.
-                                    - "litros": Sumá la cantidad TOTAL de litros de combustible. NO sumes aceites o aditivos, solo combustibles.
-                                    - "detalle_productos": Hacé un resumen de los combustibles y sus litros exactos. Ejemplo: 'Euro Diesel G3: 201 L | Gas Oil 500 G2: 81.5 L'. Si es un solo producto, poné solo ese.
-                                    - "observaciones_ia": Evaluá TODOS los ítems facturados y aplicá ESTA REGLA ESTRICTA:
-                                      1. Si SOLO cargó 'Gas Oil 500 G2' (Gasoil normal), devolvé "". (Vacío).
-                                      2. Si detectás 2 o más combustibles diferentes, devolvé "Atención. La factura tiene varios productos."
-                                      3. Si cargó SOLO Euro, devolvé "Atención. El producto cargado es Euro, verifique."
-                                      4. Si SOLO cargó Nafta, devolvé "Atención. La factura contiene Nafta."
-                                      5. Si encontrás artículos extra (aceites, filtros, etc.), devolvé "Atención. La factura contiene artículos extra: [detallar los extra]."
-                                    """).strip()
-                                    
-                                    res_ia = cliente_ia.models.generate_content(model='gemini-2.5-pro', contents=[prompt_auditoria, img_rem])
-                                    
+                                    res_ia = cliente_ia.models.generate_content(model='gemini-2.5-pro', contents=[PROMPT_AUDITORIA, img_rem])
                                     raw_t = res_ia.text.strip().replace('```json', '').replace('```', '')
                                     
                                     start = raw_t.find('{')
@@ -390,7 +376,6 @@ elif opcion == "Generador de Resumen":
                                         st.session_state[f"ia_lts_{fila['id']}"] = limpiar_num(d_ia.get('litros', 0.0))
                                         st.session_state[f"ia_imp_{fila['id']}"] = limpiar_num(d_ia.get('importe', 0.0))
                                         st.session_state[f"ia_fac_{fila['id']}"] = str(d_ia.get('comprobante', ''))
-                                        # Recibimos el detalle exacto de la IA
                                         st.session_state[f"ia_prod_{fila['id']}"] = str(d_ia.get('detalle_productos', ''))
                                         st.session_state[f"ia_obs_{fila['id']}"] = str(d_ia.get('observaciones_ia', ''))
                                     else:
@@ -417,11 +402,75 @@ elif opcion == "Generador de Resumen":
                 with st.expander(f"{estado_icono} | Camión: {patente_txt} | Chofer: {chofer_txt}"):
                     c1, c2 = st.columns([1.5, 1]) 
                     with c1:
+                        # 1. MOSTRAR FOTO O AVISO
                         if pd.notna(fila['url_foto']) and str(fila['url_foto']).strip() != "":
                             st.image(fila['url_foto'], use_container_width=True)
                             st.markdown(f"*[Ver foto en tamaño completo]({fila['url_foto']})*")
                         else:
-                            st.warning(f"⚠️ SIN FOTO: {fila['motivo_sin_foto']}")
+                            st.warning(f"⚠️ SIN FOTO: {fila.get('motivo_sin_foto', 'No se indicó motivo')}")
+                        
+                        # ==========================================
+                        # NUEVO: REEMPLAZAR FOTO + LECTURA IA INDIVIDUAL
+                        # ==========================================
+                        st.markdown("<hr style='margin: 10px 0; border-top: 1px dashed #ccc;'>", unsafe_allow_html=True)
+                        st.markdown("**🔄 Reemplazar o Subir remito correcto:**")
+                        foto_nueva = st.file_uploader("", type=["jpg", "png", "jpeg"], key=f"up_{fila['id']}", label_visibility="collapsed")
+                        
+                        if foto_nueva:
+                            if st.button("💾 Guardar y Analizar Nueva Foto", key=f"btn_up_{fila['id']}", type="primary"):
+                                with st.spinner("Subiendo imagen y analizando con IA..."):
+                                    try:
+                                        # 1. Subimos a Supabase
+                                        timestamp = int(time.time())
+                                        nombre_archivo = f"ADMIN_Orden{fila['id']}_{timestamp}_remito.jpg"
+                                        file_bytes = foto_nueva.getvalue()
+                                        
+                                        supabase.storage.from_("remitos").upload(
+                                            path=nombre_archivo,
+                                            file=file_bytes,
+                                            file_options={"content-type": foto_nueva.type}
+                                        )
+                                        
+                                        # Obtenemos URL y actualizamos base de datos
+                                        url_publica = supabase.storage.from_("remitos").get_public_url(nombre_archivo)
+                                        supabase.table("ordenes_carga").update({
+                                            "url_foto": url_publica,
+                                            "motivo_sin_foto": "Corregido por Auditoría"
+                                        }).eq("id", fila['id']).execute()
+                                        
+                                        # 2. Análisis con IA INMEDIATO para esta sola foto
+                                        img_rem = Image.open(io.BytesIO(file_bytes))
+                                        res_ia = cliente_ia.models.generate_content(model='gemini-2.5-pro', contents=[PROMPT_AUDITORIA, img_rem])
+                                        
+                                        raw_t = res_ia.text.strip().replace('```json', '').replace('```', '')
+                                        start = raw_t.find('{')
+                                        end = raw_t.rfind('}') + 1
+                                        if start != -1 and end != 0:
+                                            d_ia = json.loads(raw_t[start:end])
+                                            
+                                            def limpiar_num(v):
+                                                try:
+                                                    txt = str(v).replace('$', '').replace(' ', '').strip()
+                                                    if ',' in txt and '.' in txt: txt = txt.replace('.', '').replace(',', '.')
+                                                    elif ',' in txt: txt = txt.replace(',', '.')
+                                                    return float(txt) if txt else 0.0
+                                                except: return 0.0
+                                            
+                                            st.session_state[f"ia_fec_{fila['id']}"] = str(d_ia.get('fecha', ''))
+                                            st.session_state[f"ia_rs_{fila['id']}"] = str(d_ia.get('razon_social', ''))
+                                            st.session_state[f"ia_lts_{fila['id']}"] = limpiar_num(d_ia.get('litros', 0.0))
+                                            st.session_state[f"ia_imp_{fila['id']}"] = limpiar_num(d_ia.get('importe', 0.0))
+                                            st.session_state[f"ia_fac_{fila['id']}"] = str(d_ia.get('comprobante', ''))
+                                            st.session_state[f"ia_prod_{fila['id']}"] = str(d_ia.get('detalle_productos', ''))
+                                            st.session_state[f"ia_obs_{fila['id']}"] = str(d_ia.get('observaciones_ia', ''))
+                                        
+                                        # NO borramos la sesión general, para no reiniciar el lote de las otras 14 facturas
+                                        st.success("✅ ¡Foto actualizada y leída por IA! Recargando...")
+                                        time.sleep(1.5)
+                                        st.rerun()
+                                    except Exception as e:
+                                        st.error(f"Error al procesar: {e}")
+                        # ==========================================
                             
                     with c2:
                         if fila['id'] in st.session_state.agregados_excel:
@@ -429,9 +478,6 @@ elif opcion == "Generador de Resumen":
                         else:
                             with st.form(key=f"form_aud_{fila['id']}"):
                                 
-                                # ==========================================
-                                # AVISO: LO QUE PIDIÓ EL CLIENTE ORIGINALMENTE
-                                # ==========================================
                                 detalles_bd = fila.get('detalle_combustibles')
                                 if isinstance(detalles_bd, str):
                                     try: detalles_bd = json.loads(detalles_bd)
@@ -451,7 +497,6 @@ elif opcion == "Generador de Resumen":
                                     
                                 st.info(f"🛒 **Pedido original del cliente:**\n{texto_pedido_cliente}")
                                 st.markdown("---")
-                                # ==========================================
 
                                 col_f1, col_f2 = st.columns(2)
                                 fac_fecha = col_f1.text_input("Fecha", value=st.session_state.get(f"ia_fec_{fila['id']}", ""))
@@ -469,7 +514,6 @@ elif opcion == "Generador de Resumen":
                                 if obs_ia_val:
                                     st.warning(f"⚠️ **{obs_ia_val}**")
 
-                                # Cajas de texto a lo ancho reemplazando el selectbox
                                 fac_prod = st.text_input("Detalle de Combustibles (Leído por IA)", value=prod_ia_val)
                                 fac_obs = st.text_input("Observaciones Adicionales (Leído por IA)", value=obs_ia_val)
                                 
@@ -496,9 +540,6 @@ elif opcion == "Generador de Resumen":
                                 if st.form_submit_button("✅ Guardar Fila"):
                                     st.session_state.agregados_excel.append(fila['id'])
                                     
-                                    # ==========================================
-                                    # MAGIA DE SEPARACIÓN PARA EXCEL
-                                    # ==========================================
                                     productos_a_guardar = []
                                     
                                     if "|" in fac_prod or ":" in fac_prod:
@@ -602,10 +643,6 @@ elif opcion == "Generador de Resumen":
         confirmar_cierre = st.checkbox("Confirmo que ya descargué el Excel y deseo cerrar estas órdenes.")
         if st.button("✅ MARCAR COMO AUDITADAS", disabled=not confirmar_cierre, use_container_width=True):
             if st.session_state.agregados_excel:
-                
-                # ==========================================
-                # GUARDADO AGRUPADO EN SUPABASE
-                # ==========================================
                 ordenes_procesadas_db = []
                 for item in st.session_state.resumen_para_cliente:
                     id_actual = item.get("id_orden")
