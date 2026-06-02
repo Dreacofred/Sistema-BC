@@ -750,7 +750,7 @@ elif opcion == "Generador de Resumen":
         st.markdown("</div>", unsafe_allow_html=True)
 
 # ==========================================
-# 5. MÓDULO: VERIFICACIÓN BCRA (ESTABLE Y DEFINITIVO)
+# 5. MÓDULO: VERIFICACIÓN BCRA (100% CLOUD VÍA SCRAPERAPI)
 # ==========================================
 elif opcion == "Verificación BCRA":
     st.title("🛡️ Verificación Blindada de CUIT")
@@ -759,8 +759,12 @@ elif opcion == "Verificación BCRA":
     def consultar_bcra_completo(cuit):
         cuit = str(cuit).strip()
         
-        # 1. PUENTE PRIVADO DE GOOGLE APPS SCRIPT (By-pass Cloudflare)
-        url_gas = "https://script.google.com/macros/s/AKfycbzRPEcIcxOqSBDGH8LJyaVpjsMUWum9ifKkki6-MoCfFETT4uO79_h_uhj7V_--Qw0U/exec"
+        # 🔑 TU LLAVE DE ACCESO DE SCRAPERAPI (Reemplazar aquí)
+        API_KEY = "cf3ae8aaf0457292c6e2f8983b207139"
+        
+        # URLs Oficiales del BCRA
+        url_deudas = f"https://api.bcra.gob.ar/centraldedeudores/v1.0/Deudas/{cuit}"
+        url_cheques = f"https://api.bcra.gob.ar/centraldedeudores/v1.0/Deudas/ChequesRechazados/{cuit}"
         
         datos_cliente = {
             "situacion": 1,
@@ -770,17 +774,19 @@ elif opcion == "Verificación BCRA":
         }
         
         try:
-            import urllib3
-            import time
             import requests
+            import time
+            import urllib3
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
             
             # --- 1. SITUACIÓN CREDITICIA ---
-            res_deuda = requests.get(f"{url_gas}?cuit={cuit}&tipo=deudas", verify=False, timeout=30)
+            # Configuramos la petición para que pase por el túnel de ScraperAPI
+            payload_deudas = {'api_key': API_KEY, 'url': url_deudas, 'render': 'false'}
+            res_deuda = requests.get('https://api.scraperapi.com/', params=payload_deudas, timeout=45)
             
             if res_deuda.status_code == 200:
                 try:
-                    data = res_deuda.json() # Recibimos el JSON puro de Google
+                    data = res_deuda.json()
                     if data.get('status') == 200 and 'results' in data:
                         res = data['results']
                         datos_cliente['denominacion'] = res.get('denominacion', 'Cliente')
@@ -793,22 +799,22 @@ elif opcion == "Verificación BCRA":
                 except Exception:
                     pass
             
-            time.sleep(1) # Pausa técnica prudente
+            time.sleep(1) # Pequeño respiro para la API
             
             # --- 2. CHEQUES RECHAZADOS ---
-            res_cheque = requests.get(f"{url_gas}?cuit={cuit}&tipo=cheques", verify=False, timeout=30)
+            payload_cheques = {'api_key': API_KEY, 'url': url_cheques, 'render': 'false'}
+            res_cheque = requests.get('https://api.scraperapi.com/', params=payload_cheques, timeout=45)
             
             if res_cheque.status_code == 200:
                 try:
                     data_ch = res_cheque.json()
                     status_interno = data_ch.get('status')
                     
-                    # 200: El BCRA encontró cheques y los lista
                     if status_interno == 200:
                         results_ch = data_ch.get('results', {})
                         total_cheques = 0
                         
-                        # Parseo profundo dinámico
+                        # Parseo profundo dinámico para contar los cheques reales
                         if isinstance(results_ch, dict):
                             for k, v in results_ch.items():
                                 if isinstance(v, list):
@@ -827,12 +833,9 @@ elif opcion == "Verificación BCRA":
                             
                         datos_cliente['cheques_rechazados'] = total_cheques
                         
-                    # 404: El BCRA confirma oficialmente que NO HAY cheques rechazados (Cliente limpio)
-                    elif status_interno == 404:
+                    elif status_interno == 404: # El BCRA confirma 0 cheques
                         datos_cliente['cheques_rechazados'] = 0
-                        
-                    # 429: Saturación de peticiones al BCRA
-                    elif status_interno == 429:
+                    elif status_interno == 429: # Saturación
                         datos_cliente['cheques_rechazados'] = -429
                     else:
                         datos_cliente['cheques_rechazados'] = -1
@@ -844,7 +847,7 @@ elif opcion == "Verificación BCRA":
             return datos_cliente
             
         except requests.exceptions.Timeout:
-            st.warning("⏱️ Tiempo de espera agotado. El puente tardó demasiado en responder.")
+            st.warning("⏱️ Tiempo de espera agotado. El proxy tardó demasiado en responder.")
             return None
         except Exception as e:
             st.error(f"Error de conexión interna: {str(e)}")
@@ -875,11 +878,11 @@ elif opcion == "Verificación BCRA":
                     st.warning(f"Situación registrada anteriormente: Nivel {registro_interno.data[0]['situacion_bcra']}")
                     st.info("No hace falta consultar al BCRA, ya tenemos antecedentes negativos internos.")
                 else:
-                    with st.spinner('Consultando historial de Deudas y Cheques en el BCRA...'):
+                    with st.spinner('Consultando historial de Deudas y Cheques en el BCRA (Puede demorar unos segundos)...'):
                         datos_bcra = consultar_bcra_completo(cuit_input)
                         
                         if datos_bcra is None:
-                            st.warning("El servicio no pudo alcanzar al BCRA. Intentá nuevamente en unos minutos.")
+                            st.warning("El servicio no pudo alcanzar al BCRA. Intentá nuevamente.")
                         else:
                             situacion = datos_bcra['situacion']
                             entidad = datos_bcra['entidad']
@@ -895,14 +898,14 @@ elif opcion == "Verificación BCRA":
                                 if cheques_rechazados == -429:
                                     st.warning("⚠️ Límite API (429)")
                                 elif cheques_rechazados == -1:
-                                    st.warning("⚠️ Error Lectura")
+                                    st.warning("⚠️ Error Lectura (Bloqueo WAF)")
                                 elif cheques_rechazados > 0:
                                     st.error(f"⚠️ {cheques_rechazados} Cheques Rechazados")
                                 else:
                                     st.success("✅ 0 Cheques Rechazados")
                             
                             if cheques_rechazados in [-429, -1]:
-                                st.warning("⚠️ No se pudo comprobar el historial de cheques por congestión en el BCRA.")
+                                st.warning("⚠️ No se pudo comprobar el historial de cheques. El proxy de rotación falló, reintentá.")
                             elif situacion == 1 and cheques_rechazados == 0:
                                 st.success("✅ Cliente Totalmente Limpio (Situación 1 y sin cheques rebotados). Operación segura.")
                             else:
