@@ -750,29 +750,30 @@ elif opcion == "Generador de Resumen":
         st.markdown("</div>", unsafe_allow_html=True)
 
 # ==========================================
-# 5. MÓDULO: VERIFICACIÓN BCRA (VÍA PUENTE ROBUSTO + CHEQUES TOTALMENTE BLINDADO)
+# 5. MÓDULO: VERIFICACIÓN BCRA (CON TELEMETRÍA)
 # ==========================================
 elif opcion == "Verificación BCRA":
-    st.title("🛡️ Verificación de CUIT")
+    st.title("🛡️ Verificación Blindada de CUIT")
     st.markdown('<p style="color:#666; font-size:16px;">Consultá el estado crediticio y el historial de cheques rechazados en el BCRA.</p>', unsafe_allow_html=True)
+    
     def consultar_bcra_completo(cuit):
         cuit = str(cuit).strip()
         
-        # 1. URLs OFICIALES LIMPIAS (Sin parámetros extra que rompan el WAF del BCRA)
+        # 1. URLs OFICIALES
         url_deudas = f"https://api.bcra.gob.ar/centraldedeudores/v1.0/Deudas/{cuit}"
         url_cheques = f"https://api.bcra.gob.ar/centraldedeudores/v1.0/ChequesRechazados/{cuit}"
         
-        # 2. CACHE BUSTING AL PROXY (cb=...), NO AL BCRA.
-        # Engañamos a AllOrigins para saltar su caché, pero enviamos la URL del BCRA intacta.
-        import time
-        timestamp = int(time.time())
-        url_deudas_encoded = requests.utils.quote(url_deudas)
-        url_cheques_encoded = requests.utils.quote(url_cheques)
+        # 2. CAMBIO DE PROXY (Más evasivo y devuelve JSON directo)
+        puente_deudas = f"https://corsproxy.io/?{url_deudas}"
+        puente_cheques = f"https://corsproxy.io/?{url_cheques}"
         
-        puente_deudas = f"https://api.allorigins.win/get?url={url_deudas_encoded}&cb={timestamp}"
-        puente_cheques = f"https://api.allorigins.win/get?url={url_cheques_encoded}&cb={timestamp}"
-        
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) BC-Combustibles/2.0"}
+        # 3. HEADERS REALISTAS (Para saltar el Cloudflare WAF del BCRA)
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+            "Accept": "application/json, text/plain, */*",
+            "Accept-Language": "es-AR,es;q=0.9,en-US;q=0.8,en;q=0.7",
+            "Referer": "https://www.bcra.gob.ar/"
+        }
         
         datos_cliente = {
             "situacion": 1,
@@ -787,10 +788,15 @@ elif opcion == "Verificación BCRA":
             
             # --- PRIMERA CONSULTA: SITUACIÓN CREDITICIA ---
             res_deuda = requests.get(puente_deudas, headers=headers, verify=False, timeout=30)
+            
+            # 🛠️ PANEL DE TELEMETRÍA (Para el desarrollador)
+            with st.expander("🛠️ DEBUG: Ver respuesta cruda (Deudas)", expanded=False):
+                st.write(f"**Status Code Proxy:** {res_deuda.status_code}")
+                st.code(res_deuda.text[:1000], language="html") # Mostramos los primeros 1000 caracteres
+            
             if res_deuda.status_code == 200:
-                contenido_deuda = res_deuda.json().get('contents')
-                if contenido_deuda:
-                    data = json.loads(contenido_deuda)
+                try:
+                    data = res_deuda.json() # corsproxy devuelve el JSON directo
                     if data.get('status') == 200 and 'results' in data:
                         res = data['results']
                         datos_cliente['denominacion'] = res.get('denominacion', 'Cliente')
@@ -800,66 +806,58 @@ elif opcion == "Verificación BCRA":
                             entity_info = periodos[0]['entidades'][0]
                             datos_cliente['situacion'] = entity_info.get("situacion", 1)
                             datos_cliente['entidad'] = entity_info.get("entidad", "Entidad Financiera")
+                except json.JSONDecodeError:
+                    st.error("⚠️ El BCRA bloqueó la conexión y devolvió HTML. Revisá el panel DEBUG arriba.")
             
-            time.sleep(1) # Pequeña pausa para no saturar al proxy
+            time.sleep(1.5) # Pausa técnica prudente
             
             # --- SEGUNDA CONSULTA: CHEQUES RECHAZADOS ---
             res_cheque = requests.get(puente_cheques, headers=headers, verify=False, timeout=30)
+            
+            # 🛠️ PANEL DE TELEMETRÍA (Para el desarrollador)
+            with st.expander("🛠️ DEBUG: Ver respuesta cruda (Cheques)", expanded=False):
+                st.write(f"**Status Code Proxy:** {res_cheque.status_code}")
+                st.code(res_cheque.text[:1000], language="html")
+
             if res_cheque.status_code == 200:
-                contenido_cheque = res_cheque.json().get('contents', '')
-                if contenido_cheque:
-                    try:
-                        data_ch = json.loads(contenido_cheque)
-                        status_interno = data_ch.get('status')
+                try:
+                    data_ch = res_cheque.json()
+                    status_interno = data_ch.get('status')
+                    
+                    if status_interno == 200:
+                        results_ch = data_ch.get('results', {})
+                        total_cheques_reales = 0
                         
-                        if status_interno == 200:
-                            results_ch = data_ch.get('results', {})
-                            total_cheques_reales = 0
-                            
-                            # 🛡️ PARSEO BLINDADO EXTREMO: Buscamos listas en cualquier nivel
-                            if isinstance(results_ch, dict):
-                                for k, v in results_ch.items():
-                                    if isinstance(v, list):
-                                        for item in v:
-                                            if isinstance(item, dict):
-                                                # Buscamos si hay una sub-lista adentro (ej. "detalles")
-                                                sub_listas = [sub_v for sub_k, sub_v in item.items() if isinstance(sub_v, list)]
-                                                if sub_listas:
-                                                    for sub in sub_listas:
-                                                        total_cheques_reales += len(sub)
-                                                else:
-                                                    # Si es objeto directo, es un cheque suelto
-                                                    total_cheques_reales += 1
+                        if isinstance(results_ch, dict):
+                            for k, v in results_ch.items():
+                                if isinstance(v, list):
+                                    for item in v:
+                                        if isinstance(item, dict):
+                                            sub_listas = [sub_v for sub_k, sub_v in item.items() if isinstance(sub_v, list)]
+                                            if sub_listas:
+                                                for sub in sub_listas:
+                                                    total_cheques_reales += len(sub)
                                             else:
                                                 total_cheques_reales += 1
-                            elif isinstance(results_ch, list):
-                                total_cheques_reales = len(results_ch)
-                                
-                            datos_cliente['cheques_rechazados'] = total_cheques_reales
+                                        else:
+                                            total_cheques_reales += 1
+                        elif isinstance(results_ch, list):
+                            total_cheques_reales = len(results_ch)
                             
-                        elif status_interno == 404:
-                            datos_cliente['cheques_rechazados'] = 0
-                        elif status_interno == 429:
-                            datos_cliente['cheques_rechazados'] = -429
-                        else:
-                            datos_cliente['cheques_rechazados'] = -1
-                    except Exception:
-                        texto_bajo = str(contenido_cheque).lower()
-                        datos_cliente['cheques_rechazados'] = max(
-                            texto_bajo.count('nrocheque'), 
-                            texto_bajo.count('numerocheque'),
-                            texto_bajo.count('causal')
-                        )
+                        datos_cliente['cheques_rechazados'] = total_cheques_reales
+                    elif status_interno == 404:
+                        datos_cliente['cheques_rechazados'] = 0
+                    else:
+                        datos_cliente['cheques_rechazados'] = -1
+                except json.JSONDecodeError:
+                    pass # Ya mostramos el error principal en el primer bloque
             
             return datos_cliente
             
-        except requests.exceptions.Timeout:
-            st.warning("⏱️ El puente gratuito está saturado. Volvé a intentar en unos segundos.")
-            return None
         except Exception as e:
-            st.error(f"Error interno: {str(e)}")
+            st.error(f"Error de conexión interna: {str(e)}")
             return None
-            
+
     def guardar_cuit_afectado(cuit, situacion, nombre, observaciones_extra):
         try:
             supabase.table("cuits_afectados").insert({
@@ -898,7 +896,6 @@ elif opcion == "Verificación BCRA":
                             
                             st.markdown(f"**Titular:** {nombre}")
                             
-                            # Mostramos los dos indicadores en pantalla
                             col1, col2 = st.columns(2)
                             with col1: 
                                 st.metric("Situación Crediticia", f"Nivel {situacion}")
@@ -912,14 +909,12 @@ elif opcion == "Verificación BCRA":
                                 else:
                                     st.success("✅ 0 Cheques Rechazados")
                             
-                            # Evaluamos las respuestas
                             if cheques_rechazados in [-429, -1]:
-                                st.warning("⚠️ No se pudo comprobar el historial de cheques por congestión en el BCRA. Por seguridad, volvé a consultar en unos instantes.")
+                                st.warning("⚠️ No se pudo comprobar el historial de cheques. Revisá los paneles DEBUG de arriba.")
                             elif situacion == 1 and cheques_rechazados == 0:
                                 st.success("✅ Cliente Totalmente Limpio (Situación 1 y sin cheques rebotados). Operación segura.")
                             else:
                                 st.error("🚨 RIESGO DETECTADO EN EL BCRA.")
-                                
                                 motivos = []
                                 if situacion > 1:
                                     motivos.append(f"Situación {situacion} en {entidad}")
