@@ -127,7 +127,7 @@ with st.sidebar:
 
     opcion = option_menu(
         menu_title=None, 
-        options=["Generador de Resumen", "Facturas de Proveedores", "Verificación BCRA"],
+        options=["Generador de Resumen", "Facturas de Proveedores", "Consultas en BCRA"],
         icons=["file-earmark-spreadsheet", "receipt", "shield-check"], 
         menu_icon="cast", 
         default_index=0,
