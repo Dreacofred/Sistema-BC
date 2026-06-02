@@ -33,8 +33,9 @@ COLOR_ROJO = "#C8102E"
 COLOR_AMARILLO_ALERTA = "#FFE082" 
 COLOR_GRIS_BC = "#3A3A3A" 
 
-URL_SB = "https://bjhykcdhafoqpfkpngvw.supabase.co"
-KEY_SB = "sb_publishable_OvXN3LjawazkF5GNpsslUQ_SQOhTakr"
+# Llamamos a las llaves desde la bóveda secreta de Streamlit
+URL_SB = st.secrets["SUPABASE_URL"]
+KEY_SB = st.secrets["SUPABASE_KEY"]
 supabase: Client = create_client(URL_SB, KEY_SB)
 
 NOMBRES_SUCURSALES = {1: "RECONQUISTA", 2: "AVELLANEDA", 3: "FLORENCIA", 4: "RECREO"}
