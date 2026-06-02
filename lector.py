@@ -841,8 +841,7 @@ elif opcion == "Verificación BCRA": # Podes cambiar el nombre en tu menú a "Ri
         """
         try:
             res = modelo.generate_content([prompt, img_recorte])
-            txt = res.text.replace("```json", "").replace("
-```", "").strip()
+            txt = res.text.replace("```json", "").replace("```", "").strip()
             return json.loads(txt)
         except Exception:
             return {"cuit": "ERROR_LECTURA", "emisor": "Fallo IA"}
