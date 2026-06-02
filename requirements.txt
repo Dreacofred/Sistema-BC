@@ -7,3 +7,4 @@ openpyxl
 supabase
 requests
 streamlit-option-menu
+google-generativeai
