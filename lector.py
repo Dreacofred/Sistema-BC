@@ -750,7 +750,7 @@ elif opcion == "Generador de Resumen":
         st.markdown("</div>", unsafe_allow_html=True)
 
 # ==========================================
-# 5. MÓDULO: VERIFICACIÓN BCRA (VÍA PUENTE ROBUSTO + CHEQUES CORREGIDO)
+# 5. MÓDULO: VERIFICACIÓN BCRA (VÍA PUENTE ROBUSTO + CHEQUES TOTALMENTE BLINDADO)
 # ==========================================
 elif opcion == "Verificación BCRA":
     st.title("🛡️ Verificación Blindada de CUIT")
@@ -759,17 +759,16 @@ elif opcion == "Verificación BCRA":
     def consultar_bcra_completo(cuit):
         cuit = str(cuit).strip()
         
-        # 1. Armamos las dos URLs oficiales del BCRA
+        # 1. URLs OFICIALES CORREGIDAS (Se quitó el /Deudas/ que causaba el error 404)
         url_deudas = f"https://api.bcra.gob.ar/centraldedeudores/v1.0/Deudas/{cuit}"
-        url_cheques = f"https://api.bcra.gob.ar/centraldedeudores/v1.0/Deudas/ChequesRechazados/{cuit}"
+        url_cheques = f"https://api.bcra.gob.ar/centraldedeudores/v1.0/ChequesRechazados/{cuit}"
         
-        # 2. Las pasamos por el puente para saltar el bloqueo geográfico
+        # 2. Pasaje por el puente para saltar bloqueo regional
         puente_deudas = f"https://api.allorigins.win/get?url={requests.utils.quote(url_deudas)}"
         puente_cheques = f"https://api.allorigins.win/get?url={requests.utils.quote(url_cheques)}"
         
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) BC-Combustibles/1.0"}
         
-        # Estructura base que vamos a devolver
         datos_cliente = {
             "situacion": 1,
             "entidad": "Sin Registros",
@@ -797,7 +796,6 @@ elif opcion == "Verificación BCRA":
                             datos_cliente['situacion'] = entity_info.get("situacion", 1)
                             datos_cliente['entidad'] = entity_info.get("entidad", "Entidad Financiera")
             
-            # Pausa para no saturar el puente
             time.sleep(1)
             
             # --- SEGUNDA CONSULTA: CHEQUES RECHAZADOS ---
@@ -805,8 +803,38 @@ elif opcion == "Verificación BCRA":
             if res_cheque.status_code == 200:
                 contenido_cheque = res_cheque.json().get('contents', '')
                 if contenido_cheque:
-                    # CORRECCIÓN: Llevamos todo a minúsculas para encontrar "nrocheque" sin importar el formato
-                    datos_cliente['cheques_rechazados'] = contenido_cheque.lower().count('nrocheque')
+                    try:
+                        data_ch = json.loads(contenido_cheque)
+                        status_interno = data_ch.get('status')
+                        
+                        if status_interno == 200:
+                            results_ch = data_ch.get('results', {})
+                            # Buscamos de manera dinámica cualquier lista interna que devuelva el BCRA
+                            lista_cheques = []
+                            for k, v in results_ch.items():
+                                if isinstance(v, list):
+                                    lista_cheques = v
+                                    break
+                            
+                            if lista_cheques:
+                                datos_cliente['cheques_rechazados'] = len(lista_cheques)
+                            else:
+                                # Doble verificación por conteo de palabras clave si cambia la estructura
+                                texto_bajo = contenido_cheque.lower()
+                                datos_cliente['cheques_rechazados'] = max(
+                                    texto_bajo.count('nrocheque'), 
+                                    texto_bajo.count('causal'), 
+                                    texto_bajo.count('numerocheque')
+                                )
+                        elif status_interno == 404:
+                            datos_cliente['cheques_rechazados'] = 0
+                        elif status_interno == 429:
+                            datos_cliente['cheques_rechazados'] = -429
+                        else:
+                            datos_cliente['cheques_rechazados'] = -1
+                    except:
+                        texto_bajo = contenido_cheque.lower()
+                        datos_cliente['cheques_rechazados'] = max(texto_bajo.count('nrocheque'), texto_bajo.count('causal'))
             
             return datos_cliente
             
@@ -860,13 +888,19 @@ elif opcion == "Verificación BCRA":
                             with col1: 
                                 st.metric("Situación Crediticia", f"Nivel {situacion}")
                             with col2: 
-                                if cheques_rechazados > 0:
+                                if cheques_rechazados == -429:
+                                    st.warning("⚠️ Límite API (429)")
+                                elif cheques_rechazados == -1:
+                                    st.warning("⚠️ Error Lectura")
+                                elif cheques_rechazados > 0:
                                     st.error(f"⚠️ {cheques_rechazados} Cheques Rechazados")
                                 else:
                                     st.success("✅ 0 Cheques Rechazados")
                             
-                            # Evaluamos el riesgo combinando ambos factores
-                            if situacion == 1 and cheques_rechazados == 0:
+                            # Evaluamos las respuestas
+                            if cheques_rechazados in [-429, -1]:
+                                st.warning("⚠️ No se pudo comprobar el historial de cheques por congestión en el BCRA. Por seguridad, volvé a consultar en unos instantes.")
+                            elif situacion == 1 and cheques_rechazados == 0:
                                 st.success("✅ Cliente Totalmente Limpio (Situación 1 y sin cheques rebotados). Operación segura.")
                             else:
                                 st.error("🚨 RIESGO DETECTADO EN EL BCRA.")
@@ -880,8 +914,6 @@ elif opcion == "Verificación BCRA":
                                 msj_final = " | ".join(motivos)
                                 st.warning(f"Motivo del bloqueo: {msj_final}")
                                 st.warning("El CUIT fue ingresado automáticamente a nuestra lista negra.")
-                                
-                                # Guardamos en Supabase aclarando si fue por cheques o por situación
                                 guardar_cuit_afectado(cuit_input, situacion, nombre, f"Bloqueo por: {msj_final}")
                                 
             except Exception as e:
