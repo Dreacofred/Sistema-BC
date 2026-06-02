@@ -256,7 +256,7 @@ if opcion == "Facturas de Proveedores":
                             exito = True
                         except Exception as e:
                             error_interno = str(e)
-                            intentos -= 1
+                            intentes -= 1
                             time.sleep(2)
                     if not exito: st.session_state.cola_extracciones_prov.append({'_origen': f"⚠️ Error Técnico en {doc['nombre']} | Falla: {error_interno}"})
                     barra_progreso.progress((i + 1) / len(st.session_state.lote_pendientes_prov))
@@ -293,7 +293,7 @@ elif opcion == "Generador de Resumen":
     if user['puesto'] == 'SUPER_ADMIN':
         st.markdown(f'<div class="tarjeta-pro" style="border-left: 5px solid #28a745; padding:15px;">🔓 <strong>Acceso SUPER ADMIN:</strong> Visualizando órdenes de TODAS las sucursales.</div>', unsafe_allow_html=True)
     else:
-        st.markdown(f'<div class="tarjeta-pro" style="border-left: 5px solid {COLOR_ROJO}; padding:15px;">📍 <strong>Acceso Zonal:</strong> Visualizando solo órdenes de la sucursal <strong>{NOMBRES_SUCURSALES.get(user['sucursal_id'])}</strong>.</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="tarjeta-pro" style="border-left: 5px solid {COLOR_ROJO}; padding:15px;">📍 <strong>Acceso Zonal:</strong> Visualizando solo órdenes de la sucursal <strong>{NOMBRES_SUCURSALES.get(user["sucursal_id"])}</strong>.</div>', unsafe_allow_html=True)
 
     PROMPT_AUDITORIA = textwrap.dedent("""
     Sos un auditor experto. El Emisor es 'BC COMBUSTIBLES'. Buscá al CLIENTE Receptor y los datos de la carga. 
@@ -312,9 +312,6 @@ elif opcion == "Generador de Resumen":
       5. Si encontrás artículos extra (aceites, filtros, etc.), devolvé "Atención. La factura contiene artículos extra: [detallar los extra]."
     """).strip()
 
-    # ==========================================
-    # MODIFICACIÓN: FILTRO POR SUCURSAL MADRE DEL CLIENTE
-    # ==========================================
     try:
         # La magia está en agregar !inner pegado a la palabra clientes
         query = supabase.table("ordenes_carga").select("*, clientes!inner(nombre, formato_especial, sucursal_madre_id)")
@@ -761,25 +758,23 @@ elif opcion == "Verificación BCRA": # Podes cambiar el nombre en tu menú a "Ri
     import json
     import urllib3
     from PIL import Image
-    import google.generativeai as genai
     
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
     
-    # ⚠️ REEMPLAZAR CON TUS LLAVES
+    # 🔑 LLAVE RESIDENCIAL DE SCRAPERAPI (Inyectada Correctamente)
     API_KEY_SCRAPER = "cf3ae8aaf0457292c6e2f8983b207139"  
-    genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
     
     # --- FUNCIONES CORE ---
     def consultar_bcra_completo(cuit):
         cuit = str(cuit).strip()
-        url_deudas = f"https://api.bcra.gob.ar/centraldedeudores/v1.0/Deudas/{cuit}"
-        url_cheques = f"https://api.bcra.gob.ar/centraldedeudores/v1.0/Deudas/ChequesRechazados/{cuit}"
+        url_deudas = f"[https://api.bcra.gob.ar/centraldedeudores/v1.0/Deudas/](https://api.bcra.gob.ar/centraldedeudores/v1.0/Deudas/){cuit}"
+        url_cheques = f"[https://api.bcra.gob.ar/centraldedeudores/v1.0/Deudas/ChequesRechazados/](https://api.bcra.gob.ar/centraldedeudores/v1.0/Deudas/ChequesRechazados/){cuit}"
         
         datos_cliente = {"situacion": 1, "entidad": "Sin Registros", "denominacion": "Cliente Desconocido", "cheques_rechazados": 0}
         
         try:
             payload_deudas = {'api_key': API_KEY_SCRAPER, 'url': url_deudas, 'render': 'false'}
-            res_deuda = requests.get('https://api.scraperapi.com/', params=payload_deudas, timeout=45)
+            res_deuda = requests.get('[https://api.scraperapi.com/](https://api.scraperapi.com/)', params=payload_deudas, timeout=45)
             
             if res_deuda.status_code == 200:
                 try:
@@ -797,8 +792,9 @@ elif opcion == "Verificación BCRA": # Podes cambiar el nombre en tu menú a "Ri
             time.sleep(1) 
             
             payload_cheques = {'api_key': API_KEY_SCRAPER, 'url': url_cheques, 'render': 'false'}
-            res_cheque = requests.get('https://api.scraperapi.com/', params=payload_cheques, timeout=45)
+            res_cheque = requests.get('[https://api.scraperapi.com/](https://api.scraperapi.com/)', params=payload_cheques, timeout=45)
             
+            # CASO A: Cliente que registra antecedentes negativos (HTTP 200)
             if res_cheque.status_code == 200:
                 try:
                     data_ch = res_cheque.json()
@@ -823,28 +819,17 @@ elif opcion == "Verificación BCRA": # Podes cambiar el nombre en tu menú a "Ri
                         
                     datos_cliente['cheques_rechazados'] = total_cheques
                 except Exception: datos_cliente['cheques_rechazados'] = -1
-            elif res_cheque.status_code == 404: datos_cliente['cheques_rechazados'] = 0
-            elif res_cheque.status_code == 429: datos_cliente['cheques_rechazados'] = -429
-            else: datos_cliente['cheques_rechazados'] = -1
+                
+            # CASO B: Cliente limpio en el Banco Central (HTTP 404 real de ScraperAPI)
+            elif res_cheque.status_code == 404: 
+                datos_cliente['cheques_rechazados'] = 0
+            elif res_cheque.status_code == 429: 
+                datos_cliente['cheques_rechazados'] = -429
+            else: 
+                datos_cliente['cheques_rechazados'] = -1
                 
             return datos_cliente
         except Exception: return None
-
-    def procesar_cheque_ia(img_recorte, num):
-        modelo = genai.GenerativeModel('gemini-1.5-flash') # Ultra rápido para recortes chicos
-        prompt = f"""
-        Actúa como auditor de BC Combustibles. Analiza SOLO la parte inferior de este cheque (Cheque #{num}).
-        REGLA DE ORO: Ignora el monto, la fecha y el nombre del Destinatario ("Páguese a").
-        Busca EXCLUSIVAMENTE el CUIT (11 dígitos sin guiones) y la Razón Social del EMISOR (junto a la firma o en el logo).
-        Si no es legible, devuelve "ERROR_LECTURA".
-        Devuelve estrictamente este JSON: {{"cuit": "valor", "emisor": "valor"}}
-        """
-        try:
-            res = modelo.generate_content([prompt, img_recorte])
-            txt = res.text.replace("```json", "").replace("```", "").strip()
-            return json.loads(txt)
-        except Exception:
-            return {"cuit": "ERROR_LECTURA", "emisor": "Fallo IA"}
 
     def guardar_en_lista_negra(cuit, situacion, nombre, obs):
         try:
@@ -854,6 +839,25 @@ elif opcion == "Verificación BCRA": # Podes cambiar el nombre en tu menú a "Ri
             st.success(f"✅ CUIT {cuit} guardado en Lista Negra exitosamente.")
         except Exception as e:
             st.error(f"Error en BD: {e}")
+
+    def procesar_cheque_ia(img_recorte, num):
+        prompt = f"""
+        Actúa como auditor de BC Combustibles. Analiza SOLO la parte inferior de este cheque (Cheque #{num}).
+        REGLA DE ORO: Ignora el monto, la fecha y el nombre del Destinatario ("Páguese a").
+        Busca EXCLUSIVAMENTE el CUIT (11 dígitos sin guiones) y la Razón Social del EMISOR (junto a la firma o en el logo).
+        Si no es legible, devuelve "ERROR_LECTURA".
+        Devuelve estrictamente este JSON: {{"cuit": "valor", "emisor": "valor"}}
+        """
+        try:
+            # FIX: Usamos el cliente_ia moderno global conectado a la bóveda secreta
+            res = cliente_ia.models.generate_content(
+                model='gemini-2.5-flash', 
+                contents=[prompt, img_recorte]
+            )
+            txt = res.text.replace("```json", "").replace("```", "").strip()
+            return json.loads(txt)
+        except Exception as e:
+            return {"cuit": "ERROR_LECTURA", "emisor": f"Fallo: {str(e)}"}
 
     # --- INTERFAZ CON PESTAÑAS ---
     tab_manual, tab_ia = st.tabs(["✍️ Consulta Manual", "📸 Escáner de Cheques (IA)"])
@@ -882,7 +886,6 @@ elif opcion == "Verificación BCRA": # Podes cambiar el nombre en tu menú a "Ri
                             if datos['cheques_rechazados'] > 0:
                                 col2.error(f"⚠️ {datos['cheques_rechazados']} Cheques Rechazados")
                                 st.warning("🚨 RIESGO DETECTADO.")
-                                # REGLA: Confirmación explícita para guardar
                                 if st.button("Confirmar y Enviar a Lista Negra", key="btn_save_manual"):
                                     guardar_en_lista_negra(cuit_input, datos['situacion'], datos['denominacion'], f"Rechazos: {datos['cheques_rechazados']}")
                             elif datos['cheques_rechazados'] == 0:
@@ -915,7 +918,7 @@ elif opcion == "Verificación BCRA": # Podes cambiar el nombre en tu menú a "Ri
                     
                     for i in range(4):
                         recorte = img.crop((0, i * alto_corte, ancho, (i + 1) * alto_corte))
-                        datos_ia = procesar_cheque_ia(recorte, i+1)
+                        datos_ia = datos_ia = b = procesar_cheque_ia(recorte, i+1)
                         
                         resultado_cheque = {
                             "id": i+1,
@@ -925,14 +928,12 @@ elif opcion == "Verificación BCRA": # Podes cambiar el nombre en tu menú a "Ri
                             "datos_bcra": None
                         }
                         
-                        # Si la IA logró leer un CUIT de 11 dígitos, consultamos al BCRA
                         cuit_limpio = resultado_cheque["cuit_ia"].replace("-", "").strip()
                         if cuit_limpio.isdigit() and len(cuit_limpio) == 11:
                             resultado_cheque["datos_bcra"] = consultar_bcra_completo(cuit_limpio)
                             
                         resultados_lote.append(resultado_cheque)
                         
-                    # Guardamos en caché para no volver a gastar API si el usuario hace clic en guardar
                     st.session_state['lote_procesado'] = resultados_lote
 
         # --- RENDERIZADO DE RESULTADOS (Caché) ---
@@ -957,7 +958,6 @@ elif opcion == "Verificación BCRA": # Podes cambiar el nombre en tu menú a "Ri
                         else:
                             st.error(f"🚨 BCRA: {bcra['denominacion']} | Sit: {bcra['situacion']} | Rechazos: {bcra['cheques_rechazados']}")
                             
-                            # REGLA: Confirmación manual con clave única por cheque
                             if st.button(f"Confirmar Lista Negra (Cheque {cheque['id']})", key=f"btn_bcra_{cheque['id']}"):
                                 guardar_en_lista_negra(cuit_ia, bcra['situacion'], bcra['denominacion'], f"Cheques Rechazados: {bcra['cheques_rechazados']}")
                     else:
