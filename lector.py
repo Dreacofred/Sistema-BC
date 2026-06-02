@@ -750,16 +750,16 @@ elif opcion == "Generador de Resumen":
         st.markdown("</div>", unsafe_allow_html=True)
 
 # ==========================================
-# 5. MÓDULO: VERIFICACIÓN BCRA (100% CLOUD VÍA SCRAPERAPI)
+# 5. MÓDULO: VERIFICACIÓN BCRA (100% CLOUD VÍA SCRAPERAPI - PARSEO BLINDADO)
 # ==========================================
 elif opcion == "Verificación BCRA":
-    st.title("🛡️ Verificación Blindada de CUIT")
+    st.title("🛡️ Verificación de CUIT")
     st.markdown('<p style="color:#666; font-size:16px;">Consultá el estado crediticio y el historial de cheques rechazados en el BCRA.</p>', unsafe_allow_html=True)
     
     def consultar_bcra_completo(cuit):
         cuit = str(cuit).strip()
         
-        # 🔑 TU LLAVE DE ACCESO DE SCRAPERAPI (Reemplazar aquí)
+        # 🔑 TU LLAVE DE ACCESO DE SCRAPERAPI (Mantener la que ya pusiste)
         API_KEY = "cf3ae8aaf0457292c6e2f8983b207139"
         
         # URLs Oficiales del BCRA
@@ -776,11 +776,11 @@ elif opcion == "Verificación BCRA":
         try:
             import requests
             import time
+            import json
             import urllib3
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
             
             # --- 1. SITUACIÓN CREDITICIA ---
-            # Configuramos la petición para que pase por el túnel de ScraperAPI
             payload_deudas = {'api_key': API_KEY, 'url': url_deudas, 'render': 'false'}
             res_deuda = requests.get('https://api.scraperapi.com/', params=payload_deudas, timeout=45)
             
@@ -799,7 +799,7 @@ elif opcion == "Verificación BCRA":
                 except Exception:
                     pass
             
-            time.sleep(1) # Pequeño respiro para la API
+            time.sleep(1) # Respiro para el proxy
             
             # --- 2. CHEQUES RECHAZADOS ---
             payload_cheques = {'api_key': API_KEY, 'url': url_cheques, 'render': 'false'}
@@ -810,26 +810,35 @@ elif opcion == "Verificación BCRA":
                     data_ch = res_cheque.json()
                     status_interno = data_ch.get('status')
                     
+                    # 200: El BCRA encontró cheques y los lista
                     if status_interno == 200:
                         results_ch = data_ch.get('results', {})
                         total_cheques = 0
                         
-                        # Parseo profundo dinámico para contar los cheques reales
-                        if isinstance(results_ch, dict):
-                            for k, v in results_ch.items():
-                                if isinstance(v, list):
-                                    for item in v:
-                                        if isinstance(item, dict):
-                                            sub_listas = [sub_v for sub_k, sub_v in item.items() if isinstance(sub_v, list)]
-                                            if sub_listas:
-                                                for sub in sub_listas:
-                                                    total_cheques += len(sub)
-                                            else:
-                                                total_cheques += 1
-                                        else:
-                                            total_cheques += 1
-                        elif isinstance(results_ch, list):
-                            total_cheques = len(results_ch)
+                        # 🛡️ ESTRATEGIA 1: Arquitectura Oficial BCRA (causales -> detalles)
+                        try:
+                            causales = results_ch.get('causales', [])
+                            if isinstance(causales, list):
+                                for causal in causales:
+                                    detalles = causal.get('detalles', [])
+                                    if isinstance(detalles, list):
+                                        total_cheques += len(detalles)
+                        except Exception:
+                            pass
+                            
+                        # 🛡️ ESTRATEGIA 2: Fuerza Bruta / Anti-Alucinación (Por si el BCRA cambia las llaves)
+                        if total_cheques == 0:
+                            json_str = json.dumps(data_ch).lower()
+                            # Contamos la aparición estricta de las propiedades obligatorias de un cheque
+                            total_cheques = max(
+                                json_str.count('"nrocheque"'), 
+                                json_str.count('"fecharechazo"'),
+                                json_str.count('"numerocheque"')
+                            )
+                            
+                        # Fallback de seguridad extrema
+                        if total_cheques == 0 and results_ch:
+                            total_cheques = 1
                             
                         datos_cliente['cheques_rechazados'] = total_cheques
                         
