@@ -753,22 +753,26 @@ elif opcion == "Generador de Resumen":
 # 5. MÓDULO: VERIFICACIÓN BCRA (VÍA PUENTE ROBUSTO + CHEQUES TOTALMENTE BLINDADO)
 # ==========================================
 elif opcion == "Verificación BCRA":
-    st.title("🛡️ Verificación Blindada de CUIT")
+    st.title("🛡️ Verificación de CUIT")
     st.markdown('<p style="color:#666; font-size:16px;">Consultá el estado crediticio y el historial de cheques rechazados en el BCRA.</p>', unsafe_allow_html=True)
     def consultar_bcra_completo(cuit):
         cuit = str(cuit).strip()
         
-        # 1. URLs OFICIALES CORREGIDAS
+        # 1. URLs OFICIALES LIMPIAS (Sin parámetros extra que rompan el WAF del BCRA)
         url_deudas = f"https://api.bcra.gob.ar/centraldedeudores/v1.0/Deudas/{cuit}"
         url_cheques = f"https://api.bcra.gob.ar/centraldedeudores/v1.0/ChequesRechazados/{cuit}"
         
-        # 2. Pasaje por el puente con CACHE BUSTING (Para evitar que allorigins devuelva un 404 viejo)
+        # 2. CACHE BUSTING AL PROXY (cb=...), NO AL BCRA.
+        # Engañamos a AllOrigins para saltar su caché, pero enviamos la URL del BCRA intacta.
         import time
         timestamp = int(time.time())
-        puente_deudas = f"https://api.allorigins.win/get?url={requests.utils.quote(f'{url_deudas}?v={timestamp}')}"
-        puente_cheques = f"https://api.allorigins.win/get?url={requests.utils.quote(f'{url_cheques}?v={timestamp}')}"
+        url_deudas_encoded = requests.utils.quote(url_deudas)
+        url_cheques_encoded = requests.utils.quote(url_cheques)
         
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) BC-Combustibles/1.0"}
+        puente_deudas = f"https://api.allorigins.win/get?url={url_deudas_encoded}&cb={timestamp}"
+        puente_cheques = f"https://api.allorigins.win/get?url={url_cheques_encoded}&cb={timestamp}"
+        
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) BC-Combustibles/2.0"}
         
         datos_cliente = {
             "situacion": 1,
@@ -790,14 +794,14 @@ elif opcion == "Verificación BCRA":
                     if data.get('status') == 200 and 'results' in data:
                         res = data['results']
                         datos_cliente['denominacion'] = res.get('denominacion', 'Cliente')
-                        periodos = res.get('periodos', [])
                         
+                        periodos = res.get('periodos', [])
                         if periodos and 'entidades' in periodos[0] and periodos[0]['entidades']:
                             entity_info = periodos[0]['entidades'][0]
                             datos_cliente['situacion'] = entity_info.get("situacion", 1)
                             datos_cliente['entidad'] = entity_info.get("entidad", "Entidad Financiera")
             
-            time.sleep(1)
+            time.sleep(1) # Pequeña pausa para no saturar al proxy
             
             # --- SEGUNDA CONSULTA: CHEQUES RECHAZADOS ---
             res_cheque = requests.get(puente_cheques, headers=headers, verify=False, timeout=30)
@@ -810,20 +814,27 @@ elif opcion == "Verificación BCRA":
                         
                         if status_interno == 200:
                             results_ch = data_ch.get('results', {})
-                            causales = results_ch.get('causales', [])
                             total_cheques_reales = 0
                             
-                            # 🔧 CORRECCIÓN CORE: Iteramos sobre las causales para contar los detalles (cheques)
-                            for causal in causales:
-                                detalles = causal.get('detalles', [])
-                                if not detalles:
-                                    # Fallback dinámico por si el BCRA usa una key interna distinta a 'detalles'
-                                    for k, v in causal.items():
-                                        if isinstance(v, list):
-                                            detalles = v
-                                            break
-                                total_cheques_reales += len(detalles)
-                            
+                            # 🛡️ PARSEO BLINDADO EXTREMO: Buscamos listas en cualquier nivel
+                            if isinstance(results_ch, dict):
+                                for k, v in results_ch.items():
+                                    if isinstance(v, list):
+                                        for item in v:
+                                            if isinstance(item, dict):
+                                                # Buscamos si hay una sub-lista adentro (ej. "detalles")
+                                                sub_listas = [sub_v for sub_k, sub_v in item.items() if isinstance(sub_v, list)]
+                                                if sub_listas:
+                                                    for sub in sub_listas:
+                                                        total_cheques_reales += len(sub)
+                                                else:
+                                                    # Si es objeto directo, es un cheque suelto
+                                                    total_cheques_reales += 1
+                                            else:
+                                                total_cheques_reales += 1
+                            elif isinstance(results_ch, list):
+                                total_cheques_reales = len(results_ch)
+                                
                             datos_cliente['cheques_rechazados'] = total_cheques_reales
                             
                         elif status_interno == 404:
@@ -833,11 +844,11 @@ elif opcion == "Verificación BCRA":
                         else:
                             datos_cliente['cheques_rechazados'] = -1
                     except Exception:
-                        # 🔧 CORRECCIÓN: Si el JSON falla o viene en HTML, buscamos las keys de forma segura
                         texto_bajo = str(contenido_cheque).lower()
                         datos_cliente['cheques_rechazados'] = max(
                             texto_bajo.count('nrocheque'), 
-                            texto_bajo.count('numerocheque')
+                            texto_bajo.count('numerocheque'),
+                            texto_bajo.count('causal')
                         )
             
             return datos_cliente
@@ -848,7 +859,7 @@ elif opcion == "Verificación BCRA":
         except Exception as e:
             st.error(f"Error interno: {str(e)}")
             return None
-
+            
     def guardar_cuit_afectado(cuit, situacion, nombre, observaciones_extra):
         try:
             supabase.table("cuits_afectados").insert({
