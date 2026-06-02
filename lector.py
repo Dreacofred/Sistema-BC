@@ -921,86 +921,80 @@ elif opcion == "Verificación BCRA":
         st.markdown('</div>', unsafe_allow_html=True)
 
     # ==========================================
-    # PESTAÑA 2: ESCÁNER DE LOTE (IA PRO + CoT)
+    # PESTAÑA 2: ESCÁNER DE LOTES MÚLTIPLES (IA PRO + COLA)
     # ==========================================
     with tab_ia:
-        if 'resultados_ia_bcra' not in st.session_state:
-            st.session_state['resultados_ia_bcra'] = None
-        if 'foto_lote_actual' not in st.session_state:
-            st.session_state['foto_lote_actual'] = None
+        import random # Importante para el "jitter" anti-bloqueo
 
-        foto_lote = st.file_uploader("📸 Subí la foto completa del lote de cheques", type=['jpg', 'jpeg', 'png'])
+        if 'lote_procesado' not in st.session_state:
+            st.session_state['lote_procesado'] = []
+
+        fotos_lote = st.file_uploader("📸 Subí hasta 3 fotos de cheques", type=['jpg', 'jpeg', 'png'], accept_multiple_files=True)
         
-        if foto_lote:
-            if st.button("🚀 Procesar Lote Completo (IA Avanzada)", type="primary"):
-                with st.spinner("Analizando espacialmente los cheques y cruzando datos con el BCRA (Demora aprox. 20 seg)..."):
-                    img = Image.open(foto_lote)
+        if fotos_lote:
+            if st.button("🚀 Procesar Lotes (IA Avanzada)", type="primary"):
+                st.session_state['lote_procesado'] = [] # Limpiar resultados anteriores
+                
+                with st.spinner("Procesando fotos y consultando BCRA..."):
+                    barra_p = st.progress(0)
+                    total_fotos = len(fotos_lote)
                     
-                    # Redimensionamiento seguro manteniendo relación de aspecto
-                    img.thumbnail((2500, 3000), Image.Resampling.LANCZOS)
-                    
-                    # 1. Extracción de todo el lote de una sola pasada
-                    lista_cheques_ia = procesar_lote_cheques_ia(img)
-                    resultados_finales = []
-                    
-                    # 2. Ruteo y limpieza de datos
-                    if isinstance(lista_cheques_ia, list) and len(lista_cheques_ia) > 0:
-                        for cheque in lista_cheques_ia:
-                            nro_cheque_crudo = str(cheque.get("numero_cheque", "No detectado"))
-                            emisor_crudo = cheque.get("emisor", "DESCONOCIDO")
-                            cuit_crudo = str(cheque.get("cuit", ""))
-                            
-                            cuit_limpio = re.sub(r'\D', '', cuit_crudo)
-                            
+                    for idx, foto in enumerate(fotos_lote):
+                        st.write(f"Procesando foto {idx + 1} de {total_fotos}: {foto.name}")
+                        img = Image.open(foto)
+                        img.thumbnail((2500, 3000), Image.Resampling.LANCZOS)
+                        
+                        # 1. Extracción con IA (Modelo PRO)
+                        lista_cheques = procesar_lote_cheques_ia(img)
+                        
+                        # 2. Procesar cada cheque detectado
+                        for cheque in lista_cheques:
+                            cuit_limpio = re.sub(r'\D', '', str(cheque.get("cuit", "")))
                             datos_bcra = None
+                            
                             if len(cuit_limpio) == 11:
+                                # Espera aleatoria (1.5 a 3.5 segundos) para no disparar alertas de bot
+                                time.sleep(random.uniform(1.5, 3.5)) 
                                 datos_bcra = consultar_bcra_completo(cuit_limpio)
                             
-                            resultados_finales.append({
-                                "id": cheque.get("id", 0),
-                                "numero_cheque": nro_cheque_crudo,
-                                "emisor": emisor_crudo,
-                                "cuit_leido": cuit_crudo,
+                            st.session_state['lote_procesado'].append({
+                                "img": img, # Guardamos referencia de la foto
+                                "id": cheque.get("id"),
+                                "numero_cheque": cheque.get("numero_cheque"),
+                                "emisor": cheque.get("emisor"),
+                                "cuit": cheque.get("cuit"),
                                 "cuit_limpio": cuit_limpio,
                                 "datos_bcra": datos_bcra
                             })
-                            
-                        st.session_state['resultados_ia_bcra'] = resultados_finales
-                        st.session_state['foto_lote_actual'] = img
-                    else:
-                        st.error("⚠️ La IA no logró identificar cheques legibles en esta foto. Revise el enfoque e intente nuevamente.")
+                        
+                        barra_p.progress((idx + 1) / total_fotos)
+                    
+                    st.success("✅ Lote procesado completamente.")
 
         # --- RENDERIZADO DE RESULTADOS ---
-        if st.session_state.get('resultados_ia_bcra'):
-            st.markdown("### 📋 Resultados de Auditoría Global")
+        if st.session_state.get('lote_procesado'):
+            st.markdown("### 📋 Resultados de Auditoría")
             
-            if st.session_state.get('foto_lote_actual'):
-                with st.expander("🖼️ Ver foto original procesada"):
-                    st.image(st.session_state['foto_lote_actual'], use_container_width=True)
-            
-            for cheque in st.session_state['resultados_ia_bcra']:
-                # ACÁ AGREGAMOS EL NÚMERO DE CHEQUE AL TÍTULO
-                st.markdown(f"#### 🏦 Cheque #{cheque['id']} (Nº {cheque['numero_cheque']})")
-                st.info(f"**Emisor identificado:** {cheque['emisor']} | **CUIT Extraído:** `{cheque['cuit_leido']}`")
-                
-                if cheque['cuit_leido'] == "ERROR_LECTURA" or len(cheque['cuit_limpio']) != 11:
-                    st.warning("⚠️ Consulta cancelada: La IA reportó ilegibilidad o el CUIT está incompleto.")
-                else:
-                    bcra = cheque["datos_bcra"]
+            for i, cheque in enumerate(st.session_state['lote_procesado']):
+                st.markdown("---")
+                col1, col2 = st.columns([1, 2])
+                with col1:
+                    st.image(cheque["img"], use_container_width=True)
+                with col2:
+                    st.markdown(f"**Cheque Nº {cheque.get('numero_cheque')}** | **Emisor:** {cheque.get('emisor')}")
+                    st.markdown(f"**CUIT:** `{cheque.get('cuit')}`")
+                    
+                    bcra = cheque.get("datos_bcra")
                     if bcra and not bcra.get("error_api"):
                         if bcra['situacion'] == 1 and bcra['cheques_rechazados'] == 0:
-                            st.success(f"✅ **BCRA:** {bcra['denominacion']} | Situación Crediticia: 1 | Sin Cheques Rechazados")
+                            st.success(f"✅ BCRA: {bcra['denominacion']} | Sit: 1 | 0 Rechazos")
                         else:
-                            st.error(f"🚨 **BCRA:** {bcra['denominacion']} | Sit: {bcra['situacion']} | Rechazos Activos: {bcra['cheques_rechazados']}")
-                            
-                            if st.button(f"Confirmar en Lista Negra (Cheque #{cheque['id']})", key=f"btn_bcra_lote_{cheque['id']}"):
-                                guardar_en_lista_negra(cheque['cuit_limpio'], bcra['situacion'], bcra['denominacion'], f"Cheques Rechazados: {bcra['cheques_rechazados']}")
-                    elif bcra and bcra.get("error_api"):
-                        st.error(f"Falla de comunicación con la base del BCRA: {bcra['error_api']}")
-                
-                st.markdown("---")
+                            st.error(f"🚨 BCRA: {bcra['denominacion']} | Sit: {bcra['situacion']} | Rechazos: {bcra['cheques_rechazados']}")
+                            if st.button(f"Guardar en Lista Negra", key=f"btn_{i}"):
+                                guardar_en_lista_negra(cheque['cuit_limpio'], bcra['situacion'], bcra['denominacion'], f"Rechazos: {bcra['cheques_rechazados']}")
+                    else:
+                        st.warning("⚠️ No se pudo consultar BCRA.")
                         
-            if st.button("🧹 Limpiar Sesión y Procesar Nuevo Lote", use_container_width=True):
-                st.session_state['resultados_ia_bcra'] = None
-                st.session_state['foto_lote_actual'] = None
+            if st.button("🧹 Limpiar Resultados"):
+                st.session_state['lote_procesado'] = []
                 st.rerun()
