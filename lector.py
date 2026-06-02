@@ -750,19 +750,18 @@ elif opcion == "Generador de Resumen":
         st.markdown("</div>", unsafe_allow_html=True)
 
 # ==========================================
-# 5. MÓDULO: VERIFICACIÓN BCRA (100% CLOUD VÍA SCRAPERAPI - PARSEO BLINDADO)
+# 5. MÓDULO: VERIFICACIÓN BCRA (100% CLOUD VÍA SCRAPERAPI - FIX 404)
 # ==========================================
-elif opcion == "Consultas en BCRA":
-    st.title("🛡️ Consultas en de CUIT")
+elif opcion == "Verificación BCRA":
+    st.title("🛡️ Verificación Blindada de CUIT")
     st.markdown('<p style="color:#666; font-size:16px;">Consultá el estado crediticio y el historial de cheques rechazados en el BCRA.</p>', unsafe_allow_html=True)
     
     def consultar_bcra_completo(cuit):
         cuit = str(cuit).strip()
         
-        # 🔑 TU LLAVE DE ACCESO DE SCRAPERAPI (Mantener la que ya pusiste)
+        # 🔑 TU LLAVE DE ACCESO DE SCRAPERAPI
         API_KEY = "cf3ae8aaf0457292c6e2f8983b207139"
         
-        # URLs Oficiales del BCRA
         url_deudas = f"https://api.bcra.gob.ar/centraldedeudores/v1.0/Deudas/{cuit}"
         url_cheques = f"https://api.bcra.gob.ar/centraldedeudores/v1.0/Deudas/ChequesRechazados/{cuit}"
         
@@ -805,51 +804,47 @@ elif opcion == "Consultas en BCRA":
             payload_cheques = {'api_key': API_KEY, 'url': url_cheques, 'render': 'false'}
             res_cheque = requests.get('https://api.scraperapi.com/', params=payload_cheques, timeout=45)
             
+            # 🟢 CASO A: Cliente SUCIO (Tiene cheques, el BCRA devuelve 200 y la lista)
             if res_cheque.status_code == 200:
                 try:
                     data_ch = res_cheque.json()
-                    status_interno = data_ch.get('status')
+                    results_ch = data_ch.get('results', {})
+                    total_cheques = 0
                     
-                    # 200: El BCRA encontró cheques y los lista
-                    if status_interno == 200:
-                        results_ch = data_ch.get('results', {})
-                        total_cheques = 0
+                    if isinstance(results_ch, dict):
+                        for k, v in results_ch.items():
+                            if isinstance(v, list):
+                                for item in v:
+                                    if isinstance(item, dict):
+                                        sub_listas = [sub_v for sub_k, sub_v in item.items() if isinstance(sub_v, list)]
+                                        if sub_listas:
+                                            for sub in sub_listas:
+                                                total_cheques += len(sub)
+                                        else:
+                                            total_cheques += 1
+                                    else:
+                                        total_cheques += 1
+                    elif isinstance(results_ch, list):
+                        total_cheques = len(results_ch)
                         
-                        # 🛡️ ESTRATEGIA 1: Arquitectura Oficial BCRA (causales -> detalles)
-                        try:
-                            causales = results_ch.get('causales', [])
-                            if isinstance(causales, list):
-                                for causal in causales:
-                                    detalles = causal.get('detalles', [])
-                                    if isinstance(detalles, list):
-                                        total_cheques += len(detalles)
-                        except Exception:
-                            pass
-                            
-                        # 🛡️ ESTRATEGIA 2: Fuerza Bruta / Anti-Alucinación (Por si el BCRA cambia las llaves)
-                        if total_cheques == 0:
-                            json_str = json.dumps(data_ch).lower()
-                            # Contamos la aparición estricta de las propiedades obligatorias de un cheque
-                            total_cheques = max(
-                                json_str.count('"nrocheque"'), 
-                                json_str.count('"fecharechazo"'),
-                                json_str.count('"numerocheque"')
-                            )
-                            
-                        # Fallback de seguridad extrema
-                        if total_cheques == 0 and results_ch:
-                            total_cheques = 1
-                            
-                        datos_cliente['cheques_rechazados'] = total_cheques
+                    if total_cheques == 0:
+                        json_str = json.dumps(data_ch).lower()
+                        total_cheques = max(json_str.count('"nrocheque"'), json_str.count('"fecharechazo"'), json_str.count('"numerocheque"'))
                         
-                    elif status_interno == 404: # El BCRA confirma 0 cheques
-                        datos_cliente['cheques_rechazados'] = 0
-                    elif status_interno == 429: # Saturación
-                        datos_cliente['cheques_rechazados'] = -429
-                    else:
-                        datos_cliente['cheques_rechazados'] = -1
+                    if total_cheques == 0 and results_ch:
+                        total_cheques = 1
+                        
+                    datos_cliente['cheques_rechazados'] = total_cheques
                 except Exception:
                     datos_cliente['cheques_rechazados'] = -1
+                    
+            # 🟢 CASO B: Cliente LIMPIO (El BCRA responde HTTP 404 indicando 0 cheques)
+            elif res_cheque.status_code == 404:
+                datos_cliente['cheques_rechazados'] = 0
+                
+            # 🔴 CASOS DE ERROR REALES
+            elif res_cheque.status_code == 429:
+                datos_cliente['cheques_rechazados'] = -429
             else:
                 datos_cliente['cheques_rechazados'] = -1
                 
@@ -914,7 +909,7 @@ elif opcion == "Consultas en BCRA":
                                     st.success("✅ 0 Cheques Rechazados")
                             
                             if cheques_rechazados in [-429, -1]:
-                                st.warning("⚠️ No se pudo comprobar el historial de cheques. El proxy de rotación falló, reintentá.")
+                                st.warning("⚠️ No se pudo comprobar el historial de cheques. El proxy falló, reintentá.")
                             elif situacion == 1 and cheques_rechazados == 0:
                                 st.success("✅ Cliente Totalmente Limpio (Situación 1 y sin cheques rebotados). Operación segura.")
                             else:
