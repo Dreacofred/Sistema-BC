@@ -755,17 +755,18 @@ elif opcion == "Generador de Resumen":
 elif opcion == "Verificación BCRA":
     st.title("🛡️ Verificación Blindada de CUIT")
     st.markdown('<p style="color:#666; font-size:16px;">Consultá el estado crediticio y el historial de cheques rechazados en el BCRA.</p>', unsafe_allow_html=True)
-    
     def consultar_bcra_completo(cuit):
         cuit = str(cuit).strip()
         
-        # 1. URLs OFICIALES CORREGIDAS (Se quitó el /Deudas/ que causaba el error 404)
+        # 1. URLs OFICIALES CORREGIDAS
         url_deudas = f"https://api.bcra.gob.ar/centraldedeudores/v1.0/Deudas/{cuit}"
         url_cheques = f"https://api.bcra.gob.ar/centraldedeudores/v1.0/ChequesRechazados/{cuit}"
         
-        # 2. Pasaje por el puente para saltar bloqueo regional
-        puente_deudas = f"https://api.allorigins.win/get?url={requests.utils.quote(url_deudas)}"
-        puente_cheques = f"https://api.allorigins.win/get?url={requests.utils.quote(url_cheques)}"
+        # 2. Pasaje por el puente con CACHE BUSTING (Para evitar que allorigins devuelva un 404 viejo)
+        import time
+        timestamp = int(time.time())
+        puente_deudas = f"https://api.allorigins.win/get?url={requests.utils.quote(f'{url_deudas}?v={timestamp}')}"
+        puente_cheques = f"https://api.allorigins.win/get?url={requests.utils.quote(f'{url_cheques}?v={timestamp}')}"
         
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) BC-Combustibles/1.0"}
         
@@ -809,32 +810,35 @@ elif opcion == "Verificación BCRA":
                         
                         if status_interno == 200:
                             results_ch = data_ch.get('results', {})
-                            # Buscamos de manera dinámica cualquier lista interna que devuelva el BCRA
-                            lista_cheques = []
-                            for k, v in results_ch.items():
-                                if isinstance(v, list):
-                                    lista_cheques = v
-                                    break
+                            causales = results_ch.get('causales', [])
+                            total_cheques_reales = 0
                             
-                            if lista_cheques:
-                                datos_cliente['cheques_rechazados'] = len(lista_cheques)
-                            else:
-                                # Doble verificación por conteo de palabras clave si cambia la estructura
-                                texto_bajo = contenido_cheque.lower()
-                                datos_cliente['cheques_rechazados'] = max(
-                                    texto_bajo.count('nrocheque'), 
-                                    texto_bajo.count('causal'), 
-                                    texto_bajo.count('numerocheque')
-                                )
+                            # 🔧 CORRECCIÓN CORE: Iteramos sobre las causales para contar los detalles (cheques)
+                            for causal in causales:
+                                detalles = causal.get('detalles', [])
+                                if not detalles:
+                                    # Fallback dinámico por si el BCRA usa una key interna distinta a 'detalles'
+                                    for k, v in causal.items():
+                                        if isinstance(v, list):
+                                            detalles = v
+                                            break
+                                total_cheques_reales += len(detalles)
+                            
+                            datos_cliente['cheques_rechazados'] = total_cheques_reales
+                            
                         elif status_interno == 404:
                             datos_cliente['cheques_rechazados'] = 0
                         elif status_interno == 429:
                             datos_cliente['cheques_rechazados'] = -429
                         else:
                             datos_cliente['cheques_rechazados'] = -1
-                    except:
-                        texto_bajo = contenido_cheque.lower()
-                        datos_cliente['cheques_rechazados'] = max(texto_bajo.count('nrocheque'), texto_bajo.count('causal'))
+                    except Exception:
+                        # 🔧 CORRECCIÓN: Si el JSON falla o viene en HTML, buscamos las keys de forma segura
+                        texto_bajo = str(contenido_cheque).lower()
+                        datos_cliente['cheques_rechazados'] = max(
+                            texto_bajo.count('nrocheque'), 
+                            texto_bajo.count('numerocheque')
+                        )
             
             return datos_cliente
             
