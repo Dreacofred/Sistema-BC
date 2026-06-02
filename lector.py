@@ -862,8 +862,7 @@ elif opcion == "Verificación BCRA":
                 model='gemini-2.5-pro',
                 contents=[prompt_cot, img_lote]
             )
-            txt = res.text.replace("```json", "").replace("
-```", "").strip()
+            txt = res.text.replace("```json", "").replace("```", "").strip()
             
             # Asegurar parseo aislando solo la matriz JSON
             start = txt.find('[')
