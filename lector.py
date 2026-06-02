@@ -766,8 +766,8 @@ elif opcion == "Verificación BCRA": # Podes cambiar el nombre en tu menú a "Ri
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
     
     # ⚠️ REEMPLAZAR CON TUS LLAVES
-    API_KEY_SCRAPER = "PEGA_TU_API_KEY_AQUI"
-    # genai.configure(api_key="TU_API_KEY_DE_GEMINI") 
+    API_KEY_SCRAPER = "cf3ae8aaf0457292c6e2f8983b207139"  
+    genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
     
     # --- FUNCIONES CORE ---
     def consultar_bcra_completo(cuit):
