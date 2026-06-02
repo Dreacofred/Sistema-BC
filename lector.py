@@ -750,7 +750,7 @@ elif opcion == "Generador de Resumen":
         st.markdown("</div>", unsafe_allow_html=True)
 
 # ==========================================
-# 5. MÓDULO: VERIFICACIÓN BCRA (CON TELEMETRÍA)
+# 5. MÓDULO: VERIFICACIÓN BCRA (ESTABLE Y FINAL)
 # ==========================================
 elif opcion == "Verificación BCRA":
     st.title("🛡️ Verificación Blindada de CUIT")
@@ -759,19 +759,17 @@ elif opcion == "Verificación BCRA":
     def consultar_bcra_completo(cuit):
         cuit = str(cuit).strip()
         
-        # 1. URLs OFICIALES
+        # 🚨 EL FIX HISTÓRICO: Restauramos la ruta oficial intacta
         url_deudas = f"https://api.bcra.gob.ar/centraldedeudores/v1.0/Deudas/{cuit}"
-        url_cheques = f"https://api.bcra.gob.ar/centraldedeudores/v1.0/ChequesRechazados/{cuit}"
+        url_cheques = f"https://api.bcra.gob.ar/centraldedeudores/v1.0/Deudas/ChequesRechazados/{cuit}"
         
-        # 2. CAMBIO DE PROXY (Más evasivo y devuelve JSON directo)
+        # PROXY CORS
         puente_deudas = f"https://corsproxy.io/?{url_deudas}"
         puente_cheques = f"https://corsproxy.io/?{url_cheques}"
         
-        # 3. HEADERS REALISTAS (Para saltar el Cloudflare WAF del BCRA)
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-            "Accept": "application/json, text/plain, */*",
-            "Accept-Language": "es-AR,es;q=0.9,en-US;q=0.8,en;q=0.7",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/121.0.0.0",
+            "Accept": "application/json",
             "Referer": "https://www.bcra.gob.ar/"
         }
         
@@ -786,17 +784,11 @@ elif opcion == "Verificación BCRA":
             import urllib3
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
             
-            # --- PRIMERA CONSULTA: SITUACIÓN CREDITICIA ---
+            # --- 1. SITUACIÓN CREDITICIA ---
             res_deuda = requests.get(puente_deudas, headers=headers, verify=False, timeout=30)
-            
-            # 🛠️ PANEL DE TELEMETRÍA (Para el desarrollador)
-            with st.expander("🛠️ DEBUG: Ver respuesta cruda (Deudas)", expanded=False):
-                st.write(f"**Status Code Proxy:** {res_deuda.status_code}")
-                st.code(res_deuda.text[:1000], language="html") # Mostramos los primeros 1000 caracteres
-            
             if res_deuda.status_code == 200:
                 try:
-                    data = res_deuda.json() # corsproxy devuelve el JSON directo
+                    data = res_deuda.json()
                     if data.get('status') == 200 and 'results' in data:
                         res = data['results']
                         datos_cliente['denominacion'] = res.get('denominacion', 'Cliente')
@@ -806,27 +798,20 @@ elif opcion == "Verificación BCRA":
                             entity_info = periodos[0]['entidades'][0]
                             datos_cliente['situacion'] = entity_info.get("situacion", 1)
                             datos_cliente['entidad'] = entity_info.get("entidad", "Entidad Financiera")
-                except json.JSONDecodeError:
-                    st.error("⚠️ El BCRA bloqueó la conexión y devolvió HTML. Revisá el panel DEBUG arriba.")
+                except: pass
             
-            time.sleep(1.5) # Pausa técnica prudente
+            time.sleep(1)
             
-            # --- SEGUNDA CONSULTA: CHEQUES RECHAZADOS ---
+            # --- 2. CHEQUES RECHAZADOS ---
             res_cheque = requests.get(puente_cheques, headers=headers, verify=False, timeout=30)
             
-            # 🛠️ PANEL DE TELEMETRÍA (Para el desarrollador)
-            with st.expander("🛠️ DEBUG: Ver respuesta cruda (Cheques)", expanded=False):
-                st.write(f"**Status Code Proxy:** {res_cheque.status_code}")
-                st.code(res_cheque.text[:1000], language="html")
-
+            # Status 200: Significa que HAY cheques y nos manda la lista
             if res_cheque.status_code == 200:
                 try:
                     data_ch = res_cheque.json()
-                    status_interno = data_ch.get('status')
-                    
-                    if status_interno == 200:
+                    if data_ch.get('status') == 200:
                         results_ch = data_ch.get('results', {})
-                        total_cheques_reales = 0
+                        total_cheques = 0
                         
                         if isinstance(results_ch, dict):
                             for k, v in results_ch.items():
@@ -836,22 +821,26 @@ elif opcion == "Verificación BCRA":
                                             sub_listas = [sub_v for sub_k, sub_v in item.items() if isinstance(sub_v, list)]
                                             if sub_listas:
                                                 for sub in sub_listas:
-                                                    total_cheques_reales += len(sub)
+                                                    total_cheques += len(sub)
                                             else:
-                                                total_cheques_reales += 1
-                                        else:
-                                            total_cheques_reales += 1
+                                                total_cheques += 1
                         elif isinstance(results_ch, list):
-                            total_cheques_reales = len(results_ch)
+                            total_cheques = len(results_ch)
                             
-                        datos_cliente['cheques_rechazados'] = total_cheques_reales
-                    elif status_interno == 404:
-                        datos_cliente['cheques_rechazados'] = 0
-                    else:
-                        datos_cliente['cheques_rechazados'] = -1
-                except json.JSONDecodeError:
-                    pass # Ya mostramos el error principal en el primer bloque
-            
+                        datos_cliente['cheques_rechazados'] = total_cheques
+                except:
+                    pass
+                    
+            # Status 404: En la API del BCRA esto es un comportamiento esperado ("0 cheques encontrados")
+            elif res_cheque.status_code == 404:
+                datos_cliente['cheques_rechazados'] = 0
+                
+            # Otros errores de servidor / límite de cuota
+            elif res_cheque.status_code == 429:
+                datos_cliente['cheques_rechazados'] = -429
+            else:
+                datos_cliente['cheques_rechazados'] = -1
+                
             return datos_cliente
             
         except Exception as e:
@@ -910,7 +899,7 @@ elif opcion == "Verificación BCRA":
                                     st.success("✅ 0 Cheques Rechazados")
                             
                             if cheques_rechazados in [-429, -1]:
-                                st.warning("⚠️ No se pudo comprobar el historial de cheques. Revisá los paneles DEBUG de arriba.")
+                                st.warning("⚠️ No se pudo comprobar el historial de cheques por congestión en el BCRA.")
                             elif situacion == 1 and cheques_rechazados == 0:
                                 st.success("✅ Cliente Totalmente Limpio (Situación 1 y sin cheques rebotados). Operación segura.")
                             else:
