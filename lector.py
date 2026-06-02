@@ -759,23 +759,8 @@ elif opcion == "Verificación BCRA":
     def consultar_bcra_completo(cuit):
         cuit = str(cuit).strip()
         
-        # 1. URLs OFICIALES INTACTAS (Con la ruta /Deudas/ incluida en cheques)
-        url_deudas = f"https://api.bcra.gob.ar/centraldedeudores/v1.0/Deudas/{cuit}"
-        url_cheques = f"https://api.bcra.gob.ar/centraldedeudores/v1.0/Deudas/ChequesRechazados/{cuit}"
-        
-        # 2. VOLVEMOS A ALLORIGINS (Para evitar el Error 500 / Rate Limit de corsproxy)
-        import time
-        import urllib.parse
-        import json
-        
-        # Usamos disableCache=true nativo y un timestamp (cb) para forzar datos frescos
-        cb = int(time.time())
-        puente_deudas = f"https://api.allorigins.win/get?url={urllib.parse.quote(url_deudas)}&disableCache=true&cb={cb}"
-        puente_cheques = f"https://api.allorigins.win/get?url={urllib.parse.quote(url_cheques)}&disableCache=true&cb={cb}"
-        
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/121.0.0.0 Safari/537.36"
-        }
+        # 1. PUENTE PRIVADO DE GOOGLE APPS SCRIPT (By-pass Cloudflare)
+        url_gas = "https://script.google.com/macros/s/AKfycby7oUVHbp8Kt-cxVAFPOKS83xbDTpIVFuxaAYrioKls6FlwaBPmAIzHktnGHrbO6zHt/exec"
         
         datos_cliente = {
             "situacion": 1,
@@ -786,82 +771,81 @@ elif opcion == "Verificación BCRA":
         
         try:
             import urllib3
+            import time
+            import requests
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
             
             # --- 1. SITUACIÓN CREDITICIA ---
-            res_deuda = requests.get(puente_deudas, headers=headers, verify=False, timeout=30)
+            res_deuda = requests.get(f"{url_gas}?cuit={cuit}&tipo=deudas", verify=False, timeout=30)
+            
             if res_deuda.status_code == 200:
-                contenido_deuda = res_deuda.json().get('contents')
-                if contenido_deuda:
-                    try:
-                        data = json.loads(contenido_deuda)
-                        if data.get('status') == 200 and 'results' in data:
-                            res = data['results']
-                            datos_cliente['denominacion'] = res.get('denominacion', 'Cliente')
-                            
-                            periodos = res.get('periodos', [])
-                            if periodos and 'entidades' in periodos[0] and periodos[0]['entidades']:
-                                entity_info = periodos[0]['entidades'][0]
-                                datos_cliente['situacion'] = entity_info.get("situacion", 1)
-                                datos_cliente['entidad'] = entity_info.get("entidad", "Entidad Financiera")
-                    except:
-                        pass
+                try:
+                    data = res_deuda.json() # Ahora recibimos el JSON puro de Google
+                    if data.get('status') == 200 and 'results' in data:
+                        res = data['results']
+                        datos_cliente['denominacion'] = res.get('denominacion', 'Cliente')
+                        
+                        periodos = res.get('periodos', [])
+                        if periodos and 'entidades' in periodos[0] and periodos[0]['entidades']:
+                            entity_info = periodos[0]['entidades'][0]
+                            datos_cliente['situacion'] = entity_info.get("situacion", 1)
+                            datos_cliente['entidad'] = entity_info.get("entidad", "Entidad Financiera")
+                except Exception as e:
+                    pass
             
             time.sleep(1) # Pausa técnica prudente
             
             # --- 2. CHEQUES RECHAZADOS ---
-            res_cheque = requests.get(puente_cheques, headers=headers, verify=False, timeout=30)
+            res_cheque = requests.get(f"{url_gas}?cuit={cuit}&tipo=cheques", verify=False, timeout=30)
             
-            # AllOrigins SIEMPRE devuelve 200 si el puente funciona. El código real viene adentro.
             if res_cheque.status_code == 200:
-                contenido_cheque = res_cheque.json().get('contents')
-                if contenido_cheque:
-                    try:
-                        data_ch = json.loads(contenido_cheque)
-                        status_interno = data_ch.get('status')
+                try:
+                    data_ch = res_cheque.json()
+                    status_interno = data_ch.get('status')
+                    
+                    # 200: El BCRA encontró cheques y los lista
+                    if status_interno == 200:
+                        results_ch = data_ch.get('results', {})
+                        total_cheques = 0
                         
-                        # 200: El BCRA encontró cheques y los lista
-                        if status_interno == 200:
-                            results_ch = data_ch.get('results', {})
-                            total_cheques = 0
-                            
-                            # Parseo profundo dinámico: Busca la lista de cheques sin importar el nombre de la variable
-                            if isinstance(results_ch, dict):
-                                for k, v in results_ch.items():
-                                    if isinstance(v, list):
-                                        for item in v:
-                                            if isinstance(item, dict):
-                                                sub_listas = [sub_v for sub_k, sub_v in item.items() if isinstance(sub_v, list)]
-                                                if sub_listas:
-                                                    for sub in sub_listas:
-                                                        total_cheques += len(sub)
-                                                else:
-                                                    total_cheques += 1
+                        # Parseo profundo dinámico
+                        if isinstance(results_ch, dict):
+                            for k, v in results_ch.items():
+                                if isinstance(v, list):
+                                    for item in v:
+                                        if isinstance(item, dict):
+                                            sub_listas = [sub_v for sub_k, sub_v in item.items() if isinstance(sub_v, list)]
+                                            if sub_listas:
+                                                for sub in sub_listas:
+                                                    total_cheques += len(sub)
                                             else:
                                                 total_cheques += 1
-                            elif isinstance(results_ch, list):
-                                total_cheques = len(results_ch)
-                                
-                            datos_cliente['cheques_rechazados'] = total_cheques
+                                        else:
+                                            total_cheques += 1
+                        elif isinstance(results_ch, list):
+                            total_cheques = len(results_ch)
                             
-                        # 404: El BCRA confirma oficialmente que NO HAY cheques rechazados (Cliente limpio)
-                        elif status_interno == 404:
-                            datos_cliente['cheques_rechazados'] = 0
-                            
-                        # 429: Saturación de peticiones al BCRA
-                        elif status_interno == 429:
-                            datos_cliente['cheques_rechazados'] = -429
-                        else:
-                            datos_cliente['cheques_rechazados'] = -1
-                    except:
+                        datos_cliente['cheques_rechazados'] = total_cheques
+                        
+                    # 404: El BCRA confirma oficialmente que NO HAY cheques rechazados (Cliente limpio)
+                    elif status_interno == 404:
+                        datos_cliente['cheques_rechazados'] = 0
+                        
+                    # 429: Saturación de peticiones al BCRA
+                    elif status_interno == 429:
+                        datos_cliente['cheques_rechazados'] = -429
+                    else:
                         datos_cliente['cheques_rechazados'] = -1
-                else:
+                except Exception:
                     datos_cliente['cheques_rechazados'] = -1
             else:
                 datos_cliente['cheques_rechazados'] = -1
                 
             return datos_cliente
             
+        except requests.exceptions.Timeout:
+            st.warning("⏱️ Tiempo de espera agotado. El puente tardó demasiado en responder.")
+            return None
         except Exception as e:
             st.error(f"Error de conexión interna: {str(e)}")
             return None
