@@ -752,8 +752,8 @@ elif opcion == "Generador de Resumen":
 # ==========================================
 # 5. MÓDULO: VERIFICACIÓN BCRA (100% CLOUD VÍA SCRAPERAPI - FIX 404)
 # ==========================================
-elif opcion == "Verificación BCRA":
-    st.title("🛡️ Verificación Blindada de CUIT")
+elif opcion == "Consultas en BCRA":
+    st.title("🛡️ Consultas en Blindada de CUIT")
     st.markdown('<p style="color:#666; font-size:16px;">Consultá el estado crediticio y el historial de cheques rechazados en el BCRA.</p>', unsafe_allow_html=True)
     
     def consultar_bcra_completo(cuit):
