@@ -760,7 +760,7 @@ elif opcion == "Verificación BCRA":
         cuit = str(cuit).strip()
         
         # 1. PUENTE PRIVADO DE GOOGLE APPS SCRIPT (By-pass Cloudflare)
-        url_gas = "https://script.google.com/macros/s/AKfycby7oUVHbp8Kt-cxVAFPOKS83xbDTpIVFuxaAYrioKls6FlwaBPmAIzHktnGHrbO6zHt/exec"
+        url_gas = "https://script.google.com/macros/s/AKfycbzRPEcIcxOqSBDGH8LJyaVpjsMUWum9ifKkki6-MoCfFETT4uO79_h_uhj7V_--Qw0U/exec"
         
         datos_cliente = {
             "situacion": 1,
@@ -780,7 +780,7 @@ elif opcion == "Verificación BCRA":
             
             if res_deuda.status_code == 200:
                 try:
-                    data = res_deuda.json() # Ahora recibimos el JSON puro de Google
+                    data = res_deuda.json() # Recibimos el JSON puro de Google
                     if data.get('status') == 200 and 'results' in data:
                         res = data['results']
                         datos_cliente['denominacion'] = res.get('denominacion', 'Cliente')
@@ -790,7 +790,7 @@ elif opcion == "Verificación BCRA":
                             entity_info = periodos[0]['entidades'][0]
                             datos_cliente['situacion'] = entity_info.get("situacion", 1)
                             datos_cliente['entidad'] = entity_info.get("entidad", "Entidad Financiera")
-                except Exception as e:
+                except Exception:
                     pass
             
             time.sleep(1) # Pausa técnica prudente
