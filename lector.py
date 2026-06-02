@@ -839,32 +839,27 @@ elif opcion == "Verificación BCRA":
         2. El Emisor del cheque NUNCA es el nombre que sigue a "Páguese a". Ignora ese nombre gigante.
         3. Ve siempre a la parte INFERIOR del cheque (junto a la firma o el logo del banco). 
         4. Extrae de ahí el CUIT (11 dígitos, suelen empezar con 20, 23, 27, 30) y la Razón Social del EMISOR.
+        5. Busca el NÚMERO DEL CHEQUE. Generalmente está en la esquina superior derecha o en la serie de números de la banda inferior.
         
         ESTRUCTURA DE RESPUESTA OBLIGATORIA:
         Devuelve ÚNICAMENTE un JSON puro (sin formato markdown) que sea una LISTA de objetos, uno por cada cheque:
         [
           {
             "id": 1,
+            "numero_cheque": "84512356",
             "emisor": "RAZON SOCIAL 1",
             "cuit": "20123456789"
-          },
-          {
-            "id": 2,
-            "emisor": "RAZON SOCIAL 2",
-            "cuit": "ERROR_LECTURA"
           }
         ]
-        Si un CUIT no es legible con un 100% de seguridad, devuelve "ERROR_LECTURA" en ese campo. No inventes datos.
+        Si un dato no es legible con un 100% de seguridad, devuelve "ERROR_LECTURA" en ese campo específico.
         """
         try:
-            # ARQUITECTURA: Pasamos el control al modelo PRO (razonamiento profundo)
             res = cliente_ia.models.generate_content(
                 model='gemini-2.5-pro',
                 contents=[prompt_cot, img_lote]
             )
             txt = res.text.replace("```json", "").replace("```", "").strip()
             
-            # Asegurar parseo aislando solo la matriz JSON
             start = txt.find('[')
             end = txt.rfind(']') + 1
             if start != -1 and end != 0:
@@ -951,10 +946,10 @@ elif opcion == "Verificación BCRA":
                     # 2. Ruteo y limpieza de datos
                     if isinstance(lista_cheques_ia, list) and len(lista_cheques_ia) > 0:
                         for cheque in lista_cheques_ia:
+                            nro_cheque_crudo = str(cheque.get("numero_cheque", "No detectado"))
                             emisor_crudo = cheque.get("emisor", "DESCONOCIDO")
                             cuit_crudo = str(cheque.get("cuit", ""))
                             
-                            # La Aspiradora Regex (Destruye espacios o letras invisibles)
                             cuit_limpio = re.sub(r'\D', '', cuit_crudo)
                             
                             datos_bcra = None
@@ -963,6 +958,7 @@ elif opcion == "Verificación BCRA":
                             
                             resultados_finales.append({
                                 "id": cheque.get("id", 0),
+                                "numero_cheque": nro_cheque_crudo,
                                 "emisor": emisor_crudo,
                                 "cuit_leido": cuit_crudo,
                                 "cuit_limpio": cuit_limpio,
@@ -983,7 +979,8 @@ elif opcion == "Verificación BCRA":
                     st.image(st.session_state['foto_lote_actual'], use_container_width=True)
             
             for cheque in st.session_state['resultados_ia_bcra']:
-                st.markdown(f"#### 🏦 Cheque #{cheque['id']}")
+                # ACÁ AGREGAMOS EL NÚMERO DE CHEQUE AL TÍTULO
+                st.markdown(f"#### 🏦 Cheque #{cheque['id']} (Nº {cheque['numero_cheque']})")
                 st.info(f"**Emisor identificado:** {cheque['emisor']} | **CUIT Extraído:** `{cheque['cuit_leido']}`")
                 
                 if cheque['cuit_leido'] == "ERROR_LECTURA" or len(cheque['cuit_limpio']) != 11:
