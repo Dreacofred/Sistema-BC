@@ -750,37 +750,35 @@ elif opcion == "Generador de Resumen":
         st.markdown("</div>", unsafe_allow_html=True)
 
 # ==========================================
-# 5. MÓDULO: VERIFICACIÓN BCRA (100% CLOUD VÍA SCRAPERAPI - FIX 404)
+# 5. MÓDULO: VERIFICACIÓN BCRA Y CHEQUES (MANUAL + IA)
 # ==========================================
-elif opcion == "Consultas en BCRA":
-    st.title("🛡️ Consultas en Blindada de CUIT")
-    st.markdown('<p style="color:#666; font-size:16px;">Consultá el estado crediticio y el historial de cheques rechazados en el BCRA.</p>', unsafe_allow_html=True)
+elif opcion == "Verificación BCRA": # Podes cambiar el nombre en tu menú a "Riesgo y Cheques"
+    st.title("🛡️ Centro de Verificación y Riesgo (BCRA)")
+    st.markdown('<p style="color:#666; font-size:16px;">Auditá CUITs manualmente o procesá lotes de cheques con IA.</p>', unsafe_allow_html=True)
     
+    import requests
+    import time
+    import json
+    import urllib3
+    from PIL import Image
+    import google.generativeai as genai
+    
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+    
+    # ⚠️ REEMPLAZAR CON TUS LLAVES
+    API_KEY_SCRAPER = "PEGA_TU_API_KEY_AQUI"
+    # genai.configure(api_key="TU_API_KEY_DE_GEMINI") 
+    
+    # --- FUNCIONES CORE ---
     def consultar_bcra_completo(cuit):
         cuit = str(cuit).strip()
-        
-        # 🔑 TU LLAVE DE ACCESO DE SCRAPERAPI
-        API_KEY = "cf3ae8aaf0457292c6e2f8983b207139"
-        
         url_deudas = f"https://api.bcra.gob.ar/centraldedeudores/v1.0/Deudas/{cuit}"
         url_cheques = f"https://api.bcra.gob.ar/centraldedeudores/v1.0/Deudas/ChequesRechazados/{cuit}"
         
-        datos_cliente = {
-            "situacion": 1,
-            "entidad": "Sin Registros",
-            "denominacion": "Cliente Desconocido",
-            "cheques_rechazados": 0
-        }
+        datos_cliente = {"situacion": 1, "entidad": "Sin Registros", "denominacion": "Cliente Desconocido", "cheques_rechazados": 0}
         
         try:
-            import requests
-            import time
-            import json
-            import urllib3
-            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-            
-            # --- 1. SITUACIÓN CREDITICIA ---
-            payload_deudas = {'api_key': API_KEY, 'url': url_deudas, 'render': 'false'}
+            payload_deudas = {'api_key': API_KEY_SCRAPER, 'url': url_deudas, 'render': 'false'}
             res_deuda = requests.get('https://api.scraperapi.com/', params=payload_deudas, timeout=45)
             
             if res_deuda.status_code == 200:
@@ -789,28 +787,23 @@ elif opcion == "Consultas en BCRA":
                     if data.get('status') == 200 and 'results' in data:
                         res = data['results']
                         datos_cliente['denominacion'] = res.get('denominacion', 'Cliente')
-                        
                         periodos = res.get('periodos', [])
                         if periodos and 'entidades' in periodos[0] and periodos[0]['entidades']:
                             entity_info = periodos[0]['entidades'][0]
                             datos_cliente['situacion'] = entity_info.get("situacion", 1)
                             datos_cliente['entidad'] = entity_info.get("entidad", "Entidad Financiera")
-                except Exception:
-                    pass
+                except Exception: pass
             
-            time.sleep(1) # Respiro para el proxy
+            time.sleep(1) 
             
-            # --- 2. CHEQUES RECHAZADOS ---
-            payload_cheques = {'api_key': API_KEY, 'url': url_cheques, 'render': 'false'}
+            payload_cheques = {'api_key': API_KEY_SCRAPER, 'url': url_cheques, 'render': 'false'}
             res_cheque = requests.get('https://api.scraperapi.com/', params=payload_cheques, timeout=45)
             
-            # 🟢 CASO A: Cliente SUCIO (Tiene cheques, el BCRA devuelve 200 y la lista)
             if res_cheque.status_code == 200:
                 try:
                     data_ch = res_cheque.json()
                     results_ch = data_ch.get('results', {})
                     total_cheques = 0
-                    
                     if isinstance(results_ch, dict):
                         for k, v in results_ch.items():
                             if isinstance(v, list):
@@ -818,113 +811,159 @@ elif opcion == "Consultas en BCRA":
                                     if isinstance(item, dict):
                                         sub_listas = [sub_v for sub_k, sub_v in item.items() if isinstance(sub_v, list)]
                                         if sub_listas:
-                                            for sub in sub_listas:
-                                                total_cheques += len(sub)
-                                        else:
-                                            total_cheques += 1
-                                    else:
-                                        total_cheques += 1
-                    elif isinstance(results_ch, list):
-                        total_cheques = len(results_ch)
+                                            for sub in sub_listas: total_cheques += len(sub)
+                                        else: total_cheques += 1
+                                    else: total_cheques += 1
+                    elif isinstance(results_ch, list): total_cheques = len(results_ch)
                         
                     if total_cheques == 0:
                         json_str = json.dumps(data_ch).lower()
                         total_cheques = max(json_str.count('"nrocheque"'), json_str.count('"fecharechazo"'), json_str.count('"numerocheque"'))
-                        
-                    if total_cheques == 0 and results_ch:
-                        total_cheques = 1
+                    if total_cheques == 0 and results_ch: total_cheques = 1
                         
                     datos_cliente['cheques_rechazados'] = total_cheques
-                except Exception:
-                    datos_cliente['cheques_rechazados'] = -1
-                    
-            # 🟢 CASO B: Cliente LIMPIO (El BCRA responde HTTP 404 indicando 0 cheques)
-            elif res_cheque.status_code == 404:
-                datos_cliente['cheques_rechazados'] = 0
-                
-            # 🔴 CASOS DE ERROR REALES
-            elif res_cheque.status_code == 429:
-                datos_cliente['cheques_rechazados'] = -429
-            else:
-                datos_cliente['cheques_rechazados'] = -1
+                except Exception: datos_cliente['cheques_rechazados'] = -1
+            elif res_cheque.status_code == 404: datos_cliente['cheques_rechazados'] = 0
+            elif res_cheque.status_code == 429: datos_cliente['cheques_rechazados'] = -429
+            else: datos_cliente['cheques_rechazados'] = -1
                 
             return datos_cliente
-            
-        except requests.exceptions.Timeout:
-            st.warning("⏱️ Tiempo de espera agotado. El proxy tardó demasiado en responder.")
-            return None
-        except Exception as e:
-            st.error(f"Error de conexión interna: {str(e)}")
-            return None
+        except Exception: return None
 
-    def guardar_cuit_afectado(cuit, situacion, nombre, observaciones_extra):
+    def procesar_cheque_ia(img_recorte, num):
+        modelo = genai.GenerativeModel('gemini-1.5-flash') # Ultra rápido para recortes chicos
+        prompt = f"""
+        Actúa como auditor de BC Combustibles. Analiza SOLO la parte inferior de este cheque (Cheque #{num}).
+        REGLA DE ORO: Ignora el monto, la fecha y el nombre del Destinatario ("Páguese a").
+        Busca EXCLUSIVAMENTE el CUIT (11 dígitos sin guiones) y la Razón Social del EMISOR (junto a la firma o en el logo).
+        Si no es legible, devuelve "ERROR_LECTURA".
+        Devuelve estrictamente este JSON: {{"cuit": "valor", "emisor": "valor"}}
+        """
+        try:
+            res = modelo.generate_content([prompt, img_recorte])
+            txt = res.text.replace("```json", "").replace("
+```", "").strip()
+            return json.loads(txt)
+        except Exception:
+            return {"cuit": "ERROR_LECTURA", "emisor": "Fallo IA"}
+
+    def guardar_en_lista_negra(cuit, situacion, nombre, obs):
         try:
             supabase.table("cuits_afectados").insert({
-                "cuit": cuit, 
-                "situacion_bcra": situacion,
-                "observaciones": f"Titular: {nombre} | {observaciones_extra}"
+                "cuit": cuit, "situacion_bcra": situacion, "observaciones": f"Titular: {nombre} | {obs}"
             }).execute()
+            st.success(f"✅ CUIT {cuit} guardado en Lista Negra exitosamente.")
         except Exception as e:
-            st.error(f"Error guardando en BD local: {e}")
+            st.error(f"Error en BD: {e}")
 
-    st.markdown('<div class="tarjeta-pro">', unsafe_allow_html=True)
-    cuit_input = st.text_input("Ingresá el CUIT a verificar (solo números)", max_chars=11, placeholder="Ej: 30123456789")
+    # --- INTERFAZ CON PESTAÑAS ---
+    tab_manual, tab_ia = st.tabs(["✍️ Consulta Manual", "📸 Escáner de Cheques (IA)"])
 
-    if st.button("Validar Riesgo Global"):
-        if len(cuit_input) != 11 or not cuit_input.isdigit():
-            st.error("❌ Por favor, ingresá un CUIT válido de 11 dígitos.")
-        else:
-            try:
+    # ==========================================
+    # PESTAÑA 1: CONSULTA MANUAL
+    # ==========================================
+    with tab_manual:
+        st.markdown('<div class="tarjeta-pro">', unsafe_allow_html=True)
+        cuit_input = st.text_input("Ingresá el CUIT (solo números)", max_chars=11, key="cuit_manual")
+        
+        if st.button("Validar Riesgo Manual"):
+            if len(cuit_input) != 11 or not cuit_input.isdigit():
+                st.error("❌ CUIT inválido.")
+            else:
                 registro_interno = supabase.table("cuits_afectados").select("*").eq("cuit", cuit_input).execute()
-                
                 if registro_interno.data:
-                    st.error(f"⚠️ ¡ATENCIÓN! Este CUIT ya está en nuestra lista de AFECTADOS.")
-                    st.warning(f"Situación registrada anteriormente: Nivel {registro_interno.data[0]['situacion_bcra']}")
-                    st.info("No hace falta consultar al BCRA, ya tenemos antecedentes negativos internos.")
+                    st.error(f"⚠️ Este CUIT ya está en nuestra AFECTADOS (Nivel {registro_interno.data[0]['situacion_bcra']}).")
                 else:
-                    with st.spinner('Consultando historial de Deudas y Cheques en el BCRA (Puede demorar unos segundos)...'):
-                        datos_bcra = consultar_bcra_completo(cuit_input)
-                        
-                        if datos_bcra is None:
-                            st.warning("El servicio no pudo alcanzar al BCRA. Intentá nuevamente.")
-                        else:
-                            situacion = datos_bcra['situacion']
-                            entidad = datos_bcra['entidad']
-                            nombre = datos_bcra['denominacion']
-                            cheques_rechazados = datos_bcra['cheques_rechazados']
-                            
-                            st.markdown(f"**Titular:** {nombre}")
-                            
+                    with st.spinner('Consultando BCRA...'):
+                        datos = consultar_bcra_completo(cuit_input)
+                        if datos:
+                            st.markdown(f"**Titular:** {datos['denominacion']}")
                             col1, col2 = st.columns(2)
-                            with col1: 
-                                st.metric("Situación Crediticia", f"Nivel {situacion}")
-                            with col2: 
-                                if cheques_rechazados == -429:
-                                    st.warning("⚠️ Límite API (429)")
-                                elif cheques_rechazados == -1:
-                                    st.warning("⚠️ Error Lectura (Bloqueo WAF)")
-                                elif cheques_rechazados > 0:
-                                    st.error(f"⚠️ {cheques_rechazados} Cheques Rechazados")
-                                else:
-                                    st.success("✅ 0 Cheques Rechazados")
-                            
-                            if cheques_rechazados in [-429, -1]:
-                                st.warning("⚠️ No se pudo comprobar el historial de cheques. El proxy falló, reintentá.")
-                            elif situacion == 1 and cheques_rechazados == 0:
-                                st.success("✅ Cliente Totalmente Limpio (Situación 1 y sin cheques rebotados). Operación segura.")
+                            col1.metric("Situación", f"Nivel {datos['situacion']}")
+                            if datos['cheques_rechazados'] > 0:
+                                col2.error(f"⚠️ {datos['cheques_rechazados']} Cheques Rechazados")
+                                st.warning("🚨 RIESGO DETECTADO.")
+                                # REGLA: Confirmación explícita para guardar
+                                if st.button("Confirmar y Enviar a Lista Negra", key="btn_save_manual"):
+                                    guardar_en_lista_negra(cuit_input, datos['situacion'], datos['denominacion'], f"Rechazos: {datos['cheques_rechazados']}")
+                            elif datos['cheques_rechazados'] == 0:
+                                col2.success("✅ 0 Cheques")
+                                st.success("Operación segura.")
                             else:
-                                st.error("🚨 RIESGO DETECTADO EN EL BCRA.")
-                                motivos = []
-                                if situacion > 1:
-                                    motivos.append(f"Situación {situacion} en {entidad}")
-                                if cheques_rechazados > 0:
-                                    motivos.append(f"Tiene {cheques_rechazados} cheques rechazados")
-                                
-                                msj_final = " | ".join(motivos)
-                                st.warning(f"Motivo del bloqueo: {msj_final}")
-                                st.warning("El CUIT fue ingresado automáticamente a nuestra lista negra.")
-                                guardar_cuit_afectado(cuit_input, situacion, nombre, f"Bloqueo por: {msj_final}")
-                                
-            except Exception as e:
-                st.error(f"Error de sistema: {e}")
-    st.markdown('</div>', unsafe_allow_html=True)
+                                col2.warning("Error de lectura.")
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    # ==========================================
+    # PESTAÑA 2: ESCÁNER DE CHEQUES (GUILLOTINA + IA)
+    # ==========================================
+    with tab_ia:
+        if 'lote_procesado' not in st.session_state:
+            st.session_state['lote_procesado'] = None
+
+        foto_lote = st.file_uploader("📸 Subí la foto de los 4 cheques", type=['jpg', 'jpeg', 'png'])
+        
+        if foto_lote:
+            if st.button("Procesar Lote y Consultar BCRA", type="primary"):
+                with st.spinner("Cortando imagen, leyendo con IA y consultando BCRA. Esto tomará unos 20 segundos..."):
+                    img = Image.open(foto_lote)
+                    ancho, alto = img.size
+                    if alto > 3000:
+                        img = img.resize((int(ancho * (3000 / alto)), 3000), Image.Resampling.LANCZOS)
+                        ancho, alto = img.size
+                        
+                    alto_corte = alto // 4
+                    resultados_lote = []
+                    
+                    for i in range(4):
+                        recorte = img.crop((0, i * alto_corte, ancho, (i + 1) * alto_corte))
+                        datos_ia = procesar_cheque_ia(recorte, i+1)
+                        
+                        resultado_cheque = {
+                            "id": i+1,
+                            "img": recorte,
+                            "cuit_ia": datos_ia.get("cuit", ""),
+                            "emisor_ia": datos_ia.get("emisor", ""),
+                            "datos_bcra": None
+                        }
+                        
+                        # Si la IA logró leer un CUIT de 11 dígitos, consultamos al BCRA
+                        cuit_limpio = resultado_cheque["cuit_ia"].replace("-", "").strip()
+                        if cuit_limpio.isdigit() and len(cuit_limpio) == 11:
+                            resultado_cheque["datos_bcra"] = consultar_bcra_completo(cuit_limpio)
+                            
+                        resultados_lote.append(resultado_cheque)
+                        
+                    # Guardamos en caché para no volver a gastar API si el usuario hace clic en guardar
+                    st.session_state['lote_procesado'] = resultados_lote
+
+        # --- RENDERIZADO DE RESULTADOS (Caché) ---
+        if st.session_state['lote_procesado']:
+            st.markdown("### 📋 Resultados del Análisis")
+            
+            for cheque in st.session_state['lote_procesado']:
+                st.markdown("---")
+                col_img, col_datos = st.columns([1, 2])
+                
+                with col_img:
+                    st.image(cheque["img"], caption=f"Cheque #{cheque['id']}", use_container_width=True)
+                    
+                with col_datos:
+                    cuit_ia = cheque["cuit_ia"]
+                    st.markdown(f"**Lectura IA:** {cheque['emisor_ia']} (CUIT: `{cuit_ia}`)")
+                    
+                    bcra = cheque["datos_bcra"]
+                    if bcra:
+                        if bcra['situacion'] == 1 and bcra['cheques_rechazados'] == 0:
+                            st.success(f"✅ BCRA: {bcra['denominacion']} | Sit: 1 | 0 Rechazos")
+                        else:
+                            st.error(f"🚨 BCRA: {bcra['denominacion']} | Sit: {bcra['situacion']} | Rechazos: {bcra['cheques_rechazados']}")
+                            
+                            # REGLA: Confirmación manual con clave única por cheque
+                            if st.button(f"Confirmar Lista Negra (Cheque {cheque['id']})", key=f"btn_bcra_{cheque['id']}"):
+                                guardar_en_lista_negra(cuit_ia, bcra['situacion'], bcra['denominacion'], f"Cheques Rechazados: {bcra['cheques_rechazados']}")
+                    else:
+                        st.warning("⚠️ No se pudo consultar al BCRA (CUIT inválido o error de lectura).")
+                        
+            if st.button("Limpiar Resultados"):
+                st.session_state['lote_procesado'] = None
+                st.rerun()
