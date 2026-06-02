@@ -750,71 +750,79 @@ elif opcion == "Generador de Resumen":
         st.markdown("</div>", unsafe_allow_html=True)
 
 # ==========================================
-# 5. MÓDULO: VERIFICACIÓN BCRA (VÍA PUENTE ROBUSTO)
+# 5. MÓDULO: VERIFICACIÓN BCRA (VÍA PUENTE ROBUSTO + CHEQUES)
 # ==========================================
 elif opcion == "Verificación BCRA":
     st.title("🛡️ Verificación Blindada de CUIT")
-    st.markdown('<p style="color:#666; font-size:16px;">Consultá el estado crediticio en la base interna y en el BCRA.</p>', unsafe_allow_html=True)
+    st.markdown('<p style="color:#666; font-size:16px;">Consultá el estado crediticio y el historial de cheques rechazados en el BCRA.</p>', unsafe_allow_html=True)
     
-    def consultar_bcra(cuit):
+    def consultar_bcra_completo(cuit):
         cuit = str(cuit).strip()
-        url_oficial = f"[https://api.bcra.gob.ar/centraldedeudores/v1.0/Deudas/](https://api.bcra.gob.ar/centraldedeudores/v1.0/Deudas/){cuit}"
-        url_puente = f"[https://api.allorigins.win/get?url=](https://api.allorigins.win/get?url=){requests.utils.quote(url_oficial)}"
         
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) BC-Combustibles/1.0"
+        # 1. Armamos las dos URLs oficiales del BCRA
+        url_deudas = f"https://api.bcra.gob.ar/centraldedeudores/v1.0/Deudas/{cuit}"
+        url_cheques = f"https://api.bcra.gob.ar/centraldedeudores/v1.0/Deudas/ChequesRechazados/{cuit}"
+        
+        # 2. Las pasamos por el puente para saltar el bloqueo geográfico
+        puente_deudas = f"https://api.allorigins.win/get?url={requests.utils.quote(url_deudas)}"
+        puente_cheques = f"https://api.allorigins.win/get?url={requests.utils.quote(url_cheques)}"
+        
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) BC-Combustibles/1.0"}
+        
+        # Estructura base que vamos a devolver
+        datos_cliente = {
+            "situacion": 1,
+            "entidad": "Sin Registros",
+            "denominacion": "Cliente Desconocido",
+            "cheques_rechazados": 0
         }
         
         try:
             import urllib3
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
             
-            response = requests.get(url_puente, headers=headers, verify=False, timeout=30)
+            # --- PRIMERA CONSULTA: SITUACIÓN CREDITICIA ---
+            res_deuda = requests.get(puente_deudas, headers=headers, verify=False, timeout=30)
+            if res_deuda.status_code == 200:
+                contenido_deuda = res_deuda.json().get('contents')
+                if contenido_deuda:
+                    data = json.loads(contenido_deuda)
+                    if data.get('status') == 200 and 'results' in data:
+                        res = data['results']
+                        datos_cliente['denominacion'] = res.get('denominacion', 'Cliente')
+                        periodos = res.get('periodos', [])
+                        
+                        if periodos and 'entidades' in periodos[0] and periodos[0]['entidades']:
+                            entidad_info = periodos[0]['entidades'][0]
+                            datos_cliente['situacion'] = entidad_info.get("situacion", 1)
+                            datos_cliente['entidad'] = entidad_info.get("entidad", "Entidad Financiera")
             
-            if response.status_code == 200:
-                wrapper_data = response.json()
-                inner_content = wrapper_data.get('contents')
-                
-                if not inner_content: return None
-
-                data = json.loads(inner_content)
-                
-                if data.get('status') == 200 and 'results' in data:
-                    res = data['results']
-                    periodos = res.get('periodos', [])
-                    
-                    if periodos and 'entidades' in periodos[0] and periodos[0]['entidades']:
-                        entidad_info = periodos[0]['entidades'][0]
-                        return {
-                            "situacion": entidad_info.get("situacion", 1),
-                            "entidad": entidad_info.get("entidad", "Entidad Financiera"),
-                            "denominacion": res.get('denominacion', 'Cliente')
-                        }
-                    else:
-                        return "SIN_DEUDAS"
-                elif data.get('status') == 404:
-                    return "SIN_DEUDAS"
-                
-                return None
-                
-            elif response.status_code == 404: return "SIN_DEUDAS"
-            else:
-                st.error(f"Error en Puente: {response.status_code}")
-                return None
-                
+            # Pausa para no saturar el puente (igual que en tu script)
+            time.sleep(1)
+            
+            # --- SEGUNDA CONSULTA: CHEQUES RECHAZADOS ---
+            res_cheque = requests.get(puente_cheques, headers=headers, verify=False, timeout=30)
+            if res_cheque.status_code == 200:
+                contenido_cheque = res_cheque.json().get('contents', '')
+                if contenido_cheque:
+                    # Aplicamos tu genial truco: contamos cuántas veces aparece "NroCheque" en el texto
+                    datos_cliente['cheques_rechazados'] = contenido_cheque.count('NroCheque')
+            
+            return datos_cliente
+            
         except requests.exceptions.Timeout:
-            st.warning("⏱️ El puente gratuito está saturado y tardó demasiado. Volvé a intentar en unos segundos.")
+            st.warning("⏱️ El puente gratuito está saturado. Volvé a intentar en unos segundos.")
             return None
         except Exception as e:
             st.error(f"Error interno: {str(e)}")
             return None
 
-    def guardar_cuit_afectado(cuit, situacion, nombre):
+    def guardar_cuit_afectado(cuit, situacion, nombre, observaciones_extra):
         try:
             supabase.table("cuits_afectados").insert({
                 "cuit": cuit, 
                 "situacion_bcra": situacion,
-                "observaciones": f"Titular: {nombre} - BCRA Oficial (Vía Puente)"
+                "observaciones": f"Titular: {nombre} | {observaciones_extra}"
             }).execute()
         except Exception as e:
             st.error(f"Error guardando en BD local: {e}")
@@ -822,7 +830,7 @@ elif opcion == "Verificación BCRA":
     st.markdown('<div class="tarjeta-pro">', unsafe_allow_html=True)
     cuit_input = st.text_input("Ingresá el CUIT a verificar (solo números)", max_chars=11, placeholder="Ej: 30123456789")
 
-    if st.button("Validar Riesgo"):
+    if st.button("Validar Riesgo Global"):
         if len(cuit_input) != 11 or not cuit_input.isdigit():
             st.error("❌ Por favor, ingresá un CUIT válido de 11 dígitos.")
         else:
@@ -834,28 +842,48 @@ elif opcion == "Verificación BCRA":
                     st.warning(f"Situación registrada anteriormente: Nivel {registro_interno.data[0]['situacion_bcra']}")
                     st.info("No hace falta consultar al BCRA, ya tenemos antecedentes negativos internos.")
                 else:
-                    with st.spinner('Consultando base oficial del Banco Central vía API Puente...'):
-                        datos_bcra = consultar_bcra(cuit_input)
+                    with st.spinner('Consultando historial de Deudas y Cheques en el BCRA...'):
+                        datos_bcra = consultar_bcra_completo(cuit_input)
                         
-                        if datos_bcra == "SIN_DEUDAS":
-                            st.success("✅ Cliente Limpio. No registra deudas en el sistema financiero (Situación 1). Operación segura.")
-                        elif isinstance(datos_bcra, dict):
+                        if datos_bcra is None:
+                            st.warning("El servicio no pudo alcanzar al BCRA. Intentá nuevamente en unos minutos.")
+                        else:
                             situacion = datos_bcra['situacion']
                             entidad = datos_bcra['entidad']
                             nombre = datos_bcra['denominacion']
+                            cheques_rechazados = datos_bcra['cheques_rechazados']
                             
                             st.markdown(f"**Titular:** {nombre}")
-                            col1, col2 = st.columns(2)
-                            with col1: st.metric("Situación Actual", f"Nivel {situacion}")
                             
-                            if situacion == 1:
-                                st.success(f"✅ Cliente Limpio (Situación 1 en {entidad}). Operación segura.")
+                            # Mostramos los dos indicadores en pantalla
+                            col1, col2 = st.columns(2)
+                            with col1: 
+                                st.metric("Situación Crediticia", f"Nivel {situacion}")
+                            with col2: 
+                                if cheques_rechazados > 0:
+                                    st.error(f"⚠️ {cheques_rechazados} Cheques Rechazados")
+                                else:
+                                    st.success("✅ 0 Cheques Rechazados")
+                            
+                            # Evaluamos el riesgo combinando ambos factores
+                            if situacion == 1 and cheques_rechazados == 0:
+                                st.success("✅ Cliente Totalmente Limpio (Situación 1 y sin cheques rebotados). Operación segura.")
                             else:
-                                st.error(f"🚨 RIESGO DETECTADO: Situación {situacion} en {entidad}.")
+                                st.error("🚨 RIESGO DETECTADO EN EL BCRA.")
+                                
+                                motivos = []
+                                if situacion > 1:
+                                    motivos.append(f"Situación {situacion} en {entidad}")
+                                if cheques_rechazados > 0:
+                                    motivos.append(f"Tiene {cheques_rechazados} cheques rechazados")
+                                
+                                msj_final = " | ".join(motivos)
+                                st.warning(f"Motivo del bloqueo: {msj_final}")
                                 st.warning("El CUIT fue ingresado automáticamente a nuestra lista negra.")
-                                guardar_cuit_afectado(cuit_input, situacion, nombre)
-                        elif datos_bcra is None:
-                            st.warning("El servicio puente no pudo alcanzar al BCRA. Intentá nuevamente en unos minutos.")
+                                
+                                # Guardamos en Supabase aclarando si fue por cheques o por situación
+                                guardar_cuit_afectado(cuit_input, situacion, nombre, f"Bloqueo por: {msj_final}")
+                                
             except Exception as e:
                 st.error(f"Error de sistema: {e}")
     st.markdown('</div>', unsafe_allow_html=True)
