@@ -750,7 +750,7 @@ elif opcion == "Generador de Resumen":
         st.markdown("</div>", unsafe_allow_html=True)
 
 # ==========================================
-# 5. MÓDULO: VERIFICACIÓN BCRA (VÍA PUENTE ROBUSTO + CHEQUES)
+# 5. MÓDULO: VERIFICACIÓN BCRA (VÍA PUENTE ROBUSTO + CHEQUES CORREGIDO)
 # ==========================================
 elif opcion == "Verificación BCRA":
     st.title("🛡️ Verificación Blindada de CUIT")
@@ -793,11 +793,11 @@ elif opcion == "Verificación BCRA":
                         periodos = res.get('periodos', [])
                         
                         if periodos and 'entidades' in periodos[0] and periodos[0]['entidades']:
-                            entidad_info = periodos[0]['entidades'][0]
-                            datos_cliente['situacion'] = entidad_info.get("situacion", 1)
-                            datos_cliente['entidad'] = entidad_info.get("entidad", "Entidad Financiera")
+                            entity_info = periodos[0]['entidades'][0]
+                            datos_cliente['situacion'] = entity_info.get("situacion", 1)
+                            datos_cliente['entidad'] = entity_info.get("entidad", "Entidad Financiera")
             
-            # Pausa para no saturar el puente (igual que en tu script)
+            # Pausa para no saturar el puente
             time.sleep(1)
             
             # --- SEGUNDA CONSULTA: CHEQUES RECHAZADOS ---
@@ -805,8 +805,8 @@ elif opcion == "Verificación BCRA":
             if res_cheque.status_code == 200:
                 contenido_cheque = res_cheque.json().get('contents', '')
                 if contenido_cheque:
-                    # Aplicamos tu genial truco: contamos cuántas veces aparece "NroCheque" en el texto
-                    datos_cliente['cheques_rechazados'] = contenido_cheque.count('NroCheque')
+                    # CORRECCIÓN: Llevamos todo a minúsculas para encontrar "nrocheque" sin importar el formato
+                    datos_cliente['cheques_rechazados'] = contenido_cheque.lower().count('nrocheque')
             
             return datos_cliente
             
