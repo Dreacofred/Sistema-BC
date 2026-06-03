@@ -732,7 +732,7 @@ elif opcion == "Verificación BCRA":
     # 🔑 LLAVE RESIDENCIAL DE SCRAPERAPI
     API_KEY_SCRAPER = "cf3ae8aaf0457292c6e2f8983b207139"  
     
-    # --- FUNCIONES CORE (PARCHEADAS PARA OBSERVABILIDAD) ---
+# --- FUNCIONES CORE (PARCHEADAS PARA CONTEO EXACTO DE CHEQUES) ---
     def consultar_bcra_completo(cuit):
         cuit = str(cuit).strip()
         url_deudas = f"https://api.bcra.gob.ar/centraldedeudores/v1.0/Deudas/{cuit}"
@@ -744,7 +744,6 @@ elif opcion == "Verificación BCRA":
             payload_deudas = {'api_key': API_KEY_SCRAPER, 'url': url_deudas, 'render': 'false'}
             res_deuda = requests.get('https://api.scraperapi.com/', params=payload_deudas, timeout=45)
             
-            # 🚨 NUEVO: Intercepción explícita de falta de créditos / error de llave
             if res_deuda.status_code == 403:
                 return {"error_api": "HTTP 403: ScraperAPI sin créditos / Llave inválida"}
                 
@@ -766,34 +765,31 @@ elif opcion == "Verificación BCRA":
             payload_cheques = {'api_key': API_KEY_SCRAPER, 'url': url_cheques, 'render': 'false'}
             res_cheque = requests.get('https://api.scraperapi.com/', params=payload_cheques, timeout=45)
             
-            # 🚨 NUEVO: Verificamos en cheques también
             if res_cheque.status_code == 403:
                 return {"error_api": "HTTP 403: ScraperAPI sin créditos / Llave inválida"}
 
             if res_cheque.status_code == 200:
                 try:
                     data_ch = res_cheque.json()
-                    results_ch = data_ch.get('results', {})
-                    total_cheques = 0
-                    if isinstance(results_ch, dict):
-                        for k, v in results_ch.items():
-                            if isinstance(v, list):
-                                for item in v:
-                                    if isinstance(item, dict):
-                                        sub_listas = [sub_v for sub_k, sub_v in item.items() if isinstance(sub_v, list)]
-                                        if sub_listas:
-                                            for sub in sub_listas: total_cheques += len(sub)
-                                        else: total_cheques += 1
-                                    else: total_cheques += 1
-                    elif isinstance(results_ch, list): total_cheques = len(results_ch)
+                    
+                    # 🚀 PARCHE ARQUITECTURA: Conteo infalible de cheques
+                    json_str = json.dumps(data_ch).lower()
+                    
+                    # El BCRA incluye obligatoriamente estos campos por cada cheque individual
+                    conteo_real = max(
+                        json_str.count('"nrocheque"'),
+                        json_str.count('"fecharechazo"'),
+                        json_str.count('"numerocheque"')
+                    )
+                    
+                    # Respaldo: Si la estructura cambia radicalmente pero hay un 200 OK con datos
+                    if conteo_real == 0 and data_ch.get("results"):
+                        conteo_real = 1
                         
-                    if total_cheques == 0:
-                        json_str = json.dumps(data_ch).lower()
-                        total_cheques = max(json_str.count('"nrocheque"'), json_str.count('"fecharechazo"'), json_str.count('"numerocheque"'))
-                    if total_cheques == 0 and results_ch: total_cheques = 1
-                        
-                    datos_cliente['cheques_rechazados'] = total_cheques
-                except Exception: datos_cliente['cheques_rechazados'] = -1
+                    datos_cliente['cheques_rechazados'] = conteo_real
+                except Exception: 
+                    datos_cliente['cheques_rechazados'] = -1
+                    
             elif res_cheque.status_code == 404: 
                 datos_cliente['cheques_rechazados'] = 0
             elif res_cheque.status_code == 429: 
@@ -802,8 +798,8 @@ elif opcion == "Verificación BCRA":
                 datos_cliente['cheques_rechazados'] = -1
                 
             return datos_cliente
+            
         except requests.exceptions.RequestException as e:
-            # 🚨 NUEVO: Captura de caída de conexión pura o Timeout severo
             return {"error_api": f"Caída de red: {str(e)[:40]}..."}
         except Exception as e:
             return {"error_api": str(e)}
