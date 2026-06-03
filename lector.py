@@ -732,18 +732,22 @@ elif opcion == "Verificación BCRA":
     # 🔑 LLAVE RESIDENCIAL DE SCRAPERAPI
     API_KEY_SCRAPER = "cf3ae8aaf0457292c6e2f8983b207139"  
     
-    # --- FUNCIONES CORE ---
+    # --- FUNCIONES CORE (PARCHEADAS PARA OBSERVABILIDAD) ---
     def consultar_bcra_completo(cuit):
         cuit = str(cuit).strip()
-        url_deudas = f"[https://api.bcra.gob.ar/centraldedeudores/v1.0/Deudas/](https://api.bcra.gob.ar/centraldedeudores/v1.0/Deudas/){cuit}"
-        url_cheques = f"[https://api.bcra.gob.ar/centraldedeudores/v1.0/Deudas/ChequesRechazados/](https://api.bcra.gob.ar/centraldedeudores/v1.0/Deudas/ChequesRechazados/){cuit}"
+        url_deudas = f"https://api.bcra.gob.ar/centraldedeudores/v1.0/Deudas/{cuit}"
+        url_cheques = f"https://api.bcra.gob.ar/centraldedeudores/v1.0/Deudas/ChequesRechazados/{cuit}"
         
         datos_cliente = {"situacion": 1, "entidad": "Sin Registros", "denominacion": "Cliente Desconocido", "cheques_rechazados": 0, "error_api": False}
         
         try:
             payload_deudas = {'api_key': API_KEY_SCRAPER, 'url': url_deudas, 'render': 'false'}
-            res_deuda = requests.get('[https://api.scraperapi.com/](https://api.scraperapi.com/)', params=payload_deudas, timeout=45)
+            res_deuda = requests.get('https://api.scraperapi.com/', params=payload_deudas, timeout=45)
             
+            # 🚨 NUEVO: Intercepción explícita de falta de créditos / error de llave
+            if res_deuda.status_code == 403:
+                return {"error_api": "HTTP 403: ScraperAPI sin créditos / Llave inválida"}
+                
             if res_deuda.status_code == 200:
                 try:
                     data = res_deuda.json()
@@ -760,8 +764,12 @@ elif opcion == "Verificación BCRA":
             time.sleep(1) 
             
             payload_cheques = {'api_key': API_KEY_SCRAPER, 'url': url_cheques, 'render': 'false'}
-            res_cheque = requests.get('[https://api.scraperapi.com/](https://api.scraperapi.com/)', params=payload_cheques, timeout=45)
+            res_cheque = requests.get('https://api.scraperapi.com/', params=payload_cheques, timeout=45)
             
+            # 🚨 NUEVO: Verificamos en cheques también
+            if res_cheque.status_code == 403:
+                return {"error_api": "HTTP 403: ScraperAPI sin créditos / Llave inválida"}
+
             if res_cheque.status_code == 200:
                 try:
                     data_ch = res_cheque.json()
@@ -794,6 +802,9 @@ elif opcion == "Verificación BCRA":
                 datos_cliente['cheques_rechazados'] = -1
                 
             return datos_cliente
+        except requests.exceptions.RequestException as e:
+            # 🚨 NUEVO: Captura de caída de conexión pura o Timeout severo
+            return {"error_api": f"Caída de red: {str(e)[:40]}..."}
         except Exception as e:
             return {"error_api": str(e)}
 
@@ -955,6 +966,8 @@ elif opcion == "Verificación BCRA":
                                 guardar_en_lista_negra(cheque['cuit_limpio'], bcra['situacion'], bcra['denominacion'], f"Rechazos: {bcra['cheques_rechazados']}")
                     else:
                         st.warning("⚠️ Consulta fallida o CUIT inválido.")
+                        if bcra and bcra.get("error_api"):
+                            st.error(f"Error Técnico: {bcra['error_api']}")
                         
             if st.button("🧹 Limpiar Resultados"):
                 st.session_state['lote_procesado'] = []
@@ -1005,8 +1018,10 @@ elif opcion == "Verificación BCRA":
                             "Situación": sit, "Cheques Rech.": rechazos, "Estado": estado
                         })
                     else:
+                        # 🚨 ACÁ ESTÁ EL PARCHE PRINCIPAL: Imprime el error real en la tabla
+                        motivo_real = datos.get("error_api", "Error fatal desconocido") if datos else "Timeout masivo"
                         resultados_masivos.append({
-                            "CUIT": cuit, "Razón Social": "Error de lectura", 
+                            "CUIT": cuit, "Razón Social": f"🚨 {motivo_real}", 
                             "Situación": "-", "Cheques Rech.": "-", "Estado": "⚠️ ERROR"
                         })
                         
