@@ -10,6 +10,7 @@ import difflib
 import time
 import textwrap 
 import re 
+import random
 import gc # IMPORTANTE: Recolector de basura para limpiar la memoria RAM
 from datetime import datetime
 from supabase import create_client, Client
@@ -246,9 +247,6 @@ if opcion == "Facturas de Proveedores":
                             datos_extraidos['_origen'] = doc['nombre']
                             st.session_state.cola_extracciones_prov.append(datos_extraidos)
                             
-                            # ==========================================
-                            # 🧹 LIMPIEZA DE MEMORIA PROVEEDORES
-                            # ==========================================
                             try: img_rem.close()
                             except: pass
                             gc.collect()
@@ -256,7 +254,7 @@ if opcion == "Facturas de Proveedores":
                             exito = True
                         except Exception as e:
                             error_interno = str(e)
-                            intentes -= 1
+                            intentos -= 1
                             time.sleep(2)
                     if not exito: st.session_state.cola_extracciones_prov.append({'_origen': f"⚠️ Error Técnico en {doc['nombre']} | Falla: {error_interno}"})
                     barra_progreso.progress((i + 1) / len(st.session_state.lote_pendientes_prov))
@@ -313,10 +311,7 @@ elif opcion == "Generador de Resumen":
     """).strip()
 
     try:
-        # La magia está en agregar !inner pegado a la palabra clientes
         query = supabase.table("ordenes_carga").select("*, clientes!inner(nombre, formato_especial, sucursal_madre_id)")
-        
-        # Si no es Super Admin, filtramos por la sucursal madre del CLIENTE
         if user['puesto'] != 'SUPER_ADMIN':
             query = query.eq("clientes.sucursal_madre_id", user['sucursal_id'])
             
@@ -402,9 +397,6 @@ elif opcion == "Generador de Resumen":
                                         else:
                                             st.warning(f"La IA no devolvió un formato JSON válido para la orden #{fila['id']}")
                                             
-                                        # ==========================================
-                                        # 🧹 LIMPIEZA DE MEMORIA OBLIGATORIA (OOM FIX)
-                                        # ==========================================
                                         try: img_rem.close()
                                         except: pass
                                         del res_img     
@@ -418,14 +410,14 @@ elif opcion == "Generador de Resumen":
                                             intentos_restantes -= 1
                                             
                                             if intentos_restantes > 1:
-                                                st.warning(f"⏳ Google (Pro) saturado. Reintentando orden #{fila['id']} en {tiempo_espera} seg...")
+                                                st.warning(f"⏳ Google saturado. Reintentando orden #{fila['id']} en {tiempo_espera} seg...")
                                                 time.sleep(tiempo_espera)
                                                 tiempo_espera *= 2 
                                             elif intentos_restantes == 1:
-                                                st.warning(f"⚠️ Google (Pro) sigue caído. Cambiando a modelo Flash (Respaldo) para la orden #{fila['id']}...")
+                                                st.warning(f"⚠️ Cambiando a modelo de respaldo para la orden #{fila['id']}...")
                                                 time.sleep(2) 
                                             else:
-                                                st.error(f"❌ Falló la orden #{fila['id']} incluso con el modelo de respaldo. Intentá más tarde.")
+                                                st.error(f"❌ Falló la orden #{fila['id']}. Intentá más tarde.")
                                         else:
                                             st.error(f"❌ Falla técnica inesperada en orden #{fila['id']}: {error_msg}")
                                             break 
@@ -451,18 +443,15 @@ elif opcion == "Generador de Resumen":
                     with c1:
                         if pd.notna(fila['url_foto']) and str(fila['url_foto']).strip() != "":
                             st.image(fila['url_foto'], use_container_width=True)
-                            st.markdown(f"*[Ver foto en tamaño completo]({fila['url_foto']})*")
                         else:
                             st.warning(f"⚠️ SIN FOTO: {fila.get('motivo_sin_foto', 'No se indicó motivo')}")
                         
                         st.markdown("<hr style='margin: 10px 0; border-top: 1px dashed #ccc;'>", unsafe_allow_html=True)
-                        st.markdown("**🔄 Reemplazar o Subir remito correcto:**")
-                        foto_nueva = st.file_uploader("", type=["jpg", "png", "jpeg"], key=f"up_{fila['id']}", label_visibility="collapsed")
+                        foto_nueva = st.file_uploader("**🔄 Reemplazar remito:**", type=["jpg", "png", "jpeg"], key=f"up_{fila['id']}", label_visibility="collapsed")
                         
                         if foto_nueva:
                             if st.button("💾 Guardar y Analizar Nueva Foto", key=f"btn_up_{fila['id']}", type="primary"):
-                                with st.spinner("Subiendo imagen y analizando con IA..."):
-                                    
+                                with st.spinner("Subiendo imagen y analizando..."):
                                     exito_extraccion_manual = False
                                     intentos_restantes_manual = 3
                                     tiempo_espera_manual = 4
@@ -474,15 +463,12 @@ elif opcion == "Generador de Resumen":
                                             file_bytes = foto_nueva.getvalue()
                                             
                                             supabase.storage.from_("remitos").upload(
-                                                path=nombre_archivo,
-                                                file=file_bytes,
-                                                file_options={"content-type": foto_nueva.type}
+                                                path=nombre_archivo, file=file_bytes, file_options={"content-type": foto_nueva.type}
                                             )
                                             
                                             url_publica = supabase.storage.from_("remitos").get_public_url(nombre_archivo)
                                             supabase.table("ordenes_carga").update({
-                                                "url_foto": url_publica,
-                                                "motivo_sin_foto": "Corregido por Auditoría"
+                                                "url_foto": url_publica, "motivo_sin_foto": "Corregido por Auditoría"
                                             }).eq("id", fila['id']).execute()
                                             
                                             modelo_actual_manual = 'gemini-2.5-pro' if intentos_restantes_manual > 1 else 'gemini-2.5-flash'
@@ -495,7 +481,6 @@ elif opcion == "Generador de Resumen":
                                             end = raw_t.rfind('}') + 1
                                             if start != -1 and end != 0:
                                                 d_ia = json.loads(raw_t[start:end])
-                                                
                                                 def limpiar_num(v):
                                                     try:
                                                         txt = str(v).replace('$', '').replace(' ', '').strip()
@@ -512,9 +497,6 @@ elif opcion == "Generador de Resumen":
                                                 st.session_state[f"ia_prod_{fila['id']}"] = str(d_ia.get('detalle_productos', ''))
                                                 st.session_state[f"ia_obs_{fila['id']}"] = str(d_ia.get('observaciones_ia', ''))
                                             
-                                            # ==========================================
-                                            # 🧹 LIMPIEZA DE MEMORIA BOTON MANUAL
-                                            # ==========================================
                                             try: img_rem.close()
                                             except: pass
                                             gc.collect()
@@ -528,18 +510,15 @@ elif opcion == "Generador de Resumen":
                                             error_msg_manual = str(e)
                                             if "503" in error_msg_manual or "429" in error_msg_manual or "UNAVAILABLE" in error_msg_manual:
                                                 intentos_restantes_manual -= 1
-                                                
                                                 if intentos_restantes_manual > 1:
-                                                    st.warning(f"⏳ Google (Pro) saturado. Reintentando en {tiempo_espera_manual} seg...")
                                                     time.sleep(tiempo_espera_manual)
                                                     tiempo_espera_manual *= 2 
                                                 elif intentos_restantes_manual == 1:
-                                                    st.warning(f"⚠️ Google (Pro) sigue caído. Cambiando a modelo Flash (Respaldo)...")
                                                     time.sleep(2) 
                                                 else:
-                                                    st.error(f"❌ Falló incluso con el modelo de respaldo. Intentá más tarde.")
+                                                    st.error(f"❌ Falló incluso con el modelo de respaldo.")
                                             else:
-                                                st.error(f"❌ Falla técnica inesperada: {error_msg_manual}")
+                                                st.error(f"❌ Falla técnica inesperada.")
                                                 break
                             
                     with c2:
@@ -565,8 +544,7 @@ elif opcion == "Generador de Resumen":
                                 if extras_bd and str(extras_bd).strip() and str(extras_bd).lower() != "nan":
                                     texto_pedido_cliente += f" 📦 Extras: {extras_bd}"
                                     
-                                st.info(f"🛒 **Pedido original del cliente:**\n{texto_pedido_cliente}")
-                                st.markdown("---")
+                                st.info(f"🛒 **Pedido original:**\n{texto_pedido_cliente}")
 
                                 col_f1, col_f2 = st.columns(2)
                                 fac_fecha = col_f1.text_input("Fecha", value=st.session_state.get(f"ia_fec_{fila['id']}", ""))
@@ -576,16 +554,14 @@ elif opcion == "Generador de Resumen":
                                 fac_imp = col_f3.number_input("Importe ($)", value=st.session_state.get(f"ia_imp_{fila['id']}", 0.0))
                                 fac_comp = col_f4.text_input("Nº Factura", value=st.session_state.get(f"ia_fac_{fila['id']}", ""))
                                 
-                                st.markdown("---")
-                                
                                 prod_ia_val = st.session_state.get(f"ia_prod_{fila['id']}", "")
                                 obs_ia_val = st.session_state.get(f"ia_obs_{fila['id']}", "")
                                 
                                 if obs_ia_val:
                                     st.warning(f"⚠️ **{obs_ia_val}**")
 
-                                fac_prod = st.text_input("Detalle de Combustibles (Leído por IA)", value=prod_ia_val)
-                                fac_obs = st.text_input("Observaciones Adicionales (Leído por IA)", value=obs_ia_val)
+                                fac_prod = st.text_input("Combustibles (IA)", value=prod_ia_val)
+                                fac_obs = st.text_input("Observaciones (IA)", value=obs_ia_val)
                                 
                                 st.markdown("---")
                                 efectivo_real_bd = fila.get('efectivo_entregado') if pd.notna(fila.get('efectivo_entregado')) else fila.get('efectivo_pedido', 0)
@@ -596,20 +572,19 @@ elif opcion == "Generador de Resumen":
                                 
                                 if es_especial:
                                     c_o1, c_o2 = st.columns(2)
-                                    fac_lts = c_o1.number_input("Total de Litros", value=st.session_state.get(f"ia_lts_{fila['id']}", lts_def))
+                                    fac_lts = c_o1.number_input("Total Litros", value=st.session_state.get(f"ia_lts_{fila['id']}", lts_def))
                                     nro_ord_lts = c_o2.text_input("Nº Orden Litros", value=fila['nro_orden_litros_interna'] if pd.notna(fila['nro_orden_litros_interna']) else "")
                                     c_o3, c_o4 = st.columns(2)
                                     efectivo_final = c_o3.number_input("Efectivo Entregado", value=float(efectivo_real_bd))
                                     nro_ord_efe = c_o4.text_input("Nº Orden Efectivo", value=fila['nro_orden_efectivo_interna'] if pd.notna(fila['nro_orden_efectivo_interna']) else "")
                                 else:
                                     c_o1, c_o2 = st.columns(2)
-                                    fac_lts = c_o1.number_input("Total de Litros", value=st.session_state.get(f"ia_lts_{fila['id']}", lts_def))
-                                    nro_ord_gen = c_o2.text_input("Nº Orden (Normal)", value=fila['nro_orden_cliente'] if pd.notna(fila['nro_orden_cliente']) else "")
+                                    fac_lts = c_o1.number_input("Total Litros", value=st.session_state.get(f"ia_lts_{fila['id']}", lts_def))
+                                    nro_ord_gen = c_o2.text_input("Nº Orden Normal", value=fila['nro_orden_cliente'] if pd.notna(fila['nro_orden_cliente']) else "")
                                     efectivo_final = st.number_input("Efectivo Entregado", value=float(efectivo_real_bd))
                                     
                                 if st.form_submit_button("✅ Guardar Fila"):
                                     st.session_state.agregados_excel.append(fila['id'])
-                                    
                                     productos_a_guardar = []
                                     
                                     if "|" in fac_prod or ":" in fac_prod:
@@ -645,7 +620,6 @@ elif opcion == "Generador de Resumen":
                                             "Importe": importe_asignar, "Nº Factura": fac_comp.strip(), "Entidad Pagadora": cliente_sel,
                                             "Efectivo": efectivo_asignar, "Nº Orden Efectivo": convertir_a_numero(nro_ord_efe) if es_especial else "-"
                                         })
-                                        
                                     st.rerun()
 
     if st.session_state.resumen_para_cliente:
@@ -719,24 +693,17 @@ elif opcion == "Generador de Resumen":
                     
                     if id_actual and id_actual not in ordenes_procesadas_db:
                         filas_este_remito = [x for x in st.session_state.resumen_para_cliente if x.get("id_orden") == id_actual]
-                        
                         litros_totales = sum(float(x["Litros"]) for x in filas_este_remito)
                         importe_total = sum(float(x["Importe"]) for x in filas_este_remito)
-                        
                         texto_productos = " | ".join([f"{x['Producto']}: {x['Litros']}L" for x in filas_este_remito])
-                        
                         todas_obs = [x["Observaciones"] for x in filas_este_remito if x["Observaciones"].strip() != ""]
                         texto_obs = " | ".join(todas_obs)
                         
                         supabase.table("ordenes_carga").update({
-                            "estado": "AUDITADO",
-                            "litros_reales": litros_totales,
-                            "numero_factura": item["Nº Factura"],
-                            "monto_factura": importe_total,
-                            "producto_ia": texto_productos,
-                            "observaciones_ia": texto_obs
+                            "estado": "AUDITADO", "litros_reales": litros_totales,
+                            "numero_factura": item["Nº Factura"], "monto_factura": importe_total,
+                            "producto_ia": texto_productos, "observaciones_ia": texto_obs
                         }).eq("id", id_actual).execute()
-                        
                         ordenes_procesadas_db.append(id_actual)
                         
             st.session_state.resumen_para_cliente, st.session_state.agregados_excel = [], []
@@ -747,11 +714,11 @@ elif opcion == "Generador de Resumen":
         st.markdown("</div>", unsafe_allow_html=True)
 
 # ==========================================
-# 5. MÓDULO: VERIFICACIÓN BCRA Y CHEQUES (IA AVANZADA CoT)
+# 5. MÓDULO: VERIFICACIÓN BCRA Y CHEQUES (IA AVANZADA)
 # ==========================================
 elif opcion == "Verificación BCRA":
     st.title("🛡️ Centro de Verificación y Riesgo (BCRA)")
-    st.markdown('<p style="color:#666; font-size:16px;">Auditá CUITs manualmente o procesá lotes completos con IA Avanzada.</p>', unsafe_allow_html=True)
+    st.markdown('<p style="color:#666; font-size:16px;">Auditá CUITs manualmente, cargá Excel masivos o escaneá cheques físicos.</p>', unsafe_allow_html=True)
     
     import requests
     import time
@@ -768,14 +735,14 @@ elif opcion == "Verificación BCRA":
     # --- FUNCIONES CORE ---
     def consultar_bcra_completo(cuit):
         cuit = str(cuit).strip()
-        url_deudas = f"https://api.bcra.gob.ar/centraldedeudores/v1.0/Deudas/{cuit}"
-        url_cheques = f"https://api.bcra.gob.ar/centraldedeudores/v1.0/Deudas/ChequesRechazados/{cuit}"
+        url_deudas = f"[https://api.bcra.gob.ar/centraldedeudores/v1.0/Deudas/](https://api.bcra.gob.ar/centraldedeudores/v1.0/Deudas/){cuit}"
+        url_cheques = f"[https://api.bcra.gob.ar/centraldedeudores/v1.0/Deudas/ChequesRechazados/](https://api.bcra.gob.ar/centraldedeudores/v1.0/Deudas/ChequesRechazados/){cuit}"
         
         datos_cliente = {"situacion": 1, "entidad": "Sin Registros", "denominacion": "Cliente Desconocido", "cheques_rechazados": 0, "error_api": False}
         
         try:
             payload_deudas = {'api_key': API_KEY_SCRAPER, 'url': url_deudas, 'render': 'false'}
-            res_deuda = requests.get('https://api.scraperapi.com/', params=payload_deudas, timeout=45)
+            res_deuda = requests.get('[https://api.scraperapi.com/](https://api.scraperapi.com/)', params=payload_deudas, timeout=45)
             
             if res_deuda.status_code == 200:
                 try:
@@ -793,7 +760,7 @@ elif opcion == "Verificación BCRA":
             time.sleep(1) 
             
             payload_cheques = {'api_key': API_KEY_SCRAPER, 'url': url_cheques, 'render': 'false'}
-            res_cheque = requests.get('https://api.scraperapi.com/', params=payload_cheques, timeout=45)
+            res_cheque = requests.get('[https://api.scraperapi.com/](https://api.scraperapi.com/)', params=payload_cheques, timeout=45)
             
             if res_cheque.status_code == 200:
                 try:
@@ -879,8 +846,8 @@ elif opcion == "Verificación BCRA":
         except Exception as e:
             st.error(f"Error en BD: {e}")
 
-    # --- INTERFAZ CON PESTAÑAS ---
-    tab_manual, tab_ia = st.tabs(["✍️ Consulta Manual", "📸 Escáner de Cheques (IA Pro)"])
+    # --- INTERFAZ CON 3 PESTAÑAS ---
+    tab_manual, tab_ia, tab_masivo = st.tabs(["✍️ Consulta Manual", "📸 Escáner de Cheques (IA Pro)", "📋 Carga Masiva (Excel)"])
 
     # ==========================================
     # PESTAÑA 1: CONSULTA MANUAL
@@ -890,7 +857,6 @@ elif opcion == "Verificación BCRA":
         cuit_input = st.text_input("Ingresá el CUIT (solo números)", max_chars=11, key="cuit_manual")
         
         if st.button("Validar Riesgo Manual"):
-            # Limpiadora de CUITs
             cuit_limpio = re.sub(r'\D', '', cuit_input)
             
             if len(cuit_limpio) != 11:
@@ -924,8 +890,6 @@ elif opcion == "Verificación BCRA":
     # PESTAÑA 2: ESCÁNER DE LOTES MÚLTIPLES (IA PRO + COLA)
     # ==========================================
     with tab_ia:
-        import random # Importante para el "jitter" anti-bloqueo
-
         if 'lote_procesado' not in st.session_state:
             st.session_state['lote_procesado'] = []
 
@@ -933,32 +897,28 @@ elif opcion == "Verificación BCRA":
         
         if fotos_lote:
             if st.button("🚀 Procesar Lotes (IA Avanzada)", type="primary"):
-                st.session_state['lote_procesado'] = [] # Limpiar resultados anteriores
+                st.session_state['lote_procesado'] = [] 
                 
                 with st.spinner("Procesando fotos y consultando BCRA..."):
                     barra_p = st.progress(0)
                     total_fotos = len(fotos_lote)
                     
                     for idx, foto in enumerate(fotos_lote):
-                        st.write(f"Procesando foto {idx + 1} de {total_fotos}: {foto.name}")
                         img = Image.open(foto)
                         img.thumbnail((2500, 3000), Image.Resampling.LANCZOS)
                         
-                        # 1. Extracción con IA (Modelo PRO)
                         lista_cheques = procesar_lote_cheques_ia(img)
                         
-                        # 2. Procesar cada cheque detectado
                         for cheque in lista_cheques:
                             cuit_limpio = re.sub(r'\D', '', str(cheque.get("cuit", "")))
                             datos_bcra = None
                             
                             if len(cuit_limpio) == 11:
-                                # Espera aleatoria (1.5 a 3.5 segundos) para no disparar alertas de bot
                                 time.sleep(random.uniform(1.5, 3.5)) 
                                 datos_bcra = consultar_bcra_completo(cuit_limpio)
                             
                             st.session_state['lote_procesado'].append({
-                                "img": img, # Guardamos referencia de la foto
+                                "img": img, 
                                 "id": cheque.get("id"),
                                 "numero_cheque": cheque.get("numero_cheque"),
                                 "emisor": cheque.get("emisor"),
@@ -979,9 +939,10 @@ elif opcion == "Verificación BCRA":
                 st.markdown("---")
                 col1, col2 = st.columns([1, 2])
                 with col1:
-                    st.image(cheque["img"], use_container_width=True)
+                    with st.expander("Ver Foto"):
+                        st.image(cheque["img"], use_container_width=True)
                 with col2:
-                    st.markdown(f"**Cheque Nº {cheque.get('numero_cheque')}** | **Emisor:** {cheque.get('emisor')}")
+                    st.markdown(f"**🏦 Cheque Nº {cheque.get('numero_cheque')}** | **Emisor:** {cheque.get('emisor')}")
                     st.markdown(f"**CUIT:** `{cheque.get('cuit')}`")
                     
                     bcra = cheque.get("datos_bcra")
@@ -990,11 +951,80 @@ elif opcion == "Verificación BCRA":
                             st.success(f"✅ BCRA: {bcra['denominacion']} | Sit: 1 | 0 Rechazos")
                         else:
                             st.error(f"🚨 BCRA: {bcra['denominacion']} | Sit: {bcra['situacion']} | Rechazos: {bcra['cheques_rechazados']}")
-                            if st.button(f"Guardar en Lista Negra", key=f"btn_{i}"):
+                            if st.button(f"Guardar en Lista Negra", key=f"btn_lote_{i}"):
                                 guardar_en_lista_negra(cheque['cuit_limpio'], bcra['situacion'], bcra['denominacion'], f"Rechazos: {bcra['cheques_rechazados']}")
                     else:
-                        st.warning("⚠️ No se pudo consultar BCRA.")
+                        st.warning("⚠️ Consulta fallida o CUIT inválido.")
                         
             if st.button("🧹 Limpiar Resultados"):
                 st.session_state['lote_procesado'] = []
                 st.rerun()
+
+    # ==========================================
+    # PESTAÑA 3: CARGA MASIVA (CAJA DE DISPARO RÁPIDO)
+    # ==========================================
+    with tab_masivo:
+        st.markdown('<div class="tarjeta-pro">', unsafe_allow_html=True)
+        st.info("💡 Pegá una lista de CUITs (ej. copiados desde un Excel). El sistema los filtrará y procesará automáticamente.")
+        texto_cuits = st.text_area("Lista de CUITs", height=150, placeholder="30123456789\n20123456789\n...")
+        
+        if st.button("🚀 Iniciar Consulta Masiva"):
+            # Limpieza extrema: convertimos guiones y espacios en saltos, y luego aspiramos números
+            lineas = texto_cuits.replace('-', '').replace(' ', '\n').split('\n')
+            lista_cuits = []
+            
+            for l in lineas:
+                c = re.sub(r'\D', '', l)
+                if len(c) == 11 and c not in lista_cuits:
+                    lista_cuits.append(c)
+            
+            if not lista_cuits:
+                st.error("❌ No se detectaron CUITs válidos de 11 dígitos en el texto.")
+            else:
+                if len(lista_cuits) > 20:
+                    st.warning(f"⚠️ Detectamos {len(lista_cuits)} CUITs. Para evitar bloqueos, procesaremos solo los primeros 20.")
+                    lista_cuits = lista_cuits[:20]
+                    
+                st.write(f"⏳ Procesando {len(lista_cuits)} CUITs... Podés dejar esta pestaña abierta.")
+                barra_p = st.progress(0)
+                resultados_masivos = []
+                
+                for i, cuit in enumerate(lista_cuits):
+                    datos = consultar_bcra_completo(cuit)
+                    
+                    if datos and not datos.get("error_api"):
+                        sit = datos.get("situacion", "")
+                        rechazos = datos.get("cheques_rechazados", "")
+                        nombre = datos.get("denominacion", "")
+                        
+                        estado = "🟢 APROBADO" if sit == 1 and rechazos == 0 else "🔴 RECHAZADO"
+                        if rechazos in [-1, -429]: estado = "⚠️ ERROR API"
+                            
+                        resultados_masivos.append({
+                            "CUIT": cuit, "Razón Social": nombre, 
+                            "Situación": sit, "Cheques Rech.": rechazos, "Estado": estado
+                        })
+                    else:
+                        resultados_masivos.append({
+                            "CUIT": cuit, "Razón Social": "Error de lectura", 
+                            "Situación": "-", "Cheques Rech.": "-", "Estado": "⚠️ ERROR"
+                        })
+                        
+                    barra_p.progress((i + 1) / len(lista_cuits))
+                    time.sleep(1.5) # Respiro para el BCRA
+                
+                st.success("✅ ¡Consulta Masiva Finalizada!")
+                df_masivo = pd.DataFrame(resultados_masivos)
+                st.dataframe(df_masivo, use_container_width=True)
+                
+                # Botón de descarga en Excel
+                buf = io.BytesIO()
+                with pd.ExcelWriter(buf, engine='openpyxl') as wr:
+                    df_masivo.to_excel(wr, index=False, sheet_name='Reporte BCRA')
+                st.download_button(
+                    "📥 Descargar Reporte en Excel", 
+                    data=buf.getvalue(), 
+                    file_name=f"Reporte_Riesgo_{datetime.now().strftime('%d%m%Y')}.xlsx", 
+                    use_container_width=True
+                )
+        st.markdown('</div>', unsafe_allow_html=True)
