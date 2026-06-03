@@ -973,16 +973,19 @@ elif opcion == "Verificación BCRA":
                 st.session_state['lote_procesado'] = []
                 st.rerun()
 
-    # ==========================================
+# ==========================================
     # PESTAÑA 3: CARGA MASIVA (CAJA DE DISPARO RÁPIDO)
     # ==========================================
     with tab_masivo:
+        # 1. Inicializamos la memoria para esta pestaña
+        if 'resultados_masivos' not in st.session_state:
+            st.session_state['resultados_masivos'] = None
+
         st.markdown('<div class="tarjeta-pro">', unsafe_allow_html=True)
         st.info("💡 Pegá una lista de CUITs (ej. copiados desde un Excel). El sistema los filtrará y procesará automáticamente.")
         texto_cuits = st.text_area("Lista de CUITs", height=150, placeholder="30123456789\n20123456789\n...")
         
         if st.button("🚀 Iniciar Consulta Masiva"):
-            # Limpieza extrema: convertimos guiones y espacios en saltos, y luego aspiramos números
             lineas = texto_cuits.replace('-', '').replace(' ', '\n').split('\n')
             lista_cuits = []
             
@@ -1000,7 +1003,7 @@ elif opcion == "Verificación BCRA":
                     
                 st.write(f"⏳ Procesando {len(lista_cuits)} CUITs... Podés dejar esta pestaña abierta.")
                 barra_p = st.progress(0)
-                resultados_masivos = []
+                resultados_temporales = []
                 
                 for i, cuit in enumerate(lista_cuits):
                     datos = consultar_bcra_completo(cuit)
@@ -1013,33 +1016,48 @@ elif opcion == "Verificación BCRA":
                         estado = "🟢 APROBADO" if sit == 1 and rechazos == 0 else "🔴 RECHAZADO"
                         if rechazos in [-1, -429]: estado = "⚠️ ERROR API"
                             
-                        resultados_masivos.append({
+                        resultados_temporales.append({
                             "CUIT": cuit, "Razón Social": nombre, 
                             "Situación": sit, "Cheques Rech.": rechazos, "Estado": estado
                         })
                     else:
-                        # 🚨 ACÁ ESTÁ EL PARCHE PRINCIPAL: Imprime el error real en la tabla
                         motivo_real = datos.get("error_api", "Error fatal desconocido") if datos else "Timeout masivo"
-                        resultados_masivos.append({
+                        resultados_temporales.append({
                             "CUIT": cuit, "Razón Social": f"🚨 {motivo_real}", 
                             "Situación": "-", "Cheques Rech.": "-", "Estado": "⚠️ ERROR"
                         })
                         
                     barra_p.progress((i + 1) / len(lista_cuits))
-                    time.sleep(1.5) # Respiro para el BCRA
+                    time.sleep(1.5) 
                 
                 st.success("✅ ¡Consulta Masiva Finalizada!")
-                df_masivo = pd.DataFrame(resultados_masivos)
-                st.dataframe(df_masivo, use_container_width=True)
+                # 2. Guardamos en caché y recargamos para mostrar los botones seguros
+                st.session_state['resultados_masivos'] = resultados_temporales
+                st.rerun()
+
+        # 3. Renderizado seguro (fuera del botón)
+        if st.session_state.get('resultados_masivos'):
+            df_masivo = pd.DataFrame(st.session_state['resultados_masivos'])
+            st.dataframe(df_masivo, use_container_width=True)
+            
+            st.markdown("<br>", unsafe_allow_html=True)
+            col_btn1, col_btn2 = st.columns(2)
+            
+            buf = io.BytesIO()
+            with pd.ExcelWriter(buf, engine='openpyxl') as wr:
+                df_masivo.to_excel(wr, index=False, sheet_name='Reporte BCRA')
+            
+            # Botón de Descarga
+            col_btn1.download_button(
+                "📥 Descargar Reporte en Excel", 
+                data=buf.getvalue(), 
+                file_name=f"Reporte_Riesgo_{datetime.now().strftime('%d%m%Y')}.xlsx", 
+                use_container_width=True
+            )
+            
+            # Botón de Limpieza
+            if col_btn2.button("🧹 Limpiar Pantalla", use_container_width=True):
+                st.session_state['resultados_masivos'] = None
+                st.rerun()
                 
-                # Botón de descarga en Excel
-                buf = io.BytesIO()
-                with pd.ExcelWriter(buf, engine='openpyxl') as wr:
-                    df_masivo.to_excel(wr, index=False, sheet_name='Reporte BCRA')
-                st.download_button(
-                    "📥 Descargar Reporte en Excel", 
-                    data=buf.getvalue(), 
-                    file_name=f"Reporte_Riesgo_{datetime.now().strftime('%d%m%Y')}.xlsx", 
-                    use_container_width=True
-                )
         st.markdown('</div>', unsafe_allow_html=True)
