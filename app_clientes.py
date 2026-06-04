@@ -98,7 +98,7 @@ with tab_ia:
                 barra_p.progress((idx + 1) / len(fotos_lote))
         st.rerun()
 
-   if st.session_state.get('lote_procesado'):
+    if st.session_state.get('lote_procesado'):
         for i, cheque in enumerate(st.session_state['lote_procesado']):
             st.markdown("---")
             c1, c2 = st.columns([1, 2])
