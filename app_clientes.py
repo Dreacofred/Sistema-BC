@@ -98,22 +98,40 @@ with tab_ia:
                 barra_p.progress((idx + 1) / len(fotos_lote))
         st.rerun()
 
-    if st.session_state.get('lote_procesado'):
+   if st.session_state.get('lote_procesado'):
         for i, cheque in enumerate(st.session_state['lote_procesado']):
             st.markdown("---")
             c1, c2 = st.columns([1, 2])
-            with c1: st.image(cheque["img"], use_container_width=True)
+            with c1: 
+                st.image(cheque["img"], use_container_width=True)
             with c2:
-                st.markdown(f"**🏦 Cheque Nº {cheque.get('numero_cheque')}** | **Emisor:** {cheque.get('emisor')}")
+                emisor_ia = cheque.get('emisor', 'Emisor Desconocido')
+                st.markdown(f"**🏦 Cheque Nº {cheque.get('numero_cheque')}** | **Emisor:** {emisor_ia}")
                 st.markdown(f"**CUIT:** `{cheque.get('cuit')}`")
+                
                 bcra = cheque.get("datos_bcra")
                 if bcra and not bcra.get("error_api"):
-                    if bcra.get('cheques_rechazados', 0) > 0:
-                        st.error(f"🚨 Rechazos: {bcra['cheques_rechazados']}")
+                    # 🚀 LÓGICA ARQUITECTÓNICA: Detección de "Sin Cuentas"
+                    nombre_bcra = bcra.get('denominacion', 'Cliente Desconocido')
+                    sit = bcra.get('situacion', 1)
+                    rechazos = bcra.get('cheques_rechazados', 0)
+                    
+                    # Si el BCRA no tiene historial de deudas, no hay Situación numérica
+                    if nombre_bcra == "Cliente Desconocido":
+                        sit_texto = "Sin cuentas activas"
+                        nombre_mostrar = emisor_ia # Usamos el nombre que leyó la IA
                     else:
-                        st.success("✅ OK - 0 Rechazos")
+                        sit_texto = str(sit)
+                        nombre_mostrar = nombre_bcra
+                        
+                    # Evaluar si el cheque es un riesgo (Tiene rechazos o Situación mala)
+                    if rechazos > 0 or (isinstance(sit, int) and sit != 1):
+                        st.error(f"🚨 BCRA: {nombre_mostrar} | Situación: {sit_texto} | Rechazos: {rechazos}")
+                    else:
+                        st.success(f"✅ BCRA: {nombre_mostrar} | Situación: {sit_texto} | 0 Rechazos")
                 else:
-                    st.warning("⚠️ Error en consulta BCRA.")
+                    st.warning("⚠️ Error en consulta BCRA o CUIT inválido.")
+                    
         if st.button("🧹 Limpiar Resultados"):
             st.session_state['lote_procesado'] = []
             st.rerun()
