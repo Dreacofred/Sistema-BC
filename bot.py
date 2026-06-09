@@ -3,12 +3,11 @@ import json
 from supabase import create_client, Client
 
 # ==========================================
-# 1. CONEXIÓN A SUPABASE
+# 1. CONEXIÓN A SUPABASE (SEGURA)
 # ==========================================
-# Idealmente, traé esto de st.secrets en producción
-SUPABASE_URL = "TU_URL_DE_SUPABASE"
-SUPABASE_KEY = "TU_SERVICE_ROLE_KEY" # Usar la Service Role para ignorar el RLS interno
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+URL_SB = st.secrets["SUPABASE_URL"]
+KEY_SB = st.secrets["SUPABASE_KEY"]
+supabase: Client = create_client(URL_SB, KEY_SB)
 
 # ==========================================
 # 2. CONFIGURACIÓN DE LA PÁGINA
