@@ -1049,7 +1049,7 @@ elif opcion == "Gestión de Clientes":
 # ==========================================
 # 6. MÓDULO: LABORATORIO IA (COBRANZAS)
 # ==========================================
-    elif opcion == "Laboratorio IA":
+        elif opcion == "Laboratorio IA":
         # Leemos y ejecutamos el archivo directamente
         with open("bot.py", encoding="utf-8") as f:
             exec(f.read())
