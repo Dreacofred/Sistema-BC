@@ -128,8 +128,8 @@ with st.sidebar:
 
     opcion = option_menu(
         menu_title=None, 
-        options=["Generador de Resumen", "Facturas de Proveedores", "Verificación BCRA", "Gestión de Clientes"],
-        icons=["file-earmark-spreadsheet", "receipt", "shield-check", "people"], 
+        options=["Generador de Resumen", "Facturas de Proveedores", "Verificación BCRA", "Gestión de Clientes", "Laboratorio IA"], 
+        icons=["file-earmark-spreadsheet", "receipt", "shield-check", "people", "robot"], 
         menu_icon="cast", 
         default_index=0,
         styles={
@@ -1045,3 +1045,11 @@ elif opcion == "Gestión de Clientes":
                     except Exception as e:
                         st.error(f"Error al crear: {e}")
         st.markdown('</div>', unsafe_allow_html=True)
+
+# ==========================================
+# 6. MÓDULO: LABORATORIO IA (COBRANZAS)
+# ==========================================
+    elif opcion == "Laboratorio IA":
+        # Leemos y ejecutamos el archivo directamente
+        with open("bot.py", encoding="utf-8") as f:
+            exec(f.read())
