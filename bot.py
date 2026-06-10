@@ -37,7 +37,7 @@ def leer_documento_con_ia(archivo_subido, cliente_tag):
         archivo_gemini = genai.upload_file(tmp_path)
         
         # Invocamos al modelo estrella
-        modelo = genai.GenerativeModel('gemini-1.5-pro')
+        modelo = genai.GenerativeModel('gemini-2.5-pro')
         
         # El "Prompt" que entrena a la IA sobre cómo trabajamos
         prompt = f"""
