@@ -103,17 +103,35 @@ with col2:
         # Mostramos los datos reales en pantalla
         datos_editados = st.data_editor(st.session_state['datos_ia'])
         
-        if st.button("✅ Aprobar y Enviar a Supabase"):
-            with st.spinner("Guardando en la base de datos..."):
+       if st.button("✅ Aprobar y Enviar a Supabase"):
+            with st.spinner("Subiendo archivo y guardando en la base de datos..."):
                 try:
-                    # Rellenamos temporalmente el campo de la URL del archivo
-                    # (Esto lo programaremos más adelante para que se suba a tu Storage)
+                    import time
+                    
+                    # 1. Armamos un nombre único (ej: 1718059000_cheque.pdf)
+                    timestamp = int(time.time())
+                    nombre_archivo = f"{timestamp}_{archivo.name}"
+                    
+                    # 2. Subimos el archivo físico al "disco duro" de Supabase (Storage)
+                    supabase.storage.from_("comprobantes").upload(
+                        path=nombre_archivo,
+                        file=archivo.getvalue(),
+                        file_options={"content-type": archivo.type}
+                    )
+                    
+                    # 3. Le pedimos a Supabase el link público de ese archivo
+                    url_publica = supabase.storage.from_("comprobantes").get_public_url(nombre_archivo)
+                    
+                    # 4. Inyectamos esa URL real en la fila de datos
                     for fila in datos_editados:
-                        fila['archivo_url'] = "Pendiente_de_subida"
+                        fila['archivo_url'] = url_publica
                         
+                    # 5. Insertamos la fila completa en tu tabla
                     respuesta = supabase.table("cobranzas_pendientes").insert(datos_editados).execute()
-                    st.success("¡Guardado en Supabase perfectamente!")
+                    
+                    st.success("¡Archivo subido y base de datos actualizada perfectamente!")
                     st.balloons()
                     del st.session_state['datos_ia']
+                    
                 except Exception as e:
-                    st.error(f"Error al guardar: {e}")
+                    st.error(f"Error al subir el archivo o guardar los datos: {e}")
