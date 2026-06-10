@@ -2,6 +2,7 @@ import streamlit as st
 import json
 import tempfile
 import os
+import time
 from supabase import create_client, Client
 import google.generativeai as genai
 
@@ -19,27 +20,22 @@ genai.configure(api_key=GEMINI_API_KEY)
 # 2. ENCABEZADOS
 # ==========================================
 st.title("🤖 Laboratorio IA - Auditoría de Cobranzas")
-st.markdown("Esta pantalla usa **Gemini 1.5 Pro** para leer y extraer datos reales de los comprobantes.")
+st.markdown("Esta pantalla usa **Gemini 2.5 Pro** para leer y extraer datos reales de los comprobantes y guardarlos en la nube.")
 st.markdown("---")
 
 # ==========================================
-# 3. MOTOR IA (GEMINI 1.5 PRO REAL)
+# 3. MOTOR IA (GEMINI 2.5 PRO)
 # ==========================================
 def leer_documento_con_ia(archivo_subido, cliente_tag):
-    # Gemini necesita que el archivo esté guardado temporalmente para leerlo
     extension = os.path.splitext(archivo_subido.name)[1]
     with tempfile.NamedTemporaryFile(delete=False, suffix=extension) as tmp_file:
         tmp_file.write(archivo_subido.getvalue())
         tmp_path = tmp_file.name
 
     try:
-        # Subimos el documento temporal al cerebro de Gemini
         archivo_gemini = genai.upload_file(tmp_path)
-        
-        # Invocamos al modelo estrella
         modelo = genai.GenerativeModel('gemini-2.5-pro')
         
-        # El "Prompt" que entrena a la IA sobre cómo trabajamos
         prompt = f"""
         Sos un auditor contable experto. Analizá este comprobante de pago/cheque/depósito recibido del cliente '{cliente_tag}'.
         Extraé la información solicitada y devolvé ÚNICAMENTE un array de objetos JSON con esta estructura exacta (sin formato markdown adicional ni texto previo/posterior):
@@ -58,16 +54,12 @@ def leer_documento_con_ia(archivo_subido, cliente_tag):
         Si un dato no aparece, dejalo como un string vacío "". El monto debe ser numérico.
         """
         
-        # Disparamos la consulta
         respuesta = modelo.generate_content([archivo_gemini, prompt])
         
-        # Limpiamos los archivos temporales para no ocupar espacio
         genai.delete_file(archivo_gemini.name)
         os.remove(tmp_path)
         
-        # Limpiamos la respuesta de la IA para que sea 100% código JSON puro
         texto_json = respuesta.text.replace("```json", "").replace("```", "").strip()
-        
         return json.loads(texto_json)
 
     except Exception as e:
@@ -76,7 +68,7 @@ def leer_documento_con_ia(archivo_subido, cliente_tag):
         return None
 
 # ==========================================
-# 4. INTERFAZ VISUAL
+# 4. INTERFAZ VISUAL Y GUARDADO
 # ==========================================
 col1, col2 = st.columns([1, 1])
 
@@ -87,7 +79,6 @@ with col1:
 
     if archivo and st.button("🧠 Procesar y Leer con IA"):
         with st.spinner("Gemini está analizando el documento..."):
-            # Llamamos a nuestro motor inteligente
             datos_extraidos = leer_documento_con_ia(archivo, cliente_input)
             
             if datos_extraidos:
@@ -99,34 +90,30 @@ with col2:
     
     if 'datos_ia' in st.session_state:
         st.write("Verificá los datos extraídos por Gemini:")
-        
-        # Mostramos los datos reales en pantalla
         datos_editados = st.data_editor(st.session_state['datos_ia'])
         
-       if st.button("✅ Aprobar y Enviar a Supabase"):
+        if st.button("✅ Aprobar y Enviar a Supabase"):
             with st.spinner("Subiendo archivo y guardando en la base de datos..."):
                 try:
-                    import time
-                    
-                    # 1. Armamos un nombre único (ej: 1718059000_cheque.pdf)
+                    # 1. Armamos un nombre único
                     timestamp = int(time.time())
                     nombre_archivo = f"{timestamp}_{archivo.name}"
                     
-                    # 2. Subimos el archivo físico al "disco duro" de Supabase (Storage)
+                    # 2. Subimos el archivo físico al Storage
                     supabase.storage.from_("comprobantes").upload(
                         path=nombre_archivo,
                         file=archivo.getvalue(),
                         file_options={"content-type": archivo.type}
                     )
                     
-                    # 3. Le pedimos a Supabase el link público de ese archivo
+                    # 3. Le pedimos a Supabase el link público
                     url_publica = supabase.storage.from_("comprobantes").get_public_url(nombre_archivo)
                     
-                    # 4. Inyectamos esa URL real en la fila de datos
+                    # 4. Inyectamos la URL real en los datos
                     for fila in datos_editados:
                         fila['archivo_url'] = url_publica
                         
-                    # 5. Insertamos la fila completa en tu tabla
+                    # 5. Insertamos en la tabla
                     respuesta = supabase.table("cobranzas_pendientes").insert(datos_editados).execute()
                     
                     st.success("¡Archivo subido y base de datos actualizada perfectamente!")
