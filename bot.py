@@ -44,11 +44,11 @@ def procesar_lote_con_ia(archivos_subidos, cliente_tag):
         # 2. Configurar el cerebro
         modelo = genai.GenerativeModel('gemini-2.5-pro')
         
-        # 3. El Súper Prompt de Conciliación
+        # 3. El Súper Prompt de Conciliación con Regla Estricta
         prompt = f"""
         Sos un auditor contable experto de BC Combustibles. Estás analizando un lote de imágenes que contiene UN ticket de depósito S.I.C.E. y VARIAS fotos de cheques físicos asociados a ese depósito. El cliente asociado es '{cliente_tag}'.
         
-        Tu tarea es extraer los totales del ticket y desglosar cada cheque físico visible en las imágenes.
+        REGLA DE HIERRO PARA TEXTO MANUSCRITO: Si la letra cursiva, las fechas manuscritas, los nombres o los CUITs son borrosos, confusos o tenés la más mínima duda sobre un dígito o letra, DEBÉS dejar el campo completamente vacío (""). BAJO NINGUNA CIRCUNSTANCIA intentes adivinar, deducir o inventar fechas, CUITs o firmas. Priorizamos campos vacíos antes que datos erróneos.
         
         Devolvé ÚNICAMENTE un objeto JSON con esta estructura exacta:
         {{
@@ -74,7 +74,7 @@ def procesar_lote_con_ia(archivos_subidos, cliente_tag):
                 }}
             ]
         }}
-        Importante: Extraé el código del banco y la sucursal de la banda magnética o del recuadro superior derecho del cheque (ej: en 014-058-1842, banco es 014, sucursal es 1842). Si un dato no existe, dejalo vacío "". Los montos deben ser numéricos (sin el símbolo $).
+        Importante: Extraé el código del banco y la sucursal de la banda magnética o del recuadro superior derecho del cheque (ej: en 014-058-1842, banco es 014, sucursal es 1842). Los montos deben ser numéricos (sin el símbolo $).
         """
         
         # Mandamos la lista de imágenes junto con el texto de instrucciones
@@ -106,7 +106,6 @@ col1, col2 = st.columns([1, 1])
 with col1:
     st.subheader("📥 1. Ingreso del Lote")
     cliente_input = st.text_input("Etiqueta del Cliente", value="Pan American Energy")
-    # ATENCIÓN: accept_multiple_files=True permite seleccionar varias imágenes juntas
     archivos = st.file_uploader("Subir Ticket S.I.C.E. y Cheques", type=['png', 'jpeg', 'jpg', 'pdf'], accept_multiple_files=True)
 
     if archivos and st.button("🧠 Auditar Lote Completo"):
@@ -149,14 +148,11 @@ with col2:
             
         st.write("---")
         st.write("**Grilla de Cheques Extraídos:**")
-        # Mostrar grilla editable por si el OCR le pifió a un número
         datos_editados = st.data_editor(cheques)
         
         if st.button("✅ Aprobar y Enviar a Supabase"):
             with st.spinner("Subiendo imágenes y guardando..."):
                 try:
-                    # NOTA: En un lote real, habría que subir cada foto al Storage.
-                    # Para simplificar en esta versión, guardamos el primer archivo como referencia visual.
                     archivo_principal = st.session_state['archivos_temporales'][0]
                     timestamp = int(time.time())
                     nombre_archivo = f"lote_{timestamp}_{archivo_principal.name}"
@@ -171,7 +167,6 @@ with col2:
                     for fila in datos_editados:
                         fila['archivo_url'] = url_publica
                         
-                    # Insertar en la base de datos
                     respuesta = supabase.table("cobranzas_pendientes").insert(datos_editados).execute()
                     
                     st.success("¡Lote guardado en Supabase perfectamente!")
