@@ -44,17 +44,18 @@ def procesar_lote_con_ia(archivos_subidos, cliente_tag):
         # 2. Configurar el cerebro
         modelo = genai.GenerativeModel('gemini-2.5-pro')
         
-        # 3. El Súper Prompt con Cadena de Pensamiento
+        # 3. El Súper Prompt con Cadena de Pensamiento y Razón Social
         prompt = f"""
         Sos un auditor contable experto de BC Combustibles. Analizá este lote: UN ticket S.I.C.E. y VARIAS fotos de cheques. Cliente: '{cliente_tag}'.
         
         PASO 1 (RAZONAMIENTO): Antes de extraer los datos finales, usá el campo 'razonamiento_en_voz_alta' para describir en texto libre lo que ves en cada cheque. Analizá en detalle la letra cursiva, los montos, las fechas y los CUITs. Si una letra o número no se entiende bien o es un garabato, escribí tus dudas y dejá constancia de que no es legible.
         
-        PASO 2 (EXTRACCIÓN ESTRICTA): Una vez que termines de razonar, completá los datos. REGLA DE HIERRO: Si en tu razonamiento tuviste dudas sobre una fecha, CUIT o nombre manuscrito, DEBÉS dejar el campo vacío (""). NO inventes datos.
+        PASO 2 (EXTRACCIÓN ESTRICTA): Completá los datos. REGLA DE HIERRO: Si dudás sobre un dato manuscrito, dejalo vacío (""). NO inventes datos. 
+        ATENCIÓN: Para el campo 'razon_social_emisor', buscá EXCLUSIVAMENTE el nombre impreso en la parte inferior del cheque, que suele estar en la misma línea o pegado al CUIT del emisor (ej: 'PARA TODOS AVICOLA SRL'). IGNORÁ por completo el campo manuscrito 'Páguese a'.
         
         Devolvé ÚNICAMENTE un objeto JSON con esta estructura exacta:
         {{
-            "razonamiento_en_voz_alta": "Tu análisis exhaustivo y transcripción paso a paso de lo que ves, razonando cada garabato.",
+            "razonamiento_en_voz_alta": "Tu análisis...",
             "resumen_lote": {{
                 "total_declarado_ticket": numero_decimal,
                 "efectivo_declarado": numero_decimal
@@ -71,7 +72,7 @@ def procesar_lote_con_ia(archivos_subidos, cliente_tag):
                     "fecha_emision": "YYYY-MM-DD",
                     "fecha_pago": "YYYY-MM-DD",
                     "cuit_emisor": "CUIT con guiones",
-                    "firma_destino": "Razón social o firmante",
+                    "razon_social_emisor": "Razón social impresa junto al CUIT",
                     "estado_auditoria": "Pendiente",
                     "regente_cliente_id": "1045"
                 }}
