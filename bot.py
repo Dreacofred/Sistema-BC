@@ -173,6 +173,11 @@ with col2:
                         
                         for fila in datos_editados:
                             fila['archivo_url'] = url_publica
+                            # Limpieza de fechas vacías para que Supabase no tire error
+                            if fila.get('fecha_emision') == "":
+                                fila['fecha_emision'] = None
+                            if fila.get('fecha_pago') == "":
+                                fila['fecha_pago'] = None
                             
                         supabase.table("cobranzas_pendientes").insert(datos_editados).execute()
                         st.success("¡Guardado exitoso!")
