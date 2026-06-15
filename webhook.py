@@ -1,5 +1,6 @@
 import os
 import time
+import json
 import pandas as pd
 from flask import Flask, request, jsonify
 import google.generativeai as genai
@@ -8,10 +9,9 @@ from supabase import create_client, Client
 # ==========================================
 # 1. CREDENCIALES (Ajustadas para la Nube)
 # ==========================================
-# En Render, esto se lee desde las Variables de Entorno, no desde st.secrets
-URL_SB = os.environ.get("SUPABASE_URL")
-KEY_SB = os.environ.get("SUPABASE_KEY")
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+URL_SB = os.environ.get("SUPABASE_URL", "tu_url_supabase_aqui")
+KEY_SB = os.environ.get("SUPABASE_KEY", "tu_key_supabase_aqui")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "tu_key_gemini_aqui")
 
 supabase: Client = create_client(URL_SB, KEY_SB)
 genai.configure(api_key=GEMINI_API_KEY)
@@ -21,54 +21,126 @@ app = Flask(__name__)
 # ==========================================
 # 2. LA MEMORIA DEL BOT (El "Carrito")
 # ==========================================
-# Acá guardamos quién está mandando qué. 
-# Ejemplo: {"5493421234567": {"cliente": "fochesatto", "fotos": ["ruta1.jpg", "ruta2.jpg"]}}
 lotes_abiertos = {}
 
 # ==========================================
-# 3. EL EMBUDO DE WHATSAPP (El Webhook)
+# 3. FUNCIONES AUXILIARES (El Cerebro)
+# ==========================================
+def procesar_lote_con_ia(rutas_imagenes, cliente_tag):
+    archivos_gemini_creados = []
+    try:
+        # Subir imágenes temporales a Gemini
+        for ruta in rutas_imagenes:
+            archivo_g = genai.upload_file(ruta)
+            archivos_gemini_creados.append(archivo_g)
+
+        modelo = genai.GenerativeModel('gemini-2.5-pro')
+        
+        prompt = f"""
+        Sos un auditor contable experto de BC Combustibles. Analizá este lote: UN ticket S.I.C.E. y VARIAS fotos de cheques. Cliente: '{cliente_tag}'.
+        
+        PASO 1 (RAZONAMIENTO): Detallá qué ves en cada cheque en el campo 'razonamiento_en_voz_alta'. Si hay garabatos ilegibles, dejalo por escrito.
+        
+        PASO 2 (EXTRACCIÓN ESTRICTA): Completá los datos. 
+        - REGLA 1: Si dudás sobre un dato manuscrito, dejalo vacío (""). NO inventes.
+        - REGLA 2: Para 'razon_social_emisor', buscá el texto impreso junto al CUIT. Ignorá el 'Páguese a' manuscrito.
+        - REGLA 3: Para 'numero_cuenta', buscá en el recuadro superior derecho o en la banda magnética y extraé los números crudos, SIN guiones, ni barras, ni espacios (ej: 03800111186).
+        
+        Devolvé ÚNICAMENTE un objeto JSON con esta estructura exacta:
+        {{
+            "razonamiento_en_voz_alta": "Tu análisis...",
+            "resumen_lote": {{
+                "total_declarado_ticket": numero_decimal,
+                "efectivo_declarado": numero_decimal
+            }},
+            "cheques": [
+                {{
+                    "cliente_asociado": "{cliente_tag}",
+                    "tipo_comprobante": "Cheque Físico",
+                    "banco_origen": "Nombre del banco",
+                    "codigo_banco": "Código banco (ej: 014)",
+                    "codigo_sucursal": "Código sucursal/plaza (ej: 1842)",
+                    "numero_cuenta": "Número de cuenta limpio",
+                    "numero_identificador": "Número del cheque",
+                    "monto": numero_decimal,
+                    "fecha_emision": "YYYY-MM-DD",
+                    "fecha_pago": "YYYY-MM-DD",
+                    "cuit_emisor": "CUIT con guiones",
+                    "razon_social_emisor": "Razón social impresa",
+                    "estado_auditoria": "Pendiente",
+                    "regente_cliente_id": "1045"
+                }}
+            ]
+        }}
+        """
+        
+        contenido_a_procesar = archivos_gemini_creados + [prompt]
+        respuesta = modelo.generate_content(contenido_a_procesar)
+        
+        # Limpiar la memoria de Google
+        for g_file in archivos_gemini_creados:
+            genai.delete_file(g_file.name)
+            
+        texto_json = respuesta.text.replace("```json", "").replace("```", "").strip()
+        return json.loads(texto_json)
+
+    except Exception as e:
+        print(f"Error en IA: {e}")
+        return None
+
+def armar_excel_regente(datos_ia):
+    try:
+        cheques = datos_ia.get("cheques", [])
+        if not cheques:
+            return None
+            
+        df_exportar = pd.DataFrame(cheques)
+        df_regente = pd.DataFrame({
+            "Titular": df_exportar.get("razon_social_emisor", ""),
+            "Emision": df_exportar.get("fecha_emision", ""),
+            "Venc.": df_exportar.get("fecha_pago", ""),
+            "Nro": df_exportar.get("numero_identificador", ""),
+            "Bco.": df_exportar.get("codigo_banco", ""),
+            "NCta.": df_exportar.get("numero_cuenta", ""),
+            "Plaza": df_exportar.get("codigo_sucursal", ""),
+            "Monto": df_exportar.get("monto", 0.0)
+        })
+        
+        nombre_archivo = f"importacion_regente_{int(time.time())}.csv"
+        df_regente.to_csv(nombre_archivo, index=False, encoding='utf-8')
+        return nombre_archivo
+    except Exception as e:
+        print(f"Error armando Excel: {e}")
+        return None
+
+# ==========================================
+# 4. EL EMBUDO DE WHATSAPP (El Webhook)
 # ==========================================
 @app.route('/webhook', methods=['POST'])
 def recibir_mensaje():
     datos = request.json
-    
-    # 1. Extraer quién manda el mensaje y qué dice (Esto se ajustará según la API que usemos)
     remitente = datos.get('remitente_id') 
     mensaje_texto = datos.get('texto', '').strip().lower()
     tiene_imagen = datos.get('es_imagen', False)
     
-    # ---------------------------------------------------------
-    # CASO A: COMANDO DE APERTURA (!bot cliente)
-    # ---------------------------------------------------------
+    # A. COMANDO DE APERTURA (!bot cliente)
     if mensaje_texto.startswith("!bot "):
         nombre_cliente = mensaje_texto.replace("!bot ", "").strip().upper()
-        
-        # Le abrimos un "carrito" a este número de teléfono
-        lotes_abiertos[remitente] = {
-            "cliente": nombre_cliente,
-            "fotos": []
-        }
-        
-        respuesta = f"🟢 Lote abierto para *{nombre_cliente}*.\nPor favor, reenviá las fotos de los comprobantes. Cuando termines, escribí *!procesar*."
-        enviar_whatsapp(remitente, respuesta)
+        lotes_abiertos[remitente] = {"cliente": nombre_cliente, "fotos": []}
+        print(f"🟢 Lote abierto para: {nombre_cliente}")
+        # enviar_whatsapp(remitente, "🟢 Lote abierto...")
         return jsonify({"status": "ok"})
 
-    # ---------------------------------------------------------
-    # CASO B: RECIBIENDO FOTOS
-    # ---------------------------------------------------------
+    # B. RECIBIENDO FOTOS
     elif tiene_imagen:
-        # Si el usuario mandó una foto, verificamos si tiene un lote abierto
         if remitente in lotes_abiertos:
-            ruta_imagen = descargar_imagen_de_whatsapp(datos.get('url_imagen'))
+            ruta_imagen = "ruta_simulada.jpg" # descargar_imagen_de_whatsapp()
             lotes_abiertos[remitente]["fotos"].append(ruta_imagen)
-            
-            # Le mandamos un tilde para que sepa que la foto entró al carrito
-            enviar_whatsapp(remitente, "✅ Imagen agregada.")
+            print(f"✅ Foto agregada. Total: {len(lotes_abiertos[remitente]['fotos'])}")
+            # enviar_whatsapp(remitente, "✅ Imagen agregada.")
         return jsonify({"status": "ok"})
 
-    # ---------------------------------------------------------
-    # CASO C: COMANDO DE EJECUCIÓN (!procesar)
-    # ---------------------------------------------------------
+    # C. COMANDO DE EJECUCIÓN (!procesar)
     elif mensaje_texto == "!procesar":
         if remitente in lotes_abiertos:
             lote = lotes_abiertos[remitente]
@@ -76,41 +148,33 @@ def recibir_mensaje():
             fotos_rutas = lote["fotos"]
             
             if len(fotos_rutas) == 0:
-                enviar_whatsapp(remitente, "❌ Error: No enviaste ninguna foto para procesar. Lote cancelado.")
+                print("❌ Lote sin fotos.")
                 del lotes_abiertos[remitente]
                 return jsonify({"status": "error"})
                 
-            enviar_whatsapp(remitente, f"⏳ Analizando {len(fotos_rutas)} imágenes para {cliente}. Dame unos 20 segundos...")
+            print(f"⏳ Procesando para {cliente}...")
             
-            # --- ACÁ ENTRA LA MAGIA DE GEMINI QUE YA CREAMOS ---
+            # --- LA MAGIA ---
             datos_ia = procesar_lote_con_ia(fotos_rutas, cliente) 
-            # ---------------------------------------------------
             
             if datos_ia:
-                # Armamos el Excel con Pandas
+                # Guardar en Supabase
+                try:
+                    supabase.table("cobranzas_pendientes").insert(datos_ia["cheques"]).execute()
+                except Exception as e:
+                    print(f"Error Supabase: {e}")
+
+                # Armar el Excel y enviarlo
                 ruta_excel = armar_excel_regente(datos_ia)
+                if ruta_excel:
+                    print(f"✅ Excel listo en: {ruta_excel}")
+                    # enviar_archivo_whatsapp(remitente, ruta_excel)
                 
-                # Devolvemos el archivo al grupo de WhatsApp
-                enviar_archivo_whatsapp(remitente, ruta_excel, "Acá tenés el Excel listo para importar a Regente.")
-                
-            # Vaciamos el carrito para el próximo vendedor
             del lotes_abiertos[remitente]
-            
-        else:
-            enviar_whatsapp(remitente, "❌ No tenés ningún lote abierto. Escribí '!bot NombreCliente' para empezar.")
             
         return jsonify({"status": "ok"})
 
     return jsonify({"status": "ignorado"})
 
-# ==========================================
-# 4. FUNCIONES AUXILIARES (Motor IA y Excel)
-# ==========================================
-# Acá pegaremos las funciones exactas que ya validamos en bot.py:
-# def procesar_lote_con_ia()
-# def armar_excel_regente()
-# def enviar_whatsapp()
-
 if __name__ == '__main__':
-    # Esto mantiene el servidor prendido
     app.run(host='0.0.0.0', port=5000)
