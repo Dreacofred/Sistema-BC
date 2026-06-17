@@ -7,10 +7,12 @@ import streamlit as st
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# 🔑 LLAVE RESIDENCIAL DE SCRAPERAPI
-API_KEY_SCRAPER = "cf3ae8aaf0457292c6e2f8983b207139"  
+# 🔑 LLAVE DE SCRAPEOPS (1.000 consultas gratuitas renovables por mes)
+API_KEY_SCRAPEOPS = "d9362497-79e4-4177-97cb-11a18e8f72c7"  
 
-# 1. FUNCIÓN DE CONSULTA AL BCRA
+# ==========================================
+# 1. FUNCIÓN DE CONSULTA AL BCRA (NUEVO TÚNEL SCRAPEOPS)
+# ==========================================
 def consultar_bcra_completo(cuit):
     cuit = str(cuit).strip()
     url_deudas = f"https://api.bcra.gob.ar/centraldedeudores/v1.0/Deudas/{cuit}"
@@ -19,11 +21,12 @@ def consultar_bcra_completo(cuit):
     datos_cliente = {"situacion": 1, "entidad": "Sin Registros", "denominacion": "Cliente Desconocido", "cheques_rechazados": 0, "error_api": False}
     
     try:
-        payload_deudas = {'api_key': API_KEY_SCRAPER, 'url': url_deudas, 'render': 'false'}
-        res_deuda = requests.get('https://api.scraperapi.com/', params=payload_deudas, timeout=45)
+        # --- CONSULTA DE DEUDAS ---
+        payload_deudas = {'api_key': API_KEY_SCRAPEOPS, 'url': url_deudas}
+        res_deuda = requests.get('https://proxy.scrapeops.io/v1/', params=payload_deudas, timeout=45)
         
-        if res_deuda.status_code == 403:
-            return {"error_api": "HTTP 403: ScraperAPI sin créditos / Llave inválida"}
+        if res_deuda.status_code in [401, 403]:
+            return {"error_api": "HTTP 403: ScrapeOps sin créditos / Llave inválida"}
             
         if res_deuda.status_code == 200:
             try:
@@ -40,11 +43,12 @@ def consultar_bcra_completo(cuit):
         
         time.sleep(1) 
         
-        payload_cheques = {'api_key': API_KEY_SCRAPER, 'url': url_cheques, 'render': 'false'}
-        res_cheque = requests.get('https://api.scraperapi.com/', params=payload_cheques, timeout=45)
+        # --- CONSULTA DE CHEQUES ---
+        payload_cheques = {'api_key': API_KEY_SCRAPEOPS, 'url': url_cheques}
+        res_cheque = requests.get('https://proxy.scrapeops.io/v1/', params=payload_cheques, timeout=45)
         
-        if res_cheque.status_code == 403:
-            return {"error_api": "HTTP 403: ScraperAPI sin créditos / Llave inválida"}
+        if res_cheque.status_code in [401, 403]:
+            return {"error_api": "HTTP 403: ScrapeOps sin créditos / Llave inválida"}
 
         if res_cheque.status_code == 200:
             try:
@@ -79,7 +83,9 @@ def consultar_bcra_completo(cuit):
     except Exception as e:
         return {"error_api": str(e)}
 
-# 2. FUNCIÓN DE INTELIGENCIA ARTIFICIAL
+# ==========================================
+# 2. FUNCIÓN DE INTELIGENCIA ARTIFICIAL (ESCANEO DE CHEQUES)
+# ==========================================
 def procesar_lote_cheques_ia(cliente_ia, img_lote):
     prompt_cot = """
     Actúa como un auditor senior de BC Combustibles. Analiza esta foto que contiene un lote de cheques físicos.
@@ -88,7 +94,7 @@ def procesar_lote_cheques_ia(cliente_ia, img_lote):
     1. Analiza los cheques visualmente de arriba hacia abajo.
     2. El Emisor del cheque NUNCA es el nombre que sigue a "Páguese a". Ignora ese nombre gigante.
     3. Ve siempre a la parte INFERIOR del cheque (junto a la firma o el logo del banco). 
-    4. Extrae de ahí el CUIT (11 dígitos, suelen empezar con 20, 23, 27, 30) y la Razón Social del EMISOR.
+    4. Extrae de ahí el CUIT (11 dígitos, suelen empezar con 20, 23, 27, 30) and la Razón Social del EMISOR.
     5. Busca el NÚMERO DEL CHEQUE. Generalmente está en la esquina superior derecha o en la serie de números de la banda inferior.
     
     ESTRUCTURA DE RESPUESTA OBLIGATORIA:
@@ -120,7 +126,9 @@ def procesar_lote_cheques_ia(cliente_ia, img_lote):
         st.error(f"Falla en el motor de IA: {str(e)}")
         return []
 
-# 3. FUNCIÓN DE LISTA NEGRA
+# ==========================================
+# 3. FUNCIÓN DE BASE DE DATOS (LISTA NEGRA COOPERATIVA)
+# ==========================================
 def guardar_en_lista_negra(supabase, cuit, situacion, nombre, obs):
     try:
         supabase.table("cuits_afectados").insert({
