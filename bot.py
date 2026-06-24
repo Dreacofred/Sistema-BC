@@ -125,18 +125,26 @@ if lote_seleccionado:
                     # 1. Actualizamos Supabase fila por fila con las correcciones
                     for index, fila in datos_editados.iterrows():
                         fila_dict = fila.to_dict()
-                        # Reemplazar NaN por None para evitar errores SQL
+                        
+                        # Extraemos el ID y lo sacamos de la lista de datos a actualizar
+                        id_fila = fila_dict.pop('id', None)
+                        
+                        # Si el ID es inválido (ej: se agregó una fila vacía por accidente), la saltamos
+                        if pd.isna(id_fila) or str(id_fila).strip() in ["None", "<NA>", ""]:
+                            continue
+                            
+                        # Limpieza extrema: Reemplazamos textos basura de Streamlit por vacíos reales (NULL en SQL)
                         for key, value in fila_dict.items():
-                            if pd.isna(value):
+                            if pd.isna(value) or str(value).strip() in ["None", "<NA>", ""]:
                                 fila_dict[key] = None
                                 
                         # Le clavamos el sello de Auditado
                         fila_dict['estado_auditoria'] = 'Auditado'
                         
-                        # Actualizamos en la base de datos usando el ID
-                        supabase.table("cobranzas_pendientes").update(fila_dict).eq("id", fila_dict['id']).execute()
+                        # Actualizamos en la base de datos usando el ID limpio
+                        supabase.table("cobranzas_pendientes").update(fila_dict).eq("id", id_fila).execute()
                     
-                    st.success("¡Base de datos actualizada con éxito! El lote ya no está pendiente.")
+                    st.success("🎉 ¡Base de datos actualizada con éxito! El lote ya no está pendiente.")
                     
                     # 2. Generamos el Excel mapeado para Regente
                     df_regente = pd.DataFrame({
