@@ -1,20 +1,22 @@
 import os
 import time
+import uuid
 import json
-import pandas as pd
 from flask import Flask, request, jsonify
 import google.generativeai as genai
 from supabase import create_client, Client
 
 # ==========================================
-# 1. CREDENCIALES (Ajustadas para la Nube)
+# 1. CREDENCIALES (Para la Nube / Render)
 # ==========================================
-URL_SB = os.environ.get("SUPABASE_URL", "tu_url_supabase_aqui")
-KEY_SB = os.environ.get("SUPABASE_KEY", "tu_key_supabase_aqui")
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "tu_key_gemini_aqui")
+URL_SB = os.environ.get("SUPABASE_URL")
+KEY_SB = os.environ.get("SUPABASE_KEY")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
-supabase: Client = create_client(URL_SB, KEY_SB)
-genai.configure(api_key=GEMINI_API_KEY)
+if URL_SB and KEY_SB:
+    supabase: Client = create_client(URL_SB, KEY_SB)
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
 
 app = Flask(__name__)
 
@@ -24,42 +26,54 @@ app = Flask(__name__)
 lotes_abiertos = {}
 
 # ==========================================
-# 3. FUNCIONES AUXILIARES (El Cerebro)
+# 3. EL CEREBRO DE IA Y GUARDADO
 # ==========================================
-def procesar_lote_con_ia(rutas_imagenes, cliente_tag):
-    archivos_gemini_creados = []
+def procesar_y_guardar(rutas_imagenes, cliente_tag):
+    archivos_gemini = []
+    urls_supabase = []
+    
+    # Creamos el código único para que este lote no se mezcle con otros
+    id_lote_unico = str(uuid.uuid4()) 
+    
     try:
-        # Subir imágenes temporales a Gemini
+        # 1. Subir fotos a Supabase (Para que la oficina las vea en la web)
         for ruta in rutas_imagenes:
-            archivo_g = genai.upload_file(ruta)
-            archivos_gemini_creados.append(archivo_g)
+            nombre_archivo = f"img_{int(time.time())}_{os.path.basename(ruta)}"
+            with open(ruta, "rb") as f:
+                supabase.storage.from_("comprobantes").upload(
+                    path=nombre_archivo,
+                    file=f,
+                    file_options={"content-type": "image/jpeg"}
+                )
+            url_publica = supabase.storage.from_("comprobantes").get_public_url(nombre_archivo)
+            urls_supabase.append(url_publica)
+            
+            # 2. Subir también a Gemini para que piense
+            archivos_gemini.append(genai.upload_file(ruta))
 
+        # Unimos las URLs separadas por coma para la base de datos
+        fotos_juntas = ",".join(urls_supabase)
+
+        # 3. El Súper Prompt
         modelo = genai.GenerativeModel('gemini-2.5-pro')
-        
         prompt = f"""
         Sos un auditor contable experto de BC Combustibles. Analizá este lote: UN ticket S.I.C.E. y VARIAS fotos de cheques. Cliente: '{cliente_tag}'.
         
-        PASO 1 (RAZONAMIENTO): Detallá qué ves en cada cheque en el campo 'razonamiento_en_voz_alta'. Si hay garabatos ilegibles, dejalo por escrito.
-        
-        PASO 2 (EXTRACCIÓN ESTRICTA): Completá los datos. 
-        - REGLA 1: Si dudás sobre un dato manuscrito, dejalo vacío (""). NO inventes.
+        PASO 1: Detallá qué ves en cada cheque en 'razonamiento_en_voz_alta'.
+        PASO 2: Extraé los datos. 
+        - REGLA 1: Si dudás, dejalo vacío (""). NO inventes.
         - REGLA 2: Para 'razon_social_emisor', buscá el texto impreso junto al CUIT. Ignorá el 'Páguese a' manuscrito.
-        - REGLA 3: Para 'numero_cuenta', buscá en el recuadro superior derecho o en la banda magnética y extraé los números crudos, SIN guiones, ni barras, ni espacios (ej: 03800111186).
+        - REGLA 3: Para 'numero_cuenta', extraé los números crudos SIN guiones ni espacios.
         
-        Devolvé ÚNICAMENTE un objeto JSON con esta estructura exacta:
+        Devolvé ÚNICAMENTE un objeto JSON:
         {{
-            "razonamiento_en_voz_alta": "Tu análisis...",
-            "resumen_lote": {{
-                "total_declarado_ticket": numero_decimal,
-                "efectivo_declarado": numero_decimal
-            }},
             "cheques": [
                 {{
                     "cliente_asociado": "{cliente_tag}",
                     "tipo_comprobante": "Cheque Físico",
                     "banco_origen": "Nombre del banco",
                     "codigo_banco": "Código banco (ej: 014)",
-                    "codigo_sucursal": "Código sucursal/plaza (ej: 1842)",
+                    "codigo_sucursal": "Código sucursal (ej: 1842)",
                     "numero_cuenta": "Número de cuenta limpio",
                     "numero_identificador": "Número del cheque",
                     "monto": numero_decimal,
@@ -74,107 +88,44 @@ def procesar_lote_con_ia(rutas_imagenes, cliente_tag):
         }}
         """
         
-        contenido_a_procesar = archivos_gemini_creados + [prompt]
-        respuesta = modelo.generate_content(contenido_a_procesar)
+        # 4. Generar Respuesta
+        respuesta = modelo.generate_content(archivos_gemini + [prompt])
+        texto_json = respuesta.text.replace("```json", "").replace("```", "").strip()
+        datos_ia = json.loads(texto_json)
         
-        # Limpiar la memoria de Google
-        for g_file in archivos_gemini_creados:
+        # 5. Inyectar Lote ID, Fotos y Limpiar Fechas Vacías
+        for fila in datos_ia.get("cheques", []):
+            fila['lote_id'] = id_lote_unico
+            fila['archivo_url'] = fotos_juntas
+            if fila.get('fecha_emision') == "": fila['fecha_emision'] = None
+            if fila.get('fecha_pago') == "": fila['fecha_pago'] = None
+
+        # 6. Guardar en Base de Datos (Estado 'Pendiente')
+        supabase.table("cobranzas_pendientes").insert(datos_ia["cheques"]).execute()
+        
+        # Limpiar memoria de Google
+        for g_file in archivos_gemini:
             genai.delete_file(g_file.name)
             
-        texto_json = respuesta.text.replace("```json", "").replace("```", "").strip()
-        return json.loads(texto_json)
+        return True, id_lote_unico
 
     except Exception as e:
-        print(f"Error en IA: {e}")
-        return None
-
-def armar_excel_regente(datos_ia):
-    try:
-        cheques = datos_ia.get("cheques", [])
-        if not cheques:
-            return None
-            
-        df_exportar = pd.DataFrame(cheques)
-        df_regente = pd.DataFrame({
-            "Titular": df_exportar.get("razon_social_emisor", ""),
-            "Emision": df_exportar.get("fecha_emision", ""),
-            "Venc.": df_exportar.get("fecha_pago", ""),
-            "Nro": df_exportar.get("numero_identificador", ""),
-            "Bco.": df_exportar.get("codigo_banco", ""),
-            "NCta.": df_exportar.get("numero_cuenta", ""),
-            "Plaza": df_exportar.get("codigo_sucursal", ""),
-            "Monto": df_exportar.get("monto", 0.0)
-        })
-        
-        nombre_archivo = f"importacion_regente_{int(time.time())}.csv"
-        df_regente.to_csv(nombre_archivo, index=False, encoding='utf-8')
-        return nombre_archivo
-    except Exception as e:
-        print(f"Error armando Excel: {e}")
-        return None
+        print(f"Error procesando lote: {e}")
+        return False, str(e)
 
 # ==========================================
-# 4. EL EMBUDO DE WHATSAPP (El Webhook)
+# 4. EL EMBUDO DE WHATSAPP
 # ==========================================
 @app.route('/webhook', methods=['POST'])
-def recibir_mensaje():
+def recibir_whatsapp():
     datos = request.json
-    remitente = datos.get('remitente_id') 
-    mensaje_texto = datos.get('texto', '').strip().lower()
-    tiene_imagen = datos.get('es_imagen', False)
+    print("Recibido de WhatsApp:", datos)
     
-    # A. COMANDO DE APERTURA (!bot cliente)
-    if mensaje_texto.startswith("!bot "):
-        nombre_cliente = mensaje_texto.replace("!bot ", "").strip().upper()
-        lotes_abiertos[remitente] = {"cliente": nombre_cliente, "fotos": []}
-        print(f"🟢 Lote abierto para: {nombre_cliente}")
-        # enviar_whatsapp(remitente, "🟢 Lote abierto...")
-        return jsonify({"status": "ok"})
-
-    # B. RECIBIENDO FOTOS
-    elif tiene_imagen:
-        if remitente in lotes_abiertos:
-            ruta_imagen = "ruta_simulada.jpg" # descargar_imagen_de_whatsapp()
-            lotes_abiertos[remitente]["fotos"].append(ruta_imagen)
-            print(f"✅ Foto agregada. Total: {len(lotes_abiertos[remitente]['fotos'])}")
-            # enviar_whatsapp(remitente, "✅ Imagen agregada.")
-        return jsonify({"status": "ok"})
-
-    # C. COMANDO DE EJECUCIÓN (!procesar)
-    elif mensaje_texto == "!procesar":
-        if remitente in lotes_abiertos:
-            lote = lotes_abiertos[remitente]
-            cliente = lote["cliente"]
-            fotos_rutas = lote["fotos"]
-            
-            if len(fotos_rutas) == 0:
-                print("❌ Lote sin fotos.")
-                del lotes_abiertos[remitente]
-                return jsonify({"status": "error"})
-                
-            print(f"⏳ Procesando para {cliente}...")
-            
-            # --- LA MAGIA ---
-            datos_ia = procesar_lote_con_ia(fotos_rutas, cliente) 
-            
-            if datos_ia:
-                # Guardar en Supabase
-                try:
-                    supabase.table("cobranzas_pendientes").insert(datos_ia["cheques"]).execute()
-                except Exception as e:
-                    print(f"Error Supabase: {e}")
-
-                # Armar el Excel y enviarlo
-                ruta_excel = armar_excel_regente(datos_ia)
-                if ruta_excel:
-                    print(f"✅ Excel listo en: {ruta_excel}")
-                    # enviar_archivo_whatsapp(remitente, ruta_excel)
-                
-            del lotes_abiertos[remitente]
-            
-        return jsonify({"status": "ok"})
-
-    return jsonify({"status": "ignorado"})
+    # Acá conectaremos la lectura de mensajes cuando definamos la API (GreenAPI/Evolution)
+    
+    return jsonify({"status": "ok"})
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    # El puerto lo define Render automáticamente
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)
