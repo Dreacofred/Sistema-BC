@@ -66,17 +66,34 @@ if lote_seleccionado:
     
     with col_fotos:
         st.write("📸 **Imágenes del Lote**")
-        # Extraemos las URLs únicas de las imágenes de este lote
-        urls_imagenes = df_lote['archivo_url'].dropna().unique().tolist()
         
-        if urls_imagenes:
+        # 1. Extraemos lo que hay en la base de datos
+        urls_crudas = df_lote['archivo_url'].dropna().unique().tolist()
+        
+        urls_limpias = []
+        # 2. El "Colador": limpiamos y separamos por si hay varias URLs juntas
+        for url_str in urls_crudas:
+            if isinstance(url_str, str):
+                # Separamos por coma y limpiamos espacios
+                for u in url_str.split(','):
+                    u_limpia = u.strip()
+                    # Solo guardamos si realmente es un link web
+                    if u_limpia.startswith('http'):
+                        urls_limpias.append(u_limpia)
+                        
+        # 3. Quitamos posibles fotos duplicadas
+        urls_limpias = list(set(urls_limpias))
+
+        if urls_limpias:
             with st.container(height=600): # Caja con scroll para las fotos
-                for url in urls_imagenes:
-                    st.image(url, use_column_width=True)
-                    st.divider()
+                for url in urls_limpias:
+                    try:
+                        st.image(url, use_column_width=True)
+                        st.divider()
+                    except Exception as e:
+                        st.error(f"Error al cargar una de las imágenes.")
         else:
-            st.warning("Este lote no tiene imágenes adjuntas (o el bot de WhatsApp aún no las subió).")
-            
+            st.warning("Este lote no tiene imágenes válidas adjuntas (o el bot aún no las subió).")        
     with col_grilla:
         st.write("📊 **Datos Extraídos por IA (Editables)**")
         
