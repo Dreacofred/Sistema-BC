@@ -113,8 +113,7 @@ def procesar_y_guardar(rutas_imagenes, cliente_tag):
         """
         
         respuesta = modelo.generate_content(archivos_gemini + [prompt])
-        texto_json = respuesta.text.replace("```json", "").replace("
-```", "").strip()
+        texto_json = respuesta.text.replace("```json", "").replace("```", "").strip()
         datos_ia = json.loads(texto_json)
         
         # 5. Formatear y limpiar
