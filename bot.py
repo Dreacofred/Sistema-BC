@@ -41,11 +41,13 @@ with st.sidebar:
     st.header("📥 Bandeja de Pendientes")
     st.info("Seleccioná un lote para auditar:")
     
-    # Selector de lote
-    lote_seleccionado = st.radio(
+    # Armamos la lista con una opción vacía al principio
+    opciones_desplegable = ["--- Elegí un cliente ---"] + lotes_disponibles
+    
+    # Cambiamos st.radio por st.selectbox para hacer el menú desplegable
+    lote_seleccionado = st.selectbox(
         "Lotes esperando revisión:",
-        lotes_disponibles,
-        format_func=lambda x: f"🔴 Lote: {x}"
+        opciones_desplegable
     )
     
     if st.button("🔄 Actualizar Bandeja"):
@@ -55,7 +57,7 @@ with st.sidebar:
 # ==========================================
 # 4. PANTALLA PRINCIPAL: AUDITORÍA (Dividida)
 # ==========================================
-if lote_seleccionado:
+if lote_seleccionado != "--- Elegí un cliente ---":
     st.subheader(f"Auditoría en curso: Lote {lote_seleccionado}")
     
     # Filtramos solo los datos del lote seleccionado
