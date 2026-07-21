@@ -85,13 +85,21 @@ if lote_seleccionado:
         urls_limpias = list(set(urls_limpias))
 
         if urls_limpias:
-            with st.container(height=600): # Caja con scroll para las fotos
+            with st.container(height=600): # Caja con scroll
                 for url in urls_limpias:
                     try:
-                        st.image(url, use_column_width=True)
+                        # Preguntamos si es un PDF o una foto
+                        if ".pdf" in url.lower():
+                            # Si es PDF, lo incrustamos como documento usando HTML
+                            mostrar_pdf = f'<iframe src="{url}" width="100%" height="500" type="application/pdf"></iframe>'
+                            st.markdown(mostrar_pdf, unsafe_allow_html=True)
+                        else:
+                            # Si es foto, usamos el método normal
+                            st.image(url, use_column_width=True)
+                            
                         st.divider()
                     except Exception as e:
-                        st.error(f"Error al cargar una de las imágenes.")
+                        st.error(f"Error al cargar el archivo.")
         else:
             st.warning("Este lote no tiene imágenes válidas adjuntas (o el bot aún no las subió).")        
     with col_grilla:
