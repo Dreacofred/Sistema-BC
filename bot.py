@@ -84,22 +84,29 @@ if lote_seleccionado:
         # 3. Quitamos posibles fotos duplicadas
         urls_limpias = list(set(urls_limpias))
 
+        import base64
+        import requests
+        
         if urls_limpias:
             with st.container(height=600): # Caja con scroll
                 for url in urls_limpias:
                     try:
-                        # Preguntamos si es un PDF o una foto
                         if ".pdf" in url.lower():
-                            # Si es PDF, lo incrustamos como documento usando HTML
-                            mostrar_pdf = f'<iframe src="{url}" width="100%" height="500" type="application/pdf"></iframe>'
-                            st.markdown(mostrar_pdf, unsafe_allow_html=True)
+                            # 1. Descargamos el PDF en silencio
+                            respuesta_pdf = requests.get(url)
+                            
+                            # 2. Lo convertimos a formato base64 (para que la web lo trague sin chistar)
+                            base64_pdf = base64.b64encode(respuesta_pdf.content).decode('utf-8')
+                            
+                            # 3. Lo inyectamos directo en el navegador (evita bloqueos de Supabase)
+                            pdf_display = f'<embed src="data:application/pdf;base64,{base64_pdf}" width="100%" height="500" type="application/pdf">'
+                            st.markdown(pdf_display, unsafe_allow_html=True)
                         else:
-                            # Si es foto, usamos el método normal
                             st.image(url, use_column_width=True)
                             
                         st.divider()
                     except Exception as e:
-                        st.error(f"Error al cargar el archivo.")
+                        st.error(f"Error al cargar el archivo: {e}")
         else:
             st.warning("Este lote no tiene imágenes válidas adjuntas (o el bot aún no las subió).")        
     with col_grilla:
