@@ -61,20 +61,27 @@ def procesar_y_guardar(rutas_imagenes, cliente_tag):
     id_lote_unico = str(uuid.uuid4()) 
     
     try:
-        # 1. Subir fotos a Supabase (para visualización web)
+        # 1. Subir fotos o PDFs a Supabase con el formato correcto
         for ruta in rutas_imagenes:
-            nombre_archivo = f"img_{int(time.time())}_{os.path.basename(ruta)}"
+            nombre_archivo = f"doc_{int(time.time())}_{os.path.basename(ruta)}"
+            es_pdf = ruta.lower().endswith(".pdf")
+            tipo_mime = "application/pdf" if es_pdf else "image/jpeg"
+            
             with open(ruta, "rb") as f:
                 supabase.storage.from_("comprobantes").upload(
                     path=nombre_archivo,
                     file=f,
-                    file_options={"content-type": "image/jpeg"}
+                    file_options={"content-type": tipo_mime}
                 )
             url_publica = supabase.storage.from_("comprobantes").get_public_url(nombre_archivo)
             urls_supabase.append(url_publica)
             
-            # 2. Subir a Gemini
-            archivos_gemini.append(genai.upload_file(ruta))
+            # 2. Subir a Gemini y ESPERAR (Crucial para PDFs)
+            archivo_subido = genai.upload_file(ruta)
+            while archivo_subido.state.name == 'PROCESSING':
+                time.sleep(2) # Espera 2 segundos antes de volver a preguntar
+                archivo_subido = genai.get_file(archivo_subido.name)
+            archivos_gemini.append(archivo_subido)
 
         fotos_juntas = ",".join(urls_supabase)
 
@@ -113,7 +120,9 @@ def procesar_y_guardar(rutas_imagenes, cliente_tag):
         """
         
         respuesta = modelo.generate_content(archivos_gemini + [prompt])
-        texto_json = respuesta.text.replace("```json", "").replace(" ```", "").strip()
+        
+        # 4. Limpieza de JSON a prueba de balas (sin el espacio traicionero)
+        texto_json = respuesta.text.replace("```json", "").replace("```", "").strip()
         datos_ia = json.loads(texto_json)
         
         # 5. Formatear y limpiar
