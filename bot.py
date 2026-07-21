@@ -123,7 +123,7 @@ if lote_seleccionado:
             df_mostrar,
             hide_index=True,
             use_container_width=True,
-            num_rows="dynamic",
+            num_rows="fixed",
             disabled=["id"] # Bloqueamos el ID para que no lo rompan sin querer
         )
         
