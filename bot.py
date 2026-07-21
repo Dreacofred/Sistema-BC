@@ -131,7 +131,7 @@ if lote_seleccionado != "--- Elegí un cliente ---":
         )
         
         st.write("---")
-        st.write("### 🚦 Semáforo y Exportación")
+        st.write("### Auditoría y Exportación")
         suma_cheques = datos_editados['monto'].sum()
         st.metric("Suma Total de Cheques Auditados", f"${suma_cheques:,.2f}")
         
