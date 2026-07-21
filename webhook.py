@@ -164,9 +164,27 @@ def recibir_whatsapp():
 
         # --- A. COMANDO DE APERTURA ---
         if mensaje_texto.startswith("!bot "):
-            nombre_cliente = mensaje_texto.replace("!bot ", "").strip().upper()
-            lotes_abiertos[chat_id] = {"cliente": nombre_cliente, "fotos": []}
-            enviar_mensaje_wa(chat_id, f"🟢 Lote abierto para: *{nombre_cliente}*.\nMandá las fotos de los cheques y el ticket SICE. Cuando termines escribí *!procesar*")
+            texto_busqueda = mensaje_texto.replace("!bot ", "").strip()
+            
+            try:
+                # BÚSQUEDA INTELIGENTE EN SUPABASE
+                # Busca cualquier cliente que contenga el texto (ignorando mayúsculas/minúsculas)
+                respuesta_db = supabase.table("clientes").select("nombre").ilike("nombre", f"%{texto_busqueda}%").execute()
+                
+                if len(respuesta_db.data) > 0:
+                    # ¡Lo encontró! Usamos el nombre oficial exacto que está en la tabla
+                    nombre_oficial = respuesta_db.data[0]['nombre']
+                    
+                    lotes_abiertos[chat_id] = {"cliente": nombre_oficial, "fotos": []}
+                    enviar_mensaje_wa(chat_id, f"🟢 Lote abierto para: *{nombre_oficial}*.\nMandá las fotos de los cheques y el ticket SICE. Cuando termines escribí *!procesar*")
+                else:
+                    # Si escribís mal el nombre o no existe, te avisa en el acto
+                    enviar_mensaje_wa(chat_id, f"❌ No encontré a ningún cliente que coincida con '{texto_busqueda}' en la base de datos. Revisá cómo está escrito o cargalo primero en Supabase.")
+            
+            except Exception as e:
+                print(f"Error buscando al cliente en Supabase: {e}")
+                enviar_mensaje_wa(chat_id, "⚠️ Hubo un error de conexión buscando al cliente en la base de datos.")
+                
             return jsonify({"status": "ok"})
             
         # --- B. RECIBIENDO FOTOS ---
