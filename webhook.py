@@ -229,7 +229,18 @@ def recibir_whatsapp():
                     del lotes_abiertos[chat_id]
                     return jsonify({"status": "ok"})
                     
-                enviar_mensaje_wa(chat_id, f"⏳ Evaluando {len(fotos)} archivos para *{cliente}*. Esto va a demorar un par de minutos, dejame trabajar...")
+                # ----------------------------------------------------
+                # MENSAJE AMIGABLE SEGÚN CANTIDAD DE ARCHIVOS
+                # ----------------------------------------------------
+                cantidad = len(fotos)
+                if cantidad <= 4:
+                    mensaje_tiempo = "Esto sale al toque! 😜"
+                elif cantidad <= 8:
+                    mensaje_tiempo = "Bancame un minutito 😉"
+                else:
+                    mensaje_tiempo = "Una banda... 🤨 bancame 2 o 3 minuttos"
+                    
+                enviar_mensaje_wa(chat_id, f"⏳ Evaluando {cantidad} archivos para *{cliente}*. {mensaje_tiempo}")
                 
                 # ----------------------------------------------------
                 # EL TRUCO DEL SEGUNDO PLANO (PARA EVITAR EL TIMEOUT)
