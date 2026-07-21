@@ -92,15 +92,13 @@ if lote_seleccionado:
                 for url in urls_limpias:
                     try:
                         if ".pdf" in url.lower():
-                            # 1. Descargamos el PDF en silencio
-                            respuesta_pdf = requests.get(url)
+                            # 1. Usamos el visor de Google para saltar el bloqueo de Streamlit
+                            visor_url = f"https://docs.google.com/gview?url={url}&embedded=true"
+                            mostrar_pdf = f'<iframe src="{visor_url}" width="100%" height="500" frameborder="0"></iframe>'
+                            st.markdown(mostrar_pdf, unsafe_allow_html=True)
                             
-                            # 2. Lo convertimos a formato base64 (para que la web lo trague sin chistar)
-                            base64_pdf = base64.b64encode(respuesta_pdf.content).decode('utf-8')
-                            
-                            # 3. Lo inyectamos directo en el navegador (evita bloqueos de Supabase)
-                            pdf_display = f'<embed src="data:application/pdf;base64,{base64_pdf}" width="100%" height="500" type="application/pdf">'
-                            st.markdown(pdf_display, unsafe_allow_html=True)
+                            # 2. Botón de rescate: por si Google tarda en cargar, te deja abrirlo afuera
+                            st.link_button("📄 Abrir PDF en otra pestaña", url)
                         else:
                             st.image(url, use_column_width=True)
                             
