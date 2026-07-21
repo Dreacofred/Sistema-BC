@@ -225,24 +225,35 @@ def recibir_whatsapp():
                 fotos = lote["fotos"]
                 
                 if len(fotos) == 0:
-                    enviar_mensaje_wa(chat_id, "❌ No subiste ningún comprobante. Se canceló el lote.")
+                    enviar_mensaje_wa(chat_id, "❌ No subiste ningún archivo. Se canceló el lote.")
                     del lotes_abiertos[chat_id]
                     return jsonify({"status": "ok"})
                     
-                enviar_mensaje_wa(chat_id, f"⏳ Evaluando {len(fotos)} comprobantes para *{cliente}*. Esto puede tardar unos segundos...")
+                enviar_mensaje_wa(chat_id, f"⏳ Evaluando {len(fotos)} archivos para *{cliente}*. Esto va a demorar un par de minutos, dejame trabajar...")
                 
-                # Ejecutar la extracción de datos
-                exito = procesar_y_guardar(fotos, cliente)
+                # ----------------------------------------------------
+                # EL TRUCO DEL SEGUNDO PLANO (PARA EVITAR EL TIMEOUT)
+                # ----------------------------------------------------
+                import threading
                 
-                if exito:
-                    enviar_mensaje_wa(chat_id, "🎉 ¡Listo! Lote procesado con éxito. Ya está pendiente de auditoría.")
-                else:
-                    enviar_mensaje_wa(chat_id, "⚠️ Hubo un error procesando el lote. Por favor, avisale al administrador.")
+                def trabajo_pesado(fotos_a_procesar, cliente_a_procesar, chat_destino):
+                    # Esta función trabaja silenciosamente en el fondo
+                    exito = procesar_y_guardar(fotos_a_procesar, cliente_a_procesar)
                     
-                # Borrar fotos temporales del servidor
-                for f in fotos:
-                    if os.path.exists(f): os.remove(f)
-                    
+                    if exito:
+                        enviar_mensaje_wa(chat_destino, "🎉 ¡Listo! Lote procesado con éxito. Ya está en la oficina pendiente de auditoría.")
+                    else:
+                        enviar_mensaje_wa(chat_destino, "⚠️ Hubo un error procesando el lote. Por favor, avisale a administración.")
+                        
+                    # Borramos la basura
+                    for f in fotos_a_procesar:
+                        if os.path.exists(f): os.remove(f)
+
+                # Creamos el trabajador invisible y le damos play
+                hilo = threading.Thread(target=trabajo_pesado, args=(fotos, cliente, chat_id))
+                hilo.start()
+                
+                # Vaciamos el carrito
                 del lotes_abiertos[chat_id]
                 
     except Exception as e:
