@@ -185,7 +185,7 @@ def recibir_whatsapp():
                     nombre_oficial = respuesta_db.data[0]['nombre']
                     
                     lotes_abiertos[chat_id] = {"cliente": nombre_oficial, "fotos": []}
-                    enviar_mensaje_wa(chat_id, f"🟢 Lote abierto para: *{nombre_oficial}*.\nMandá las fotos de los cheques y el ticket SICE. Cuando termines escribí *!procesar*")
+                    enviar_mensaje_wa(chat_id, f"🟢 Lote abierto para: *{nombre_oficial}*.\nMandá los comprobantes. Cuando termines escribí *!procesar*")
                 else:
                     # Si escribís mal el nombre o no existe, te avisa en el acto
                     enviar_mensaje_wa(chat_id, f"❌ No encontré a ningún cliente que coincida con '{texto_busqueda}' en la base de datos. Revisá cómo está escrito o cargalo primero en Supabase.")
@@ -225,19 +225,19 @@ def recibir_whatsapp():
                 fotos = lote["fotos"]
                 
                 if len(fotos) == 0:
-                    enviar_mensaje_wa(chat_id, "❌ No subiste ninguna foto. Se canceló el lote.")
+                    enviar_mensaje_wa(chat_id, "❌ No subiste ningún comprobante. Se canceló el lote.")
                     del lotes_abiertos[chat_id]
                     return jsonify({"status": "ok"})
                     
-                enviar_mensaje_wa(chat_id, f"⏳ Evaluando {len(fotos)} imágenes para *{cliente}*. Esto puede tardar unos segundos...")
+                enviar_mensaje_wa(chat_id, f"⏳ Evaluando {len(fotos)} comprobantes para *{cliente}*. Esto puede tardar unos segundos...")
                 
                 # Ejecutar la extracción de datos
                 exito = procesar_y_guardar(fotos, cliente)
                 
                 if exito:
-                    enviar_mensaje_wa(chat_id, "🎉 ¡Listo! Lote procesado con éxito. Ya está en la oficina pendiente de auditoría.")
+                    enviar_mensaje_wa(chat_id, "🎉 ¡Listo! Lote procesado con éxito. Ya está pendiente de auditoría.")
                 else:
-                    enviar_mensaje_wa(chat_id, "⚠️ Hubo un error procesando el lote. Por favor, avisale a administración.")
+                    enviar_mensaje_wa(chat_id, "⚠️ Hubo un error procesando el lote. Por favor, avisale al administrador.")
                     
                 # Borrar fotos temporales del servidor
                 for f in fotos:
