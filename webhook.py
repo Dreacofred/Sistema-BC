@@ -190,10 +190,11 @@ def recibir_whatsapp():
         # --- B. RECIBIENDO FOTOS Y ARCHIVOS PDF ---
         elif type_message in ["imageMessage", "documentMessage"]:
             if chat_id in lotes_abiertos:
-                download_url = message_data.get('fileMessageData', {}).get('downloadUrl')
+                # GreenAPI guarda la URL en distintos lugares según si es foto o documento
+                datos_archivo = message_data.get('documentMessageData') or message_data.get('fileMessageData') or message_data.get('imageMessageData') or {}
+                download_url = datos_archivo.get('downloadUrl')
                 
                 if download_url:
-                    # Le ponemos la extensión correcta para que no se confunda
                     ext = ".pdf" if type_message == "documentMessage" else ".jpg"
                     nombre_temp = f"tmp_{int(time.time())}_{uuid.uuid4().hex[:6]}{ext}"
                     
@@ -202,6 +203,9 @@ def recibir_whatsapp():
                         cant = len(lotes_abiertos[chat_id]["fotos"])
                         palabra = "PDF" if type_message == "documentMessage" else "Foto"
                         enviar_mensaje_wa(chat_id, f"✅ {palabra} {cant} recibido en el carrito.")
+                else:
+                    print("Error: No se encontró la URL de descarga en el mensaje.")
+                    
             return jsonify({"status": "ok"})
             
         # --- C. COMANDO DE EJECUCIÓN ---
