@@ -187,16 +187,21 @@ def recibir_whatsapp():
                 
             return jsonify({"status": "ok"})
             
-        # --- B. RECIBIENDO FOTOS ---
-        elif type_message == "imageMessage":
+        # --- B. RECIBIENDO FOTOS Y ARCHIVOS PDF ---
+        elif type_message in ["imageMessage", "documentMessage"]:
             if chat_id in lotes_abiertos:
                 download_url = message_data.get('fileMessageData', {}).get('downloadUrl')
+                
                 if download_url:
-                    nombre_temp = f"tmp_{int(time.time())}_{uuid.uuid4().hex[:6]}.jpg"
+                    # Le ponemos la extensión correcta para que no se confunda
+                    ext = ".pdf" if type_message == "documentMessage" else ".jpg"
+                    nombre_temp = f"tmp_{int(time.time())}_{uuid.uuid4().hex[:6]}{ext}"
+                    
                     if descargar_imagen(download_url, nombre_temp):
                         lotes_abiertos[chat_id]["fotos"].append(nombre_temp)
                         cant = len(lotes_abiertos[chat_id]["fotos"])
-                        enviar_mensaje_wa(chat_id, f"✅ Foto {cant} recibida en el carrito.")
+                        palabra = "PDF" if type_message == "documentMessage" else "Foto"
+                        enviar_mensaje_wa(chat_id, f"✅ {palabra} {cant} recibido en el carrito.")
             return jsonify({"status": "ok"})
             
         # --- C. COMANDO DE EJECUCIÓN ---
