@@ -35,28 +35,29 @@ df_pendientes = pd.DataFrame(datos_pendientes)
 lotes_disponibles = df_pendientes['cliente_asociado'].unique().tolist()
 
 # ==========================================
-# 3. BARRA LATERAL: LA BANDEJA DE ENTRADA
+# 3. BANDEJA DE ENTRADA (EN PANTALLA PRINCIPAL)
 # ==========================================
-with st.sidebar:
-    st.header("📥 Bandeja de Pendientes")
-    st.info("Seleccioná un lote para auditar:")
-    
-    # Armamos la lista con una opción vacía al principio
-    opciones_desplegable = ["--- Elegí un cliente ---"] + lotes_disponibles
-    
-    # Cambiamos st.radio por st.selectbox para hacer el menú desplegable
-    lote_seleccionado = st.selectbox(
-        "Lotes esperando revisión:",
-        opciones_desplegable
-    )
-    
-    if st.button("🔄 Actualizar Bandeja"):
-        st.cache_data.clear()
-        st.rerun()
+st.subheader("📥 Bandeja de Pendientes")
+
+# Armamos la lista con una opción vacía al principio
+opciones_desplegable = ["--- Elegí un cliente ---"] + lotes_disponibles
+
+# Menú desplegable en el centro de la pantalla
+lote_seleccionado = st.selectbox(
+    "Seleccioná un lote para auditar:",
+    opciones_desplegable
+)
+
+if st.button("🔄 Actualizar Bandeja"):
+    st.cache_data.clear()
+    st.rerun()
+
+st.markdown("---")
 
 # ==========================================
 # 4. PANTALLA PRINCIPAL: AUDITORÍA (Dividida)
 # ==========================================
+# Solo mostramos los datos si el usuario eligió un cliente válido
 if lote_seleccionado != "--- Elegí un cliente ---":
     st.subheader(f"Auditoría en curso: Lote {lote_seleccionado}")
     
