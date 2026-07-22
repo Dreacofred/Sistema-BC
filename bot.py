@@ -32,9 +32,10 @@ if df_completo.empty or not (df_completo['estado_auditoria'] == 'Pendiente').any
     st.success("🎉 ¡Bandeja limpia! No hay lotes pendientes de auditoría en este momento.")
     st.stop()
 
-# --- EL FILTRO MÁGICO ---
-ids_lotes_activos = df_completo[df_completo['estado_auditoria'] == 'Pendiente']['lote_id'].unique()
-df_general = df_completo[df_completo['lote_id'].isin(ids_lotes_activos)].copy()
+# --- EL FILTRO MÁGICO (CORTADO DE RAÍZ) ---
+# Solo nos quedamos ESTRICTAMENTE con las filas que dicen 'Pendiente'. 
+# Lo que ya se auditó (así sea del mismo lote) no se muestra más.
+df_general = df_completo[df_completo['estado_auditoria'] == 'Pendiente'].copy()
 lotes_disponibles = df_general['cliente_asociado'].unique().tolist()
 
 # ==========================================
@@ -86,18 +87,15 @@ if lote_seleccionado != "--- Elegí un cliente ---":
             col_btn_izq, col_contador, col_btn_der = st.columns([1, 2, 1])
             
             with col_btn_izq:
-                # Botón Anterior (solo funciona si no estamos en la primera foto)
                 if st.button("⬅️ Anterior", use_container_width=True):
                     if st.session_state.foto_index > 0:
                         st.session_state.foto_index -= 1
                         st.rerun()
                         
             with col_contador:
-                # Texto central que indica por dónde vamos
                 st.markdown(f"<h5 style='text-align: center;'>Archivo {st.session_state.foto_index + 1} de {len(urls_limpias)}</h5>", unsafe_allow_html=True)
                 
             with col_btn_der:
-                # Botón Siguiente (solo funciona si no estamos en la última foto)
                 if st.button("Siguiente ➡️", use_container_width=True):
                     if st.session_state.foto_index < len(urls_limpias) - 1:
                         st.session_state.foto_index += 1
