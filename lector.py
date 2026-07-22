@@ -123,28 +123,27 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # 2. CABECERA SUPERIOR ALINEADA AL CENTRO
-# Usamos vertical_alignment="center" para que el botón Salir quede perfectamente a la misma altura que tu perfil
 col_logo, col_esp, col_perfil, col_salir = st.columns([1, 4, 2.5, 1], vertical_alignment="center")
 
 with col_logo:
     st.image(URL_LOGO_OFICIAL, width=120)
 
 with col_perfil:
-    # Textos forzados a blanco (#FFFFFF) para que resalten sobre el gris
+    # Usamos etiquetas <font> que Streamlit no puede ignorar para garantizar el texto blanco
     st.markdown(f"""
-        <div style="background:#3A3A3A; padding:8px 15px; border-radius:8px; border-left:4px solid {COLOR_ROJO};">
-            <p style="margin:0; font-size:13px; color:#FFFFFF !important;">Operador: <b>{usuario_app}</b></p>
-            <p style="margin:0; font-size:13px; color:#FFFFFF !important;">📍 {NOMBRES_SUCURSALES.get(user['sucursal_id'], 'BC')}</p>
+        <div style="background-color: #3A3A3A; padding: 10px 15px; border-radius: 8px; border-left: 5px solid {COLOR_ROJO}; line-height: 1.5;">
+            <font color="white" size="2">Operador: <b>{usuario_app}</b></font><br>
+            <font color="white" size="2">📍 {NOMBRES_SUCURSALES.get(user['sucursal_id'], 'BC')}</font>
         </div>
     """, unsafe_allow_html=True)
 
 with col_salir:
-    # Botón más chico, centrado y con texto en negrita
-    if st.button("**🚪 Salir**"):
+    # Agregamos use_container_width=True para que el botón se acomode bien
+    if st.button("**🚪 Salir**", use_container_width=True):
         st.session_state.usuario_autenticado = None
         st.rerun()
 
-# 3. MENÚ HORIZONTAL AJUSTADO
+# 3. MENÚ HORIZONTAL AJUSTADO (GROSOR NORMAL)
 opcion = option_menu(
     menu_title=None, 
     options=["Generador de Resumen", "Facturas de Proveedores", "Verificación BCRA", "Gestión de Clientes", "Laboratorio IA"], 
@@ -152,11 +151,10 @@ opcion = option_menu(
     default_index=0,
     orientation="horizontal",
     styles={
-        "container": {"padding": "0!important", "background-color": COLOR_GRIS_BC, "border-radius": "8px", "margin-top": "10px"},
-        "icon": {"color": "#FFFFFF", "font-size": "13px"}, 
-        # Achicamos la fuente a 12px
-        "nav-link": {"color": "#FFFFFF", "font-size": "12px", "text-align": "center", "margin":"0px", "--hover-color": "#4A4A4A"},
-        # IMPORTANTISIMO: Anulamos la negrita al seleccionar (font-weight: normal) para que no salte de renglón
+        # Le sacamos el 0 al padding y le ponemos 10px para que la barra recupere su altura normal
+        "container": {"padding": "10px!important", "background-color": COLOR_GRIS_BC, "border-radius": "8px", "margin-top": "15px"},
+        "icon": {"color": "#FFFFFF", "font-size": "15px"}, 
+        "nav-link": {"color": "#FFFFFF", "font-size": "13px", "text-align": "center", "margin":"0px", "--hover-color": "#4A4A4A"},
         "nav-link-selected": {"background-color": COLOR_ROJO, "color": "white", "font-weight": "normal"}, 
     }
 )
