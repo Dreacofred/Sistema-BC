@@ -114,41 +114,50 @@ if st.session_state.usuario_autenticado is None:
 user = st.session_state.usuario_autenticado
 usuario_app = user['nombre']
 
-# Ocultamos la flechita de la barra lateral via CSS para que no estorbe
-st.markdown("""<style>[data-testid="collapsedControl"] {display: none;}</style>""", unsafe_allow_html=True)
+# 1. ELIMINAR EL "FANTASMA" DE LA BARRA LATERAL POR COMPLETO
+st.markdown("""
+    <style>
+    [data-testid="stSidebar"] { display: none !important; }
+    [data-testid="collapsedControl"] { display: none !important; }
+    </style>
+""", unsafe_allow_html=True)
 
-# --- CABECERA Y PERFIL SUPERIOR ---
-col_logo, col_espacio, col_perfil, col_salir = st.columns([1, 4, 2, 1])
+# 2. CABECERA SUPERIOR ALINEADA AL CENTRO
+# Usamos vertical_alignment="center" para que el botón Salir quede perfectamente a la misma altura que tu perfil
+col_logo, col_esp, col_perfil, col_salir = st.columns([1, 4, 2.5, 1], vertical_alignment="center")
 
 with col_logo:
     st.image(URL_LOGO_OFICIAL, width=120)
 
 with col_perfil:
+    # Textos forzados a blanco (#FFFFFF) para que resalten sobre el gris
     st.markdown(f"""
-        <div style="background:#2C2C2C; padding:8px 15px; border-radius:10px; border-left:4px solid {COLOR_ROJO}; margin-top:5px;">
-            <p style="margin:0; font-size:12px; color:#B0B0B0 !important;">Operador: <b>{usuario_app}</b></p>
-            <p style="margin:0; font-size:12px; color:#B0B0B0 !important;">📍 {NOMBRES_SUCURSALES.get(user['sucursal_id'], 'BC')}</p>
+        <div style="background:#3A3A3A; padding:8px 15px; border-radius:8px; border-left:4px solid {COLOR_ROJO};">
+            <p style="margin:0; font-size:13px; color:#FFFFFF !important;">Operador: <b>{usuario_app}</b></p>
+            <p style="margin:0; font-size:13px; color:#FFFFFF !important;">📍 {NOMBRES_SUCURSALES.get(user['sucursal_id'], 'BC')}</p>
         </div>
     """, unsafe_allow_html=True)
 
 with col_salir:
-    st.markdown("<br>", unsafe_allow_html=True)
-    if st.button("🚪 Salir", use_container_width=True):
+    # Botón más chico, centrado y con texto en negrita
+    if st.button("**🚪 Salir**"):
         st.session_state.usuario_autenticado = None
         st.rerun()
 
-# --- MENÚ HORIZONTAL MODERNO ---
+# 3. MENÚ HORIZONTAL AJUSTADO
 opcion = option_menu(
     menu_title=None, 
     options=["Generador de Resumen", "Facturas de Proveedores", "Verificación BCRA", "Gestión de Clientes", "Laboratorio IA"], 
     icons=["file-earmark-spreadsheet", "receipt", "shield-check", "people", "robot"], 
     default_index=0,
-    orientation="horizontal", # ESTA ES LA MAGIA QUE LO ACUESTA ARRIBA
+    orientation="horizontal",
     styles={
-        "container": {"padding": "0!important", "background-color": COLOR_GRIS_BC, "border-radius": "10px"},
-        "icon": {"color": "#FFFFFF", "font-size": "15px"}, 
-        "nav-link": {"color": "#FFFFFF", "font-size": "14px", "text-align": "center", "margin":"0px", "--hover-color": "#4A4A4A"},
-        "nav-link-selected": {"background-color": COLOR_ROJO, "color": "white"},
+        "container": {"padding": "0!important", "background-color": COLOR_GRIS_BC, "border-radius": "8px", "margin-top": "10px"},
+        "icon": {"color": "#FFFFFF", "font-size": "13px"}, 
+        # Achicamos la fuente a 12px
+        "nav-link": {"color": "#FFFFFF", "font-size": "12px", "text-align": "center", "margin":"0px", "--hover-color": "#4A4A4A"},
+        # IMPORTANTISIMO: Anulamos la negrita al seleccionar (font-weight: normal) para que no salte de renglón
+        "nav-link-selected": {"background-color": COLOR_ROJO, "color": "white", "font-weight": "normal"}, 
     }
 )
 st.markdown("<br>", unsafe_allow_html=True)
