@@ -74,42 +74,44 @@ if lote_seleccionado != "--- Elegí un cliente ---":
         urls_crudas = df_lote['archivo_url'].dropna().unique().tolist()
         
         urls_limpias = []
-        # 2. El "Colador": limpiamos y separamos por si hay varias URLs juntas
+        # 2. El "Colador": limpiamos y separamos
         for url_str in urls_crudas:
             if isinstance(url_str, str):
-                # Separamos por coma y limpiamos espacios
                 for u in url_str.split(','):
                     u_limpia = u.strip()
-                    # Solo guardamos si realmente es un link web
                     if u_limpia.startswith('http'):
                         urls_limpias.append(u_limpia)
                         
-        # 3. Quitamos posibles fotos duplicadas
-        urls_limpias = list(set(urls_limpias))
+        # 3. Quitamos duplicados manteniendo el orden
+        urls_limpias = list(dict.fromkeys(urls_limpias))
 
-        import base64
-        import requests
-        
         if urls_limpias:
-            with st.container(height=600): # Caja con scroll
-                for url in urls_limpias:
-                    try:
-                        if ".pdf" in url.lower():
-                            # 1. Usamos el visor de Google para saltar el bloqueo de Streamlit
-                            visor_url = f"https://docs.google.com/gview?url={url}&embedded=true"
-                            mostrar_pdf = f'<iframe src="{visor_url}" width="100%" height="500" frameborder="0"></iframe>'
-                            st.markdown(mostrar_pdf, unsafe_allow_html=True)
-                            
-                            # 2. Botón de rescate: por si Google tarda en cargar, te deja abrirlo afuera
-                            st.link_button("📄 Abrir PDF en otra pestaña", url)
-                        else:
-                            st.image(url, use_column_width=True)
-                            
-                        st.divider()
-                    except Exception as e:
-                        st.error(f"Error al cargar el archivo: {e}")
+            # --- NUEVO: NAVEGADOR DE ARCHIVOS ---
+            st.info(f"📁 Este lote tiene {len(urls_limpias)} archivo(s).")
+            
+            # Armamos los nombres de los botones (Archivo 1, Archivo 2, etc.)
+            opciones = [f"Archivo {i+1}" for i in range(len(urls_limpias))]
+            
+            # Creamos los botones horizontales
+            seleccion = st.radio("Navegar:", opciones, horizontal=True, label_visibility="collapsed")
+            
+            # Buscamos qué URL corresponde al botón tocado
+            indice = opciones.index(seleccion)
+            url_activa = urls_limpias[indice]
+            
+            # Mostramos SOLO el archivo que se seleccionó
+            try:
+                if ".pdf" in url_activa.lower():
+                    visor_url = f"https://docs.google.com/gview?url={url_activa}&embedded=true"
+                    mostrar_pdf = f'<iframe src="{visor_url}" width="100%" height="550" frameborder="0"></iframe>'
+                    st.markdown(mostrar_pdf, unsafe_allow_html=True)
+                    st.link_button("📄 Abrir PDF en otra pestaña", url_activa)
+                else:
+                    st.image(url_activa, use_column_width=True)
+            except Exception as e:
+                st.error(f"Error al cargar el archivo.")
         else:
-            st.warning("Este lote no tiene imágenes válidas adjuntas (o el bot aún no las subió).")        
+            st.warning("Este lote no tiene imágenes válidas adjuntas (o el bot aún no las subió).")   
     with col_grilla:
         st.write("📊 **Datos Extraídos por IA (Editables)**")
         
