@@ -41,7 +41,7 @@ supabase: Client = create_client(URL_SB, KEY_SB)
 
 NOMBRES_SUCURSALES = {1: "RECONQUISTA", 2: "AVELLANEDA", 3: "FLORENCIA", 4: "RECREO"}
 
-st.set_page_config(page_title="BC Combustibles - Gestión Pro", page_icon="⛽", layout="wide")
+st.set_page_config(page_title="BC Combustibles - Gestión Pro", page_icon="⛽", layout="wide", initial_sidebar_state="collapsed")
 
 st.markdown(f"""
     <style>
