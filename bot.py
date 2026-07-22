@@ -55,26 +55,74 @@ if st.button("🔄 Actualizar Bandeja"):
 st.markdown("---")
 
 # ==========================================
-# 4. PANTALLA PRINCIPAL: AUDITORÍA (Dividida)
+# 4. PANTALLA PRINCIPAL: AUDITORÍA (Maestro/Detalle)
 # ==========================================
-# Solo mostramos los datos si el usuario eligió un cliente válido
 if lote_seleccionado != "--- Elegí un cliente ---":
     st.subheader(f"Auditoría en curso: Lote {lote_seleccionado}")
     
     # Filtramos solo los datos del lote seleccionado
     df_lote = df_pendientes[df_pendientes['cliente_asociado'] == lote_seleccionado].copy()
+
+    # --- 1. TABLA GENERAL (A TODO EL ANCHO) ---
+    st.write("📊 **Resumen del Lote (Vista General)**")
     
-    # Dividimos la pantalla: Izquierda (Fotos) | Derecha (Grilla IA)
-    col_fotos, col_grilla = st.columns([1, 1.5])
+    # Función para pintar la fila de verde si ya está auditada
+    def pintar_verde(fila):
+        # Usamos .get por las dudas, chequeando si dice 'Auditado'
+        if fila.get('estado_auditoria') == 'Auditado':
+            return ['background-color: #c3e6cb; color: #155724'] * len(fila)
+        return [''] * len(fila)
+
+    # Mostramos la tabla bloqueada (solo lectura) pero pintada
+    st.dataframe(
+        df_lote[columnas_visibles].style.apply(pintar_verde, axis=1),
+        use_container_width=True,
+        hide_index=True
+    )
     
-    with col_fotos:
-        st.write("📸 **Imágenes del Lote**")
+    st.divider()
+
+    # --- 2. ZONA DE AUDITORÍA INDIVIDUAL ---
+    st.subheader("🔍 Estación de Revisión")
+    
+    # Armamos la lista para el desplegable con un tilde si ya está listo
+    opciones_cheques = ["--- Elegí un comprobante ---"]
+    for _, fila in df_lote.iterrows():
+        icono = "✅" if fila.get('estado_auditoria') == 'Auditado' else "⏳"
+        opciones_cheques.append(f"{icono} Cheque N° {fila.get('numero_identificador', 'S/N')} | Monto: ${fila.get('monto', 0)} | ID: {fila['id']}")
+
+    cheque_sel = st.selectbox("Seleccioná un comprobante para auditar y ver su imagen:", opciones_cheques)
+
+    if cheque_sel != "--- Elegí un comprobante ---":
+        # Extraemos el ID del final del texto (después de 'ID: ')
+        id_seleccionado = cheque_sel.split("ID: ")[1]
+        df_fila = df_lote[df_lote['id'] == id_seleccionado].copy()
+
+        # --- A. EDITOR DE LA FILA ---
+        st.write("📝 **Datos extraídos (Corregí acá si la IA se equivocó)**")
+        fila_editada = st.data_editor(df_fila[columnas_visibles], hide_index=True, use_container_width=True, disabled=["id"])
         
-        # 1. Extraemos lo que hay en la base de datos
-        urls_crudas = df_lote['archivo_url'].dropna().unique().tolist()
+        # --- B. BOTÓN DE CONFIRMACIÓN ---
+        if st.button("✅ Confirmar y Marcar como OK", use_container_width=True):
+            datos_nuevos = fila_editada.iloc[0].to_dict()
+            datos_nuevos['estado_auditoria'] = 'Auditado' # Le cambiamos el estado
+            
+            # Actualizamos en Supabase
+            supabase.table("cobranzas_pendientes").update(datos_nuevos).eq("id", id_seleccionado).execute()
+            
+            # Avisamos y recargamos la página para que se pinte de verde
+            st.success("¡Comprobante auditado correctamente!")
+            import time
+            time.sleep(1)
+            st.rerun()
+
+        st.write("---")
+        
+        # --- C. VISOR DE ARCHIVOS DEL LOTE ---
+        st.write("📸 **Documentos Adjuntos**")
+        urls_crudas = df_fila['archivo_url'].dropna().unique().tolist()
         
         urls_limpias = []
-        # 2. El "Colador": limpiamos y separamos
         for url_str in urls_crudas:
             if isinstance(url_str, str):
                 for u in url_str.split(','):
@@ -82,36 +130,26 @@ if lote_seleccionado != "--- Elegí un cliente ---":
                     if u_limpia.startswith('http'):
                         urls_limpias.append(u_limpia)
                         
-        # 3. Quitamos duplicados manteniendo el orden
         urls_limpias = list(dict.fromkeys(urls_limpias))
 
         if urls_limpias:
-            # --- NUEVO: NAVEGADOR DE ARCHIVOS ---
-            st.info(f"📁 Este lote tiene {len(urls_limpias)} archivo(s).")
-            
-            # Armamos los nombres de los botones (Archivo 1, Archivo 2, etc.)
             opciones = [f"Archivo {i+1}" for i in range(len(urls_limpias))]
-            
-            # Creamos los botones horizontales
-            seleccion = st.radio("Navegar:", opciones, horizontal=True, label_visibility="collapsed")
-            
-            # Buscamos qué URL corresponde al botón tocado
+            seleccion = st.radio("Navegar por las imágenes del lote:", opciones, horizontal=True, label_visibility="collapsed")
             indice = opciones.index(seleccion)
             url_activa = urls_limpias[indice]
             
-            # Mostramos SOLO el archivo que se seleccionó
             try:
                 if ".pdf" in url_activa.lower():
                     visor_url = f"https://docs.google.com/gview?url={url_activa}&embedded=true"
-                    mostrar_pdf = f'<iframe src="{visor_url}" width="100%" height="550" frameborder="0"></iframe>'
+                    mostrar_pdf = f'<iframe src="{visor_url}" width="100%" height="600" frameborder="0"></iframe>'
                     st.markdown(mostrar_pdf, unsafe_allow_html=True)
                     st.link_button("📄 Abrir PDF en otra pestaña", url_activa)
                 else:
-                    st.image(url_activa, use_column_width=True)
+                    st.image(url_activa, use_container_width=True)
             except Exception as e:
                 st.error(f"Error al cargar el archivo.")
         else:
-            st.warning("Este lote no tiene imágenes válidas adjuntas (o el bot aún no las subió).")   
+            st.warning("Este lote no tiene imágenes adjuntas.")
     with col_grilla:
         st.write("📊 **Datos Extraídos por IA (Editables)**")
         
