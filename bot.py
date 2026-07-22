@@ -17,22 +17,23 @@ st.markdown("Revisá los lotes enviados desde la pista, validá la lectura de la
 st.markdown("---")
 
 # ==========================================
-# 2. TRAER LOTES PENDIENTES DE SUPABASE
+# 2. TRAER LOTES DE SUPABASE
 # ==========================================
 @st.cache_data(ttl=10) # Se actualiza cada 10 segundos
-def obtener_pendientes():
-    respuesta = supabase.table("cobranzas_pendientes").select("*").eq("estado_auditoria", "Pendiente").execute()
+def obtener_datos():
+    # Traemos todos los datos para poder ver cuáles están pendientes y cuáles ya pintados de verde
+    respuesta = supabase.table("cobranzas_pendientes").select("*").execute()
     return respuesta.data
 
-datos_pendientes = obtener_pendientes()
+datos_db = obtener_datos()
+df_general = pd.DataFrame(datos_db)
 
-if not datos_pendientes:
+# Filtramos para armar la lista de la bandeja (solo clientes que tengan cosas pendientes)
+if df_general.empty or not (df_general['estado_auditoria'] == 'Pendiente').any():
     st.success("🎉 ¡Bandeja limpia! No hay lotes pendientes de auditoría en este momento.")
     st.stop()
 
-# Agrupar los cheques por Cliente para armar la "Bandeja de Entrada"
-df_pendientes = pd.DataFrame(datos_pendientes)
-lotes_disponibles = df_pendientes['cliente_asociado'].unique().tolist()
+lotes_disponibles = df_general[df_general['estado_auditoria'] == 'Pendiente']['cliente_asociado'].unique().tolist()
 
 # ==========================================
 # 3. BANDEJA DE ENTRADA (EN PANTALLA PRINCIPAL)
@@ -61,14 +62,20 @@ if lote_seleccionado != "--- Elegí un cliente ---":
     st.subheader(f"Auditoría en curso: Lote {lote_seleccionado}")
     
     # Filtramos solo los datos del lote seleccionado
-    df_lote = df_pendientes[df_pendientes['cliente_asociado'] == lote_seleccionado].copy()
+    df_lote = df_general[df_general['cliente_asociado'] == lote_seleccionado].copy()
+
+    # ¡Acá definimos las columnas para que la tabla las entienda!
+    columnas_visibles = [
+        'id', 'numero_identificador', 'monto', 'fecha_emision', 
+        'fecha_pago', 'codigo_banco', 'codigo_sucursal', 
+        'numero_cuenta', 'cuit_emisor', 'razon_social_emisor'
+    ]
 
     # --- 1. TABLA GENERAL (A TODO EL ANCHO) ---
     st.write("📊 **Resumen del Lote (Vista General)**")
     
     # Función para pintar la fila de verde si ya está auditada
     def pintar_verde(fila):
-        # Usamos .get por las dudas, chequeando si dice 'Auditado'
         if fila.get('estado_auditoria') == 'Auditado':
             return ['background-color: #c3e6cb; color: #155724'] * len(fila)
         return [''] * len(fila)
@@ -107,12 +114,17 @@ if lote_seleccionado != "--- Elegí un cliente ---":
             datos_nuevos = fila_editada.iloc[0].to_dict()
             datos_nuevos['estado_auditoria'] = 'Auditado' # Le cambiamos el estado
             
+            # Limpieza de valores nulos o vacíos antes de guardar
+            for key, value in datos_nuevos.items():
+                if pd.isna(value) or str(value).strip() in ["None", "<NA>", ""]:
+                    datos_nuevos[key] = None
+
             # Actualizamos en Supabase
             supabase.table("cobranzas_pendientes").update(datos_nuevos).eq("id", id_seleccionado).execute()
             
-            # Avisamos y recargamos la página para que se pinte de verde
+            # Avisamos, limpiamos la memoria caché y recargamos la página para que se pinte de verde
             st.success("¡Comprobante auditado correctamente!")
-            import time
+            st.cache_data.clear() 
             time.sleep(1)
             st.rerun()
 
@@ -150,80 +162,45 @@ if lote_seleccionado != "--- Elegí un cliente ---":
                 st.error(f"Error al cargar el archivo.")
         else:
             st.warning("Este lote no tiene imágenes adjuntas.")
-    with col_grilla:
-        st.write("📊 **Datos Extraídos por IA (Editables)**")
-        
-        # Preparamos las columnas que la administración realmente necesita ver/editar
-        columnas_visibles = [
-            'id', 'numero_identificador', 'monto', 'fecha_emision', 
-            'fecha_pago', 'codigo_banco', 'codigo_sucursal', 
-            'numero_cuenta', 'cuit_emisor', 'razon_social_emisor'
-        ]
-        
-        # Mostramos la grilla editable
-        df_mostrar = df_lote[columnas_visibles].copy()
-        datos_editados = st.data_editor(
-            df_mostrar,
-            hide_index=True,
-            use_container_width=True,
-            num_rows="fixed",
-            disabled=["id"] # Bloqueamos el ID para que no lo rompan sin querer
-        )
-        
-        st.write("---")
-        st.write("### Auditoría y Exportación")
-        suma_cheques = datos_editados['monto'].sum()
-        st.metric("Suma Total de Cheques Auditados", f"${suma_cheques:,.2f}")
-        
-        if st.button("✅ Aprobar Lote y Generar Excel", type="primary"):
-            with st.spinner("Guardando auditoría y generando archivo..."):
-                try:
-                    # 1. Actualizamos Supabase fila por fila con las correcciones
-                    for index, fila in datos_editados.iterrows():
-                        fila_dict = fila.to_dict()
-                        
-                        # Extraemos el ID y lo sacamos de la lista de datos a actualizar
-                        id_fila = fila_dict.pop('id', None)
-                        
-                        # Si el ID es inválido (ej: se agregó una fila vacía por accidente), la saltamos
-                        if pd.isna(id_fila) or str(id_fila).strip() in ["None", "<NA>", ""]:
-                            continue
-                            
-                        # Limpieza extrema: Reemplazamos textos basura de Streamlit por vacíos reales (NULL en SQL)
-                        for key, value in fila_dict.items():
-                            if pd.isna(value) or str(value).strip() in ["None", "<NA>", ""]:
-                                fila_dict[key] = None
-                                
-                        # Le clavamos el sello de Auditado
-                        fila_dict['estado_auditoria'] = 'Auditado'
-                        
-                        # Actualizamos en la base de datos usando el ID limpio
-                        supabase.table("cobranzas_pendientes").update(fila_dict).eq("id", id_fila).execute()
-                    
-                    st.success("🎉 ¡Base de datos actualizada con éxito! El lote ya no está pendiente.")
-                    
-                    # 2. Generamos el Excel mapeado para Regente
-                    df_regente = pd.DataFrame({
-                        "Titular": datos_editados.get("razon_social_emisor", ""),
-                        "Emision": datos_editados.get("fecha_emision", ""),
-                        "Venc.": datos_editados.get("fecha_pago", ""),
-                        "Nro": datos_editados.get("numero_identificador", ""),
-                        "Bco.": datos_editados.get("codigo_banco", ""),
-                        "NCta.": datos_editados.get("numero_cuenta", ""),
-                        "Plaza": datos_editados.get("codigo_sucursal", ""),
-                        "Monto": datos_editados.get("monto", 0.0)
-                    })
-                    
-                    csv_data = df_regente.to_csv(index=False).encode('utf-8')
-                    
-                    st.download_button(
-                        label="⬇️ Descargar Archivo para Regente",
-                        data=csv_data,
-                        file_name=f"importacion_regente_{lote_seleccionado.replace(' ', '_')}.csv",
-                        mime="text/csv",
-                    )
-                    
-                    st.info("👆 Clic en el botón para descargar. (Refrescá la página para seguir con el próximo lote).")
-                    
-                except Exception as e:
-                    st.error(f"Error al guardar la auditoría: {e}")
+            
+    st.divider()
+    
+    # --- 3. EXPORTACIÓN DEL LOTE COMPLETO ---
+    st.write("### 🚀 Exportación a Regente")
+    suma_cheques = df_lote['monto'].sum()
+    st.metric("Suma Total de Cheques del Lote", f"${suma_cheques:,.2f}")
+    
+    # Verificamos si falta alguno por auditar
+    pendientes = df_lote[df_lote['estado_auditoria'] != 'Auditado']
+    
+    if not pendientes.empty:
+        st.warning(f"⚠️ Faltan auditar {len(pendientes)} comprobantes para poder generar el Excel de este lote.")
+    else:
+        if st.button("💾 Generar Excel para Regente", type="primary", use_container_width=True):
+            try:
+                # Generamos el Excel mapeado para Regente con todos los cheques del lote
+                df_regente = pd.DataFrame({
+                    "Titular": df_lote["razon_social_emisor"],
+                    "Emision": df_lote["fecha_emision"],
+                    "Venc.": df_lote["fecha_pago"],
+                    "Nro": df_lote["numero_identificador"],
+                    "Bco.": df_lote["codigo_banco"],
+                    "NCta.": df_lote["numero_cuenta"],
+                    "Plaza": df_lote["codigo_sucursal"],
+                    "Monto": df_lote["monto"]
+                })
+                
+                csv_data = df_regente.to_csv(index=False).encode('utf-8')
+                
+                st.download_button(
+                    label="⬇️ Descargar Archivo",
+                    data=csv_data,
+                    file_name=f"importacion_regente_{lote_seleccionado.replace(' ', '_')}.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
+                
+                st.info("👆 Clic en el botón para descargar. Luego actualizá la bandeja para seguir con el próximo lote.")
+                
+            except Exception as e:
+                st.error(f"Error al generar el archivo: {e}")
