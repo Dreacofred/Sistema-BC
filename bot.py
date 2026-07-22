@@ -21,19 +21,27 @@ st.markdown("---")
 # ==========================================
 @st.cache_data(ttl=10) # Se actualiza cada 10 segundos
 def obtener_datos():
-    # Traemos todos los datos para poder ver cuáles están pendientes y cuáles ya pintados de verde
+    # Traemos todos los datos de la base
     respuesta = supabase.table("cobranzas_pendientes").select("*").execute()
     return respuesta.data
 
 datos_db = obtener_datos()
-df_general = pd.DataFrame(datos_db)
+df_completo = pd.DataFrame(datos_db)
 
-# Filtramos para armar la lista de la bandeja (solo clientes que tengan cosas pendientes)
-if df_general.empty or not (df_general['estado_auditoria'] == 'Pendiente').any():
+# Verificamos si hay ALGO pendiente en toda la base
+if df_completo.empty or not (df_completo['estado_auditoria'] == 'Pendiente').any():
     st.success("🎉 ¡Bandeja limpia! No hay lotes pendientes de auditoría en este momento.")
     st.stop()
 
-lotes_disponibles = df_general[df_general['estado_auditoria'] == 'Pendiente']['cliente_asociado'].unique().tolist()
+# --- EL FILTRO MÁGICO ---
+# 1. Buscamos los IDs de los Lotes (envíos) que tienen al menos un cheque pendiente
+ids_lotes_activos = df_completo[df_completo['estado_auditoria'] == 'Pendiente']['lote_id'].unique()
+
+# 2. Recortamos la tabla general para que SOLO muestre los cheques de esos envíos puntuales
+df_general = df_completo[df_completo['lote_id'].isin(ids_lotes_activos)].copy()
+
+# Armamos la lista del desplegable
+lotes_disponibles = df_general['cliente_asociado'].unique().tolist()
 
 # ==========================================
 # 3. BANDEJA DE ENTRADA (EN PANTALLA PRINCIPAL)
