@@ -114,36 +114,44 @@ if st.session_state.usuario_autenticado is None:
 user = st.session_state.usuario_autenticado
 usuario_app = user['nombre']
 
-with st.sidebar:
-    st.markdown("<br>", unsafe_allow_html=True)
-    st.image(URL_LOGO_OFICIAL, use_container_width=True)
-    
+# Ocultamos la flechita de la barra lateral via CSS para que no estorbe
+st.markdown("""<style>[data-testid="collapsedControl"] {display: none;}</style>""", unsafe_allow_html=True)
+
+# --- CABECERA Y PERFIL SUPERIOR ---
+col_logo, col_espacio, col_perfil, col_salir = st.columns([1, 4, 2, 1])
+
+with col_logo:
+    st.image(URL_LOGO_OFICIAL, width=120)
+
+with col_perfil:
     st.markdown(f"""
-        <div style="background:#2C2C2C; padding:15px; border-radius:10px; border-left:4px solid {COLOR_ROJO}; margin-bottom:20px;">
-            <p style="margin:0; font-size:13px; color:#B0B0B0 !important;">Operador activo:</p>
-            <h4 style="margin:0; color:#FFFFFF !important; padding-top: 5px;">{usuario_app}</h4>
-            <p style="margin:0; font-size:13px; color:#B0B0B0 !important; margin-top:5px;">📍 {NOMBRES_SUCURSALES.get(user['sucursal_id'], 'BC')}</p>
+        <div style="background:#2C2C2C; padding:8px 15px; border-radius:10px; border-left:4px solid {COLOR_ROJO}; margin-top:5px;">
+            <p style="margin:0; font-size:12px; color:#B0B0B0 !important;">Operador: <b>{usuario_app}</b></p>
+            <p style="margin:0; font-size:12px; color:#B0B0B0 !important;">📍 {NOMBRES_SUCURSALES.get(user['sucursal_id'], 'BC')}</p>
         </div>
     """, unsafe_allow_html=True)
 
-    opcion = option_menu(
-        menu_title=None, 
-        options=["Generador de Resumen", "Facturas de Proveedores", "Verificación BCRA", "Gestión de Clientes", "Laboratorio IA"], 
-        icons=["file-earmark-spreadsheet", "receipt", "shield-check", "people", "robot"], 
-        menu_icon="cast", 
-        default_index=0,
-        styles={
-            "container": {"padding": "0!important", "background-color": COLOR_GRIS_BC},
-            "icon": {"color": "#FFFFFF", "font-size": "18px"}, 
-            "nav-link": {"color": "#FFFFFF", "font-size": "15px", "text-align": "left", "margin":"5px 0", "--hover-color": "#4A4A4A", "border-radius": "8px"},
-            "nav-link-selected": {"background-color": COLOR_ROJO, "color": "white"},
-        }
-    )
-
-    st.markdown("<br><br>", unsafe_allow_html=True)
-    if st.button("🚪 Cerrar Sesión"):
+with col_salir:
+    st.markdown("<br>", unsafe_allow_html=True)
+    if st.button("🚪 Salir", use_container_width=True):
         st.session_state.usuario_autenticado = None
         st.rerun()
+
+# --- MENÚ HORIZONTAL MODERNO ---
+opcion = option_menu(
+    menu_title=None, 
+    options=["Generador de Resumen", "Facturas de Proveedores", "Verificación BCRA", "Gestión de Clientes", "Laboratorio IA"], 
+    icons=["file-earmark-spreadsheet", "receipt", "shield-check", "people", "robot"], 
+    default_index=0,
+    orientation="horizontal", # ESTA ES LA MAGIA QUE LO ACUESTA ARRIBA
+    styles={
+        "container": {"padding": "0!important", "background-color": COLOR_GRIS_BC, "border-radius": "10px"},
+        "icon": {"color": "#FFFFFF", "font-size": "15px"}, 
+        "nav-link": {"color": "#FFFFFF", "font-size": "14px", "text-align": "center", "margin":"0px", "--hover-color": "#4A4A4A"},
+        "nav-link-selected": {"background-color": COLOR_ROJO, "color": "white"},
+    }
+)
+st.markdown("<br>", unsafe_allow_html=True)
 
 if 'lote_pendientes_prov' not in st.session_state: st.session_state.lote_pendientes_prov = []
 if 'cola_extracciones_prov' not in st.session_state: st.session_state.cola_extracciones_prov = []
