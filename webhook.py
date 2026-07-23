@@ -76,28 +76,28 @@ def procesar_y_guardar(rutas_imagenes, cliente_tag):
             url_publica = supabase.storage.from_("comprobantes").get_public_url(nombre_archivo)
             urls_supabase.append(url_publica)
             
-            # 2. Subir a Gemini y ESPERAR
+            # 2. Subir a Gemini y ESPERAR (Crucial para PDFs y Múltiples fotos)
             archivo_subido = genai.upload_file(ruta)
             while archivo_subido.state.name == 'PROCESSING':
-                time.sleep(2)
+                time.sleep(2) 
                 archivo_subido = genai.get_file(archivo_subido.name)
             archivos_gemini.append(archivo_subido)
 
         fotos_juntas = ",".join(urls_supabase)
 
-        # 3. Prompt con vinculación de imagen por posición
+        # 3. Prompt
         modelo = genai.GenerativeModel('gemini-2.5-pro')
         prompt = f"""
-        Sos un auditor contable experto de BC Combustibles. Analizá este lote: UN ticket S.I.C.E. y VARIAS fotos de cheques. Cliente: '{cliente_tag}'.
+        Sos un auditor contable experto de BC Combustibles. Analizá este lote de imágenes. Cliente: '{cliente_tag}'.
         
-        PASO 1: Detallá qué ves en cada cheque en 'razonamiento_en_voz_alta'.
+        PASO 1: Observá y razoná internamente qué datos hay en las fotos.
         PASO 2: Extraé los datos. 
         - REGLA 1: Si dudás, dejalo vacío (""). NO inventes.
         - REGLA 2: Para 'razon_social_emisor', buscá el texto impreso junto al CUIT. Ignorá el 'Páguese a' manuscrito.
         - REGLA 3: Para 'numero_cuenta', extraé los números crudos SIN guiones ni espacios.
         - REGLA 4: Indicá obligatoriamente a qué número de archivo/imagen corresponde este cheque en 'numero_imagen' (1 para el primer archivo enviado, 2 para el segundo, etc.).
         
-        Devolvé ÚNICAMENTE un objeto JSON:
+        Devolvé ÚNICAMENTE un objeto JSON con este formato exacto:
         {{
             "cheques": [
                 {{
@@ -105,14 +105,14 @@ def procesar_y_guardar(rutas_imagenes, cliente_tag):
                     "numero_imagen": 1,
                     "tipo_comprobante": "Cheque Físico",
                     "banco_origen": "Nombre del banco",
-                    "codigo_banco": "Código banco (ej: 014)",
-                    "codigo_sucursal": "Código sucursal (ej: 1842)",
-                    "numero_cuenta": "Número de cuenta limpio",
-                    "numero_identificador": "Número del cheque",
-                    "monto": numero_decimal,
-                    "fecha_emision": "YYYY-MM-DD",
-                    "fecha_pago": "YYYY-MM-DD",
-                    "cuit_emisor": "CUIT con guiones",
+                    "codigo_banco": "014",
+                    "codigo_sucursal": "1842",
+                    "numero_cuenta": "12345678",
+                    "numero_identificador": "90000052",
+                    "monto": 150000.50,
+                    "fecha_emision": "2026-06-10",
+                    "fecha_pago": "2026-08-15",
+                    "cuit_emisor": "20-12345678-9",
                     "razon_social_emisor": "Razón social impresa",
                     "estado_auditoria": "Pendiente",
                     "regente_cliente_id": "1045"
@@ -123,20 +123,26 @@ def procesar_y_guardar(rutas_imagenes, cliente_tag):
         
         respuesta = modelo.generate_content(archivos_gemini + [prompt])
         
-        # 4. Limpieza de JSON
-        texto_json = respuesta.text.replace("```json", "").replace("```", "").strip()
-        datos_ia = json.loads(texto_json)
+        # 4. Limpieza de JSON a prueba de balas (El mismo método robusto de lector.py)
+        raw_text = respuesta.text.strip()
+        start = raw_text.find('{')
+        end = raw_text.rfind('}') + 1
         
-        # 5. Formatear y vincular CADA CHEQUE con SU FOTO ESPECÍFICA
+        if start != -1 and end != 0:
+            texto_json = raw_text[start:end]
+            datos_ia = json.loads(texto_json)
+        else:
+            raise Exception("Gemini no devolvió un JSON válido para leer.")
+        
+        # 5. Formatear y vincular foto individual
         for fila in datos_ia.get("cheques", []):
             fila['lote_id'] = id_lote_unico
             
-            # Asignamos solo la foto individual correspondiente
             num_img = fila.pop('numero_imagen', None)
             if num_img and isinstance(num_img, int) and 1 <= num_img <= len(urls_supabase):
                 fila['archivo_url'] = urls_supabase[num_img - 1]
             else:
-                fila['archivo_url'] = fotos_juntas # Respaldo por si acaso
+                fila['archivo_url'] = fotos_juntas # De respaldo
             
             if fila.get('fecha_emision') == "": fila['fecha_emision'] = None
             if fila.get('fecha_pago') == "": fila['fecha_pago'] = None
