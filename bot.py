@@ -74,17 +74,17 @@ if cliente_sel != "--- Elegí un cliente ---":
         # ACORDEÓN EXPANDIBLE
         with st.expander(f"{icono} | Cheque Nº {nro_display} | Monto: ${float(monto_display or 0):,.2f}"):
             
-            # Datos a la Izquierda (1.2), Imagen a la Derecha (1)
-            col_datos, col_img = st.columns([1.2, 1])
+            # ACÁ ESTÁ LA MAGIA: 1 de ancho para el form, 1.8 para la imagen (casi el doble de tamaño)
+            col_datos, col_img = st.columns([1, 1.8])
             
-            # --- MITAD DERECHA: IMAGEN ---
+            # --- MITAD DERECHA: IMAGEN GIGANTE ---
             with col_img:
                 url_activa = str(fila['archivo_url']).split(',')[0].strip() if pd.notna(fila['archivo_url']) else ""
                 
                 if url_activa.startswith('http'):
                     if ".pdf" in url_activa.lower():
                         visor_url = f"https://docs.google.com/gview?url={url_activa}&embedded=true"
-                        st.markdown(f'<iframe src="{visor_url}" width="100%" height="400" frameborder="0"></iframe>', unsafe_allow_html=True)
+                        st.markdown(f'<iframe src="{visor_url}" width="100%" height="600" frameborder="0"></iframe>', unsafe_allow_html=True)
                         st.link_button("📄 Abrir PDF en pestaña grande", url_activa)
                     else:
                         st.image(url_activa, use_container_width=True)
@@ -92,7 +92,7 @@ if cliente_sel != "--- Elegí un cliente ---":
                 else:
                     st.warning("Este cheque no tiene imagen adjunta.")
 
-            # --- MITAD IZQUIERDA: FORMULARIO ---
+            # --- MITAD IZQUIERDA: FORMULARIO ESTILO LISTA ---
             with col_datos:
                 if ya_listo:
                     st.success("✔️ Fila revisada y guardada temporalmente.")
@@ -101,25 +101,26 @@ if cliente_sel != "--- Elegí un cliente ---":
                         st.rerun()
                 else:
                     with st.form(f"form_cheque_{cid}"):
-                        st.markdown("📝 **Completá o corregí los datos:**")
+                        st.markdown("📝 **Completá o corregí:**")
                         
-                        c1, c2 = st.columns(2)
-                        f_nro = c1.text_input("Nº Cheque", value=str(fila.get('numero_identificador', '')))
-                        f_monto = c2.number_input("Monto ($)", value=float(fila.get('monto', 0.0) or 0.0))
+                        # Función que crea la estructura: Texto a la Izq, Caja a la Der
+                        def crear_campo(etiqueta, valor, tipo="texto"):
+                            c_lbl, c_inp = st.columns([1, 1.5])
+                            c_lbl.markdown(f"<div style='margin-top: 8px; font-size: 14px;'>{etiqueta}</div>", unsafe_allow_html=True)
+                            if tipo == "numero":
+                                return c_inp.number_input(etiqueta, value=float(valor or 0.0), label_visibility="collapsed")
+                            else:
+                                return c_inp.text_input(etiqueta, value=str(valor), label_visibility="collapsed")
 
-                        c3, c4 = st.columns(2)
-                        f_emi = c3.text_input("Fecha Emisión", value=str(fila.get('fecha_emision', '')))
-                        f_pago = c4.text_input("Fecha Pago", value=str(fila.get('fecha_pago', '')))
-
-                        c5, c6 = st.columns(2)
-                        f_banco = c5.text_input("Cód. Banco", value=str(fila.get('codigo_banco', '')))
-                        f_sucursal = c6.text_input("Cód. Sucursal", value=str(fila.get('codigo_sucursal', '')))
-
-                        f_cuenta = st.text_input("Nº Cuenta", value=str(fila.get('numero_cuenta', '')))
-
-                        c7, c8 = st.columns(2)
-                        f_cuit = c7.text_input("CUIT Emisor", value=str(fila.get('cuit_emisor', '')))
-                        f_rs = c8.text_input("Razón Social", value=str(fila.get('razon_social_emisor', '')))
+                        f_nro = crear_campo("Nº Cheque", fila.get('numero_identificador', ''))
+                        f_monto = crear_campo("Monto ($)", fila.get('monto', 0.0), tipo="numero")
+                        f_emi = crear_campo("Emisión", fila.get('fecha_emision', ''))
+                        f_pago = crear_campo("Vencimiento", fila.get('fecha_pago', ''))
+                        f_banco = crear_campo("Cód. Banco", fila.get('codigo_banco', ''))
+                        f_sucursal = crear_campo("Cód. Sucursal", fila.get('codigo_sucursal', ''))
+                        f_cuenta = crear_campo("Nº Cuenta", fila.get('numero_cuenta', ''))
+                        f_cuit = crear_campo("CUIT Emisor", fila.get('cuit_emisor', ''))
+                        f_rs = crear_campo("Razón Social", fila.get('razon_social_emisor', ''))
                         
                         st.markdown("<br>", unsafe_allow_html=True)
                         if st.form_submit_button("✅ Guardar Fila", type="primary", use_container_width=True):
