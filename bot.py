@@ -4,20 +4,17 @@ from supabase import create_client, Client
 import time
 
 # ==========================================
-# 1. CONFIGURACIÓN DE PÁGINA Y CREDENCIALES
+# 1. CREDENCIALES
 # ==========================================
-st.set_page_config(page_title="Auditoría SICE", layout="wide")
-
 URL_SB = st.secrets["SUPABASE_URL"]
 KEY_SB = st.secrets["SUPABASE_KEY"]
 supabase: Client = create_client(URL_SB, KEY_SB)
 
-st.title("🏢 Centro de Auditoría - BC Combustibles")
-st.markdown("Revisá los lotes enviados desde la pista, validá la lectura de la IA y exportá a Regente.")
+st.title("🏢 Auditoría de Cheques - BC Combustibles")
 st.markdown("---")
 
 # ==========================================
-# 2. TRAER LOTES DE SUPABASE
+# 2. TRAER LOTES PENDIENTES
 # ==========================================
 @st.cache_data(ttl=10)
 def obtener_datos():
@@ -27,161 +24,190 @@ def obtener_datos():
 datos_db = obtener_datos()
 df_completo = pd.DataFrame(datos_db)
 
-# Verificamos si hay ALGO pendiente en toda la base
 if df_completo.empty or not (df_completo['estado_auditoria'] == 'Pendiente').any():
-    st.success("🎉 ¡Bandeja limpia! No hay lotes pendientes de auditoría en este momento.")
+    st.success("🎉 ¡Bandeja limpia! No hay cheques pendientes de auditoría en este momento.")
     st.stop()
 
-# --- EL FILTRO MÁGICO (CORTADO DE RAÍZ) ---
-# Solo nos quedamos ESTRICTAMENTE con las filas que dicen 'Pendiente'. 
-# Lo que ya se auditó (así sea del mismo lote) no se muestra más.
-df_general = df_completo[df_completo['estado_auditoria'] == 'Pendiente'].copy()
-lotes_disponibles = df_general['cliente_asociado'].unique().tolist()
+# Solo trabajamos con los pendientes
+df_pendientes = df_completo[df_completo['estado_auditoria'] == 'Pendiente'].copy()
+lotes_disponibles = df_pendientes['cliente_asociado'].unique().tolist()
 
 # ==========================================
-# 3. BANDEJA DE ENTRADA
+# 3. VARIABLES DE MEMORIA 
+# ==========================================
+if 'cheques_listos' not in st.session_state: 
+    st.session_state.cheques_listos = []
+if 'datos_corregidos' not in st.session_state: 
+    st.session_state.datos_corregidos = {}
+
+# ==========================================
+# 4. SELECTOR DE LOTE
 # ==========================================
 st.subheader("📥 Bandeja de Pendientes")
-opciones_desplegable = ["--- Elegí un cliente ---"] + lotes_disponibles
-lote_seleccionado = st.selectbox("Seleccioná un lote para auditar:", opciones_desplegable)
+cliente_sel = st.selectbox("Seleccioná un cliente para auditar su lote:", ["--- Elegí un cliente ---"] + lotes_disponibles)
 
 if st.button("🔄 Actualizar Bandeja"):
     st.cache_data.clear()
     st.rerun()
 
-st.markdown("---")
+st.markdown("<br>", unsafe_allow_html=True)
 
 # ==========================================
-# 4. PANTALLA PRINCIPAL: CARRUSEL Y TABLA
+# 5. PANTALLA DE AUDITORÍA (ESTILO ACORDEÓN)
 # ==========================================
-if lote_seleccionado != "--- Elegí un cliente ---":
-    st.subheader(f"Auditoría en curso: Lote {lote_seleccionado}")
-    
-    df_lote = df_general[df_general['cliente_asociado'] == lote_seleccionado].copy()
+if cliente_sel != "--- Elegí un cliente ---":
+    df_lote = df_pendientes[df_pendientes['cliente_asociado'] == cliente_sel].copy()
 
-    # Extraemos y limpiamos las URLs de la base de datos
-    urls_crudas = df_lote['archivo_url'].dropna().unique().tolist()
-    urls_limpias = []
-    for url_str in urls_crudas:
-        if isinstance(url_str, str):
-            for u in url_str.split(','):
-                u_limpia = u.strip()
-                if u_limpia.startswith('http'):
-                    urls_limpias.append(u_limpia)
-    urls_limpias = list(dict.fromkeys(urls_limpias))
+    st.markdown(f"### 📋 Revisión de Cheques: {cliente_sel}")
 
-    # --- MEMORIA DEL CARRUSEL ---
-    # Si cambiamos de cliente o entramos por primera vez, reseteamos la foto a la número 0
-    if 'lote_actual' not in st.session_state or st.session_state.lote_actual != lote_seleccionado:
-        st.session_state.lote_actual = lote_seleccionado
-        st.session_state.foto_index = 0
-
-    # Dividimos la pantalla mitad y mitad para tener un buen tamaño de lectura
-    col_izq, col_der = st.columns([1, 1])
-
-    with col_izq:
-        st.write("📸 **Visor de Archivos**")
+    for index, fila in df_lote.iterrows():
+        cid = fila['id']
+        ya_listo = cid in st.session_state.cheques_listos
         
-        if urls_limpias:
-            # --- BOTONERA DE NAVEGACIÓN ---
-            col_btn_izq, col_contador, col_btn_der = st.columns([1, 2, 1])
+        # Icono dinámico según si ya lo guardamos en memoria
+        icono = "✅ LISTO" if ya_listo else "🟠 PENDIENTE"
+        
+        # Mostramos los datos actualizados si ya se corrigieron, sino los de la base
+        monto_display = st.session_state.datos_corregidos.get(cid, {}).get('monto', fila.get('monto', 0))
+        nro_display = st.session_state.datos_corregidos.get(cid, {}).get('numero_identificador', fila.get('numero_identificador', 'S/N'))
+
+        # ACORDEÓN EXPANDIBLE
+        with st.expander(f"{icono} | Cheque Nº {nro_display} | Monto: ${float(monto_display or 0):,.2f}"):
             
-            with col_btn_izq:
-                if st.button("⬅️ Anterior", use_container_width=True):
-                    if st.session_state.foto_index > 0:
-                        st.session_state.foto_index -= 1
-                        st.rerun()
-                        
-            with col_contador:
-                st.markdown(f"<h5 style='text-align: center;'>Archivo {st.session_state.foto_index + 1} de {len(urls_limpias)}</h5>", unsafe_allow_html=True)
+            # Datos a la Izquierda (1.2), Imagen a la Derecha (1)
+            col_datos, col_img = st.columns([1.2, 1])
+            
+            # --- MITAD DERECHA: IMAGEN ---
+            with col_img:
+                url_activa = str(fila['archivo_url']).split(',')[0].strip() if pd.notna(fila['archivo_url']) else ""
                 
-            with col_btn_der:
-                if st.button("Siguiente ➡️", use_container_width=True):
-                    if st.session_state.foto_index < len(urls_limpias) - 1:
-                        st.session_state.foto_index += 1
-                        st.rerun()
-
-            # --- MOSTRAR LA IMAGEN O PDF ACTIVO ---
-            url_activa = urls_limpias[st.session_state.foto_index]
-            
-            try:
-                if ".pdf" in url_activa.lower():
-                    visor_url = f"https://docs.google.com/gview?url={url_activa}&embedded=true"
-                    mostrar_pdf = f'<iframe src="{visor_url}" width="100%" height="600" frameborder="0"></iframe>'
-                    st.markdown(mostrar_pdf, unsafe_allow_html=True)
-                    st.link_button("📄 Abrir PDF en pestaña gigante", url_activa)
+                if url_activa.startswith('http'):
+                    if ".pdf" in url_activa.lower():
+                        visor_url = f"https://docs.google.com/gview?url={url_activa}&embedded=true"
+                        st.markdown(f'<iframe src="{visor_url}" width="100%" height="400" frameborder="0"></iframe>', unsafe_allow_html=True)
+                        st.link_button("📄 Abrir PDF en pestaña grande", url_activa)
+                    else:
+                        st.image(url_activa, use_container_width=True)
+                        st.link_button("🖼️ Ver imagen original", url_activa)
                 else:
-                    st.image(url_activa, use_container_width=True)
-                    st.link_button("🖼️ Ver imagen en tamaño completo", url_activa)
-            except Exception:
-                st.error("Error al cargar el archivo.")
-        else:
-            st.warning("No hay archivos adjuntos.")
+                    st.warning("Este cheque no tiene imagen adjunta.")
 
-    with col_der:
-        st.write("📊 **Datos Extraídos por IA (Editables)**")
+            # --- MITAD IZQUIERDA: FORMULARIO ---
+            with col_datos:
+                if ya_listo:
+                    st.success("✔️ Fila revisada y guardada temporalmente.")
+                    if st.button("✏️ Editar nuevamente", key=f"btn_edit_{cid}"):
+                        st.session_state.cheques_listos.remove(cid)
+                        st.rerun()
+                else:
+                    with st.form(f"form_cheque_{cid}"):
+                        st.markdown("📝 **Completá o corregí los datos:**")
+                        
+                        c1, c2 = st.columns(2)
+                        f_nro = c1.text_input("Nº Cheque", value=str(fila.get('numero_identificador', '')))
+                        f_monto = c2.number_input("Monto ($)", value=float(fila.get('monto', 0.0) or 0.0))
+
+                        c3, c4 = st.columns(2)
+                        f_emi = c3.text_input("Fecha Emisión", value=str(fila.get('fecha_emision', '')))
+                        f_pago = c4.text_input("Fecha Pago", value=str(fila.get('fecha_pago', '')))
+
+                        c5, c6 = st.columns(2)
+                        f_banco = c5.text_input("Cód. Banco", value=str(fila.get('codigo_banco', '')))
+                        f_sucursal = c6.text_input("Cód. Sucursal", value=str(fila.get('codigo_sucursal', '')))
+
+                        f_cuenta = st.text_input("Nº Cuenta", value=str(fila.get('numero_cuenta', '')))
+
+                        c7, c8 = st.columns(2)
+                        f_cuit = c7.text_input("CUIT Emisor", value=str(fila.get('cuit_emisor', '')))
+                        f_rs = c8.text_input("Razón Social", value=str(fila.get('razon_social_emisor', '')))
+                        
+                        st.markdown("<br>", unsafe_allow_html=True)
+                        if st.form_submit_button("✅ Guardar Fila", type="primary", use_container_width=True):
+                            # Guardamos los cambios en la memoria temporal
+                            st.session_state.datos_corregidos[cid] = {
+                                'numero_identificador': f_nro.strip(),
+                                'monto': f_monto,
+                                'fecha_emision': f_emi.strip(),
+                                'fecha_pago': f_pago.strip(),
+                                'codigo_banco': f_banco.strip(),
+                                'codigo_sucursal': f_sucursal.strip(),
+                                'numero_cuenta': f_cuenta.strip(),
+                                'cuit_emisor': f_cuit.strip(),
+                                'razon_social_emisor': f_rs.strip(),
+                                'estado_auditoria': 'Auditado'
+                            }
+                            st.session_state.cheques_listos.append(cid)
+                            st.rerun()
+
+    # ==========================================
+    # 6. CIERRE Y EXPORTACIÓN DEL LOTE
+    # ==========================================
+    st.markdown("<br><hr>", unsafe_allow_html=True)
+    faltantes = len(df_lote) - len(st.session_state.cheques_listos)
+    
+    if faltantes > 0:
+        st.info(f"⚠️ Faltan revisar {faltantes} cheque(s) para poder exportar y cerrar el lote.")
+    else:
+        st.success("🎉 ¡Excelente! Todos los cheques de este lote fueron revisados.")
+        st.markdown("### 🚀 Exportación a Regente")
         
-        columnas_visibles = [
-            'id', 'numero_identificador', 'monto', 'fecha_emision', 
-            'fecha_pago', 'codigo_banco', 'codigo_sucursal', 
-            'numero_cuenta', 'cuit_emisor', 'razon_social_emisor'
-        ]
+        # Armamos la tabla final para exportar
+        filas_export = []
+        suma_total = 0
+        for cid in df_lote['id']:
+            d = st.session_state.datos_corregidos[cid]
+            suma_total += d['monto']
+            filas_export.append({
+                "Titular": d['razon_social_emisor'],
+                "Emision": d['fecha_emision'],
+                "Venc.": d['fecha_pago'],
+                "Nro": d['numero_identificador'],
+                "Bco.": d['codigo_banco'],
+                "NCta.": d['numero_cuenta'],
+                "Plaza": d['codigo_sucursal'],
+                "Monto": d['monto']
+            })
+            
+        df_regente = pd.DataFrame(filas_export)
+        st.metric("Suma Total Auditada", f"${suma_total:,.2f}")
         
-        # Mostramos la tabla editable
-        datos_editados = st.data_editor(
-            df_lote[columnas_visibles],
-            hide_index=True,
-            use_container_width=True,
-            disabled=["id"],
-            height=650 # Le damos la misma altura que el visor de fotos
+        col_ex1, col_ex2 = st.columns(2)
+        
+        # Botón de descarga
+        csv_data = df_regente.to_csv(index=False).encode('utf-8')
+        col_ex1.download_button(
+            label="⬇️ 1. Descargar Archivo para Regente",
+            data=csv_data,
+            file_name=f"importacion_regente_{cliente_sel.replace(' ', '_')}.csv",
+            mime="text/csv",
+            use_container_width=True
         )
         
-        st.divider()
-        
-        suma_cheques = datos_editados['monto'].sum()
-        st.metric("Suma Total de Cheques", f"${suma_cheques:,.2f}")
-        
-        if st.button("✅ Aprobar Lote Completo y Generar Excel", type="primary", use_container_width=True):
-            with st.spinner("Guardando auditoría..."):
+        # Cierre en base de datos
+        st.markdown("<div style='text-align:center;'>", unsafe_allow_html=True)
+        confirmar = col_ex2.checkbox("Confirmo que ya descargué el archivo CSV")
+        if col_ex2.button("✅ 2. CERRAR LOTE EN BASE DE DATOS", disabled=not confirmar, type="primary", use_container_width=True):
+            with st.spinner("Guardando en la nube..."):
                 try:
-                    for index, fila in datos_editados.iterrows():
-                        fila_dict = fila.to_dict()
-                        id_fila = fila_dict.pop('id', None)
-                        
-                        if pd.isna(id_fila) or str(id_fila).strip() in ["None", "<NA>", ""]:
-                            continue
-                            
-                        for key, value in fila_dict.items():
+                    # Impactamos cada cheque corregido en Supabase
+                    for cid in st.session_state.cheques_listos:
+                        datos_finales = st.session_state.datos_corregidos[cid].copy()
+                        # Limpieza de vacíos para SQL
+                        for key, value in datos_finales.items():
                             if pd.isna(value) or str(value).strip() in ["None", "<NA>", ""]:
-                                fila_dict[key] = None
+                                datos_finales[key] = None
                                 
-                        fila_dict['estado_auditoria'] = 'Auditado'
-                        supabase.table("cobranzas_pendientes").update(fila_dict).eq("id", id_fila).execute()
+                        supabase.table("cobranzas_pendientes").update(datos_finales).eq("id", cid).execute()
+                        
+                    st.success("¡Lote cerrado y limpiado de la bandeja con éxito!")
                     
-                    st.success("🎉 ¡Lote auditado y guardado con éxito!")
-                    
-                    df_regente = pd.DataFrame({
-                        "Titular": datos_editados.get("razon_social_emisor", ""),
-                        "Emision": datos_editados.get("fecha_emision", ""),
-                        "Venc.": datos_editados.get("fecha_pago", ""),
-                        "Nro": datos_editados.get("numero_identificador", ""),
-                        "Bco.": datos_editados.get("codigo_banco", ""),
-                        "NCta.": datos_editados.get("numero_cuenta", ""),
-                        "Plaza": datos_editados.get("codigo_sucursal", ""),
-                        "Monto": datos_editados.get("monto", 0.0)
-                    })
-                    
-                    csv_data = df_regente.to_csv(index=False).encode('utf-8')
-                    
-                    st.download_button(
-                        label="⬇️ Descargar Archivo para Regente",
-                        data=csv_data,
-                        file_name=f"importacion_regente_{lote_seleccionado.replace(' ', '_')}.csv",
-                        mime="text/csv",
-                        use_container_width=True
-                    )
-                    
+                    # Limpiamos la memoria para el próximo lote
+                    st.session_state.cheques_listos = []
+                    st.session_state.datos_corregidos = {}
+                    time.sleep(1.5)
                     st.cache_data.clear()
+                    st.rerun()
                     
                 except Exception as e:
-                    st.error(f"Error al procesar: {e}")
+                    st.error(f"Error al guardar: {e}")
+        st.markdown("</div>", unsafe_allow_html=True)
