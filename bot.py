@@ -1,3 +1,5 @@
+# ESTE BOT ES EL QUE MANEJA LA AUDITORIA DE LOS COMPROBANTES QUE ESTAN PENDIENTES DE AUDITAR
+
 import streamlit as st
 import pandas as pd
 from supabase import create_client, Client
