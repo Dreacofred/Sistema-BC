@@ -7,8 +7,8 @@ import streamlit as st
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# 🔑 LLAVE DE SCRAPEOPS (1.000 consultas gratuitas renovables por mes)
-API_KEY_SCRAPEOPS = "d9362497-79e4-4177-97cb-11a18e8f72c7"  
+# 🔑 LLAVE DE SCRAPEOPS (ahora se lee desde los Secrets de Streamlit, ya no está escrita acá)
+API_KEY_SCRAPEOPS = st.secrets["SCRAPEOPS_API_KEY"]
 
 # ==========================================
 # 1. FUNCIÓN DE CONSULTA AL BCRA (NUEVO TÚNEL SCRAPEOPS)
