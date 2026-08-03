@@ -5,9 +5,11 @@ import urllib3
 import re
 import streamlit as st
 
+from core.prompts_ia import PROMPT_LECTURA_CHEQUES
+
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# 🔑 LLAVE DE SCRAPEOPS (ahora se lee desde los Secrets de Streamlit, ya no está escrita acá)
+# 🔑 LLAVE DE SCRAPEOPS (ahora se lee desde los Secrets de Streamlit)
 API_KEY_SCRAPEOPS = st.secrets["SCRAPEOPS_API_KEY"]
 
 # ==========================================
@@ -21,7 +23,6 @@ def consultar_bcra_completo(cuit):
     datos_cliente = {"situacion": 1, "entidad": "Sin Registros", "denominacion": "Cliente Desconocido", "cheques_rechazados": 0, "error_api": False}
     
     try:
-        # --- CONSULTA DE DEUDAS ---
         payload_deudas = {'api_key': API_KEY_SCRAPEOPS, 'url': url_deudas}
         res_deuda = requests.get('https://proxy.scrapeops.io/v1/', params=payload_deudas, timeout=45)
         
@@ -43,7 +44,6 @@ def consultar_bcra_completo(cuit):
         
         time.sleep(1) 
         
-        # --- CONSULTA DE CHEQUES ---
         payload_cheques = {'api_key': API_KEY_SCRAPEOPS, 'url': url_cheques}
         res_cheque = requests.get('https://proxy.scrapeops.io/v1/', params=payload_cheques, timeout=45)
         
@@ -53,18 +53,14 @@ def consultar_bcra_completo(cuit):
         if res_cheque.status_code == 200:
             try:
                 data_ch = res_cheque.json()
-                
-                # PARCHE ARQUITECTURA: Conteo infalible de cheques
                 json_str = json.dumps(data_ch).lower()
                 conteo_real = max(
                     json_str.count('"nrocheque"'),
                     json_str.count('"fecharechazo"'),
                     json_str.count('"numerocheque"')
                 )
-                
                 if conteo_real == 0 and data_ch.get("results"):
                     conteo_real = 1
-                    
                 datos_cliente['cheques_rechazados'] = conteo_real
             except Exception: 
                 datos_cliente['cheques_rechazados'] = -1
@@ -87,32 +83,10 @@ def consultar_bcra_completo(cuit):
 # 2. FUNCIÓN DE INTELIGENCIA ARTIFICIAL (ESCANEO DE CHEQUES)
 # ==========================================
 def procesar_lote_cheques_ia(cliente_ia, img_lote):
-    prompt_cot = """
-    Actúa como un auditor senior de BC Combustibles. Analiza esta foto que contiene un lote de cheques físicos.
-    
-    REGLAS DE ORO (Aislamiento de Datos):
-    1. Analiza los cheques visualmente de arriba hacia abajo.
-    2. El Emisor del cheque NUNCA es el nombre que sigue a "Páguese a". Ignora ese nombre gigante.
-    3. Ve siempre a la parte INFERIOR del cheque (junto a la firma o el logo del banco). 
-    4. Extrae de ahí el CUIT (11 dígitos, suelen empezar con 20, 23, 27, 30) and la Razón Social del EMISOR.
-    5. Busca el NÚMERO DEL CHEQUE. Generalmente está en la esquina superior derecha o en la serie de números de la banda inferior.
-    
-    ESTRUCTURA DE RESPUESTA OBLIGATORIA:
-    Devuelve ÚNICAMENTE un JSON puro (sin formato markdown) que sea una LISTA de objetos, uno por cada cheque:
-    [
-      {
-        "id": 1,
-        "numero_cheque": "84512356",
-        "emisor": "RAZON SOCIAL 1",
-        "cuit": "20123456789"
-      }
-    ]
-    Si un dato no es legible con un 100% de seguridad, devuelve "ERROR_LECTURA" en ese campo específico.
-    """
     try:
         res = cliente_ia.models.generate_content(
             model='gemini-2.5-pro',
-            contents=[prompt_cot, img_lote]
+            contents=[PROMPT_LECTURA_CHEQUES, img_lote]
         )
         txt = res.text.replace("```json", "").replace("```", "").strip()
         
