@@ -14,6 +14,7 @@ import random
 import gc # IMPORTANTE: Recolector de basura para limpiar la memoria RAM
 from datetime import datetime
 from core.supabase_client import get_supabase_client
+from core.prompts_ia import PROMPT_FACTURAS_PROVEEDORES, PROMPT_AUDITORIA_REMITOS
 import requests 
 
 # Importamos la nueva botonera PRO
@@ -249,7 +250,7 @@ if opcion == "Facturas de Proveedores":
                     exito, intentos, error_interno = False, 3, ""
                     while intentos > 0 and not exito:
                         try:
-                            prompt_prov = """Eres auditor contable. Objetivo: leer FACTURA DE COMPRA. BC COMBUSTIBLES es RECEPTOR. Buscá CUIT, Fecha, Nº de Factura y Totales. Extraé JSON puro."""
+                            prompt_prov = PROMPT_FACTURAS_PROVEEDORES
                             modelo_actual = 'gemini-2.5-pro' if intentos > 1 else 'gemini-2.5-flash'
                             
                             img_rem = Image.open(io.BytesIO(doc['data']))
@@ -306,22 +307,7 @@ elif opcion == "Generador de Resumen":
     else:
         st.markdown(f'<div class="tarjeta-pro" style="border-left: 5px solid {COLOR_ROJO}; padding:15px;">📍 <strong>Acceso Zonal:</strong> Visualizando solo órdenes de la sucursal <strong>{NOMBRES_SUCURSALES.get(user["sucursal_id"])}</strong>.</div>', unsafe_allow_html=True)
 
-    PROMPT_AUDITORIA = textwrap.dedent("""
-    Sos un auditor experto. El Emisor es 'BC COMBUSTIBLES'. Buscá al CLIENTE Receptor y los datos de la carga. 
-    Devolvé ÚNICAMENTE un JSON puro, sin texto adicional ni formato markdown (sin ```json), con estas claves exactas:
-    - "fecha": Fecha del comprobante.
-    - "razon_social": Cliente receptor.
-    - "importe": Monto total en números.
-    - "comprobante": Número de comprobante.
-    - "litros": Sumá la cantidad TOTAL de litros de combustible. NO sumes aceites o aditivos, solo combustibles.
-    - "detalle_productos": Hacé un resumen de los combustibles y sus litros exactos. Ejemplo: 'Euro Diesel G3: 201 L | Gas Oil 500 G2: 81.5 L'. Si es un solo producto, poné solo ese.
-    - "observaciones_ia": Evaluá TODOS los ítems facturados y aplicá ESTA REGLA ESTRICTA:
-      1. Si SOLO cargó 'Gas Oil 500 G2' (Gasoil normal), devolvé "". (Vacío).
-      2. Si detectás 2 o más combustibles diferentes, devolvé "Atención. La factura tiene varios productos."
-      3. Si cargó SOLO Euro, devolvé "Atención. El producto cargado es Euro, verifique."
-      4. Si SOLO cargó Nafta, devolvé "Atención. La factura contiene Nafta."
-      5. Si encontrás artículos extra (aceites, filtros, etc.), devolvé "Atención. La factura contiene artículos extra: [detallar los extra]."
-    """).strip()
+    PROMPT_AUDITORIA = PROMPT_AUDITORIA_REMITOS
 
     try:
         query = supabase.table("ordenes_carga").select("*, clientes!inner(nombre, formato_especial, sucursal_madre_id)")
