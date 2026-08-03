@@ -13,7 +13,7 @@ import re
 import random
 import gc # IMPORTANTE: Recolector de basura para limpiar la memoria RAM
 from datetime import datetime
-from supabase import create_client, Client
+from core.supabase_client import get_supabase_client
 import requests 
 
 # Importamos la nueva botonera PRO
@@ -35,9 +35,7 @@ COLOR_AMARILLO_ALERTA = "#FFE082"
 COLOR_GRIS_BC = "#3A3A3A" 
 
 # Llamamos a las llaves desde la bóveda secreta de Streamlit
-URL_SB = st.secrets["SUPABASE_URL"]
-KEY_SB = st.secrets["SUPABASE_KEY"]
-supabase: Client = create_client(URL_SB, KEY_SB)
+supabase = get_supabase_client()
 
 NOMBRES_SUCURSALES = {1: "RECONQUISTA", 2: "AVELLANEDA", 3: "FLORENCIA", 4: "RECREO"}
 
