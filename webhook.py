@@ -294,7 +294,9 @@ def recibir_whatsapp():
                     exito, avisos = procesar_y_guardar(fotos_a_procesar, cliente_a_procesar)
                     if exito:
                         enviar_mensaje_wa(chat_destino, "🎉 ¡Listo! Ya está en la oficina pendiente de auditoría.")
-                    else:
+                    elif not avisos:
+                        # Solo mostramos el cartel de error genérico cuando fue una falla
+                        # técnica real (sin avisos específicos que expliquen qué pasó).
                         enviar_mensaje_wa(chat_destino, "⚠️ Hubo un error procesando el lote.")
                     for aviso in avisos:
                         enviar_mensaje_wa(chat_destino, aviso)
