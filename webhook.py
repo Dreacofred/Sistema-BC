@@ -138,7 +138,7 @@ def procesar_y_guardar(rutas_imagenes, cliente_tag):
         for fila_ia in lista_cheques:
             fila = {
                 "cliente_asociado": cliente_tag,
-                "tipo_comprobante": "Cheque Físico",
+                "tipo_comprobante": fila_ia.get("tipo_comprobante") or "Cheque Físico",
                 "banco_origen": fila_ia.get("banco_origen") or "",
                 "codigo_banco": fila_ia.get("codigo_banco") or "",
                 "codigo_sucursal": fila_ia.get("codigo_sucursal") or "",
