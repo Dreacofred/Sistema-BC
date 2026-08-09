@@ -80,7 +80,7 @@ Devolvé ÚNICAMENTE un JSON puro, sin texto adicional ni formato markdown (sin 
 # el problema que tuvimos con el ThinkingBlock (Claude respondiendo con un
 # bloque de texto que no era JSON puro) y hace la lectura mucho más robusta.
 #
-# El bot recibe 3 tipos de situaciones posibles en un mismo lote de fotos:
+# El bot recibe distintas situaciones posibles en un mismo lote de fotos:
 #   CASO A: solo fotos de cheques físicos sueltos (el caso de siempre).
 #   CASO B: una captura de pantalla de home banking con una TABLA de varios
 #           cheques (cada fila de la tabla = un cheque).
@@ -89,16 +89,18 @@ Devolvé ÚNICAMENTE un JSON puro, sin texto adicional ni formato markdown (sin 
 #           físicos que integran ese depósito. Acá hay que "fusionar":
 #           un solo movimiento por cada instrumento de la liquidación,
 #           completado con los datos de la foto que tenga el mismo monto.
+#   CASO D: comprobantes que NO son cheques (ej: transferencias bancarias).
+#           También se registran, marcados con su tipo real.
 
 HERRAMIENTA_CHEQUES_WHATSAPP = {
     "name": "registrar_cheques_whatsapp",
     "description": (
-        "Registra los cheques de este lote de WhatsApp. Si el lote incluye un "
+        "Registra los comprobantes de este lote de WhatsApp. Si el lote incluye un "
         "comprobante de liquidación/depósito con un total general, fusioná esa "
         "liquidación con las fotos de los cheques físicos (un movimiento por "
         "cada instrumento de la liquidación, ni más ni menos). Si el lote son "
-        "solo cheques sueltos o una tabla de home banking, generá un cheque "
-        "por cada uno."
+        "solo cheques sueltos, transferencias, o una tabla de home banking, "
+        "generá un comprobante por cada uno."
     ),
     "input_schema": {
         "type": "object",
@@ -115,20 +117,30 @@ HERRAMIENTA_CHEQUES_WHATSAPP = {
             },
             "cheques": {
                 "type": "array",
-                "description": "Un objeto por cada cheque detectado en el lote.",
+                "description": "Un objeto por cada comprobante detectado en el lote (cheque, transferencia, etc.).",
                 "items": {
                     "type": "object",
                     "properties": {
+                        "tipo_comprobante": {
+                            "type": "string",
+                            "enum": ["Cheque Físico", "Cheque Electrónico", "Transferencia", "Otro"],
+                            "description": (
+                                "El tipo real de este comprobante. 'Cheque Físico' para un cheque "
+                                "fotografiado o de una liquidación de cheques. 'Cheque Electrónico' "
+                                "para uno visto en una tabla de home banking. 'Transferencia' para "
+                                "un comprobante de transferencia bancaria (sin número de cheque). "
+                                "'Otro' si no encaja en ninguno de los anteriores."
+                            ),
+                        },
                         "numero_imagen": {
                             "type": ["integer", "null"],
                             "description": (
                                 "Número de archivo (1 para el primero enviado, 2 para el "
-                                "segundo, etc.) de la FOTO DEL CHEQUE FÍSICO que corresponde "
-                                "a este cheque, si existe una foto propia de ese cheque en el "
-                                "lote. Si este cheque viene SOLO de un comprobante de "
-                                "liquidación y no tiene foto propia en el lote, dejá este "
-                                "campo en null. Nunca pongas acá el número de imagen del "
-                                "comprobante de liquidación en sí."
+                                "segundo, etc.) de la FOTO FÍSICA que corresponde a este "
+                                "comprobante, si existe una foto propia de él en el lote. Si "
+                                "este comprobante viene SOLO de un documento de liquidación y "
+                                "no tiene foto propia en el lote, dejá este campo en null. Nunca "
+                                "pongas acá el número de imagen del comprobante de liquidación en sí."
                             ),
                         },
                         "banco_origen": {"type": "string"},
@@ -140,7 +152,11 @@ HERRAMIENTA_CHEQUES_WHATSAPP = {
                         },
                         "numero_identificador": {
                             "type": "string",
-                            "description": "El número del cheque.",
+                            "description": (
+                                "El número del cheque. Si es una transferencia u otro comprobante "
+                                "sin número de cheque, usá el número de operación/comprobante que "
+                                "figure, o dejalo vacío si no hay ninguno."
+                            ),
                         },
                         "monto": {
                             "type": "number",
@@ -152,7 +168,7 @@ HERRAMIENTA_CHEQUES_WHATSAPP = {
                         },
                         "fecha_pago": {
                             "type": ["string", "null"],
-                            "description": "Formato 'AAAA-MM-DD'. Si el cheque no aclara fecha de pago diferida, usá la misma que fecha_emision.",
+                            "description": "Formato 'AAAA-MM-DD'. Si el comprobante no aclara fecha de pago diferida, usá la misma que fecha_emision.",
                         },
                         "cuit_emisor": {
                             "type": ["string", "null"],
@@ -161,13 +177,14 @@ HERRAMIENTA_CHEQUES_WHATSAPP = {
                         "razon_social_emisor": {
                             "type": ["string", "null"],
                             "description": (
-                                "El texto impreso junto al CUIT, en la zona de firma/datos del "
-                                "titular del cheque. NUNCA el nombre que sigue a 'Páguese a' o "
-                                "'A la orden de' (ese es el beneficiario, no el emisor)."
+                                "Para cheques: el texto impreso junto al CUIT, en la zona de firma/datos "
+                                "del titular del cheque. NUNCA el nombre que sigue a 'Páguese a' o "
+                                "'A la orden de' (ese es el beneficiario, no el emisor). Para "
+                                "transferencias: el nombre de quien envía el dinero."
                             ),
                         },
                     },
-                    "required": ["monto", "numero_identificador"],
+                    "required": ["tipo_comprobante", "monto"],
                 },
             },
         },
@@ -180,20 +197,23 @@ def instrucciones_cheques_whatsapp(cliente_tag: str) -> str:
     return f"""
 Sos un auditor contable experto de BC Combustibles, especializado en leer cheques y comprobantes bancarios argentinos que llegan por WhatsApp. Cliente de este lote: '{cliente_tag}'.
 
-Vas a recibir uno o varios archivos (fotos o PDFs). Pueden darse 3 situaciones distintas:
+Vas a recibir uno o varios archivos (fotos o PDFs). Pueden darse varias situaciones distintas, incluso mezcladas en un mismo lote:
 
 CASO A — Cheques físicos sueltos:
-Una o varias fotos, cada una con uno o varios cheques físicos fotografiados (sin ningún comprobante de liquidación de por medio). Generá un cheque por cada uno que veas.
+Una o varias fotos, cada una con uno o varios cheques físicos fotografiados (sin ningún comprobante de liquidación de por medio). Generá un comprobante por cada uno que veas, con tipo_comprobante = "Cheque Físico".
 
 CASO B — Tabla de home banking:
-Una captura de pantalla de un listado/tabla de cheques (por ejemplo, cheques electrónicos emitidos, vistos en la web de un banco). Cada FILA de esa tabla es un cheque — generá un cheque por cada fila, usando los datos de esa fila (número, cuenta, razón social/CUIT si figura, fecha, monto).
+Una captura de pantalla de un listado/tabla de cheques (por ejemplo, cheques electrónicos emitidos, vistos en la web de un banco). Cada FILA de esa tabla es un comprobante — generá uno por cada fila, con tipo_comprobante = "Cheque Electrónico", usando los datos de esa fila (número, cuenta, razón social/CUIT si figura, fecha, monto).
 
 CASO C — Liquidación/depósito + fotos de cheques físicos:
 Si alguno de los archivos es un comprobante de LIQUIDACIÓN o RESUMEN DE DEPÓSITO (trae un TOTAL general y una lista de instrumentos, pero con poco detalle de cada uno — a veces sin ni siquiera el nombre del emisor), y los demás archivos son fotos de cheques físicos:
-- Generá EXACTAMENTE un cheque por cada instrumento que figura en la liquidación (ni más, ni menos, ni duplicados).
-- Para completar los datos de cada cheque, buscá entre las fotos de cheques físicos la que tenga el MISMO MONTO que ese instrumento de la liquidación, y usá los datos de esa foto (emisor, CUIT, número de cheque, banco, cuenta, fechas).
-- Si un instrumento de la liquidación no tiene ninguna foto de cheque con el mismo monto, igual generá el cheque con el monto de la liquidación, dejando emisor/cuit/numero_identificador en null si no los podés determinar.
+- Generá EXACTAMENTE un comprobante por cada instrumento que figura en la liquidación (ni más, ni menos, ni duplicados), con tipo_comprobante = "Cheque Físico".
+- Para completar los datos de cada uno, buscá entre las fotos de cheques físicos la que tenga el MISMO MONTO que ese instrumento de la liquidación, y usá los datos de esa foto (emisor, CUIT, número de cheque, banco, cuenta, fechas).
+- Si un instrumento de la liquidación no tiene ninguna foto con el mismo monto, igual generá el comprobante con el monto de la liquidación, dejando emisor/cuit/numero_identificador en null si no los podés determinar.
 - Completá "total_declarado" con el TOTAL general que figura en la liquidación.
+
+CASO D — Comprobantes que no son cheques:
+Si alguno de los archivos es una transferencia bancaria (comprobante de "Transferencia enviada", "Transferencia recibida", o similar, SIN número de cheque), generá un comprobante con tipo_comprobante = "Transferencia". Usá como "numero_identificador" el número de operación/comprobante si figura, y como "razon_social_emisor" el nombre de quien envía el dinero.
 
 REGLAS DE ORO PARA LEER CADA CHEQUE FÍSICO (aplican en CASO A y CASO C):
 1. El Emisor del cheque NUNCA es el nombre que sigue a "Páguese a" o "A la orden de". Ignorá ese nombre.
@@ -202,7 +222,7 @@ REGLAS DE ORO PARA LEER CADA CHEQUE FÍSICO (aplican en CASO A y CASO C):
 4. Si el cheque no especifica una fecha de pago diferido, "fecha_pago" debe ser igual a "fecha_emision".
 5. "numero_cuenta": solo números, SIN guiones ni espacios.
 
-REGLA GENERAL: si dudás de un dato, dejalo en null. NO inventes.
+REGLA GENERAL: si dudás de un dato, dejalo en null. NO inventes. Elegí siempre el tipo_comprobante que mejor describa cada uno — no asumas que todo es un cheque.
 
 Usá siempre la herramienta "registrar_cheques_whatsapp" para responder. No respondas con texto libre.
 """.strip()
