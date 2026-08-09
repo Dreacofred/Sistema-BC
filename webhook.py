@@ -2,6 +2,7 @@
 import os
 import time
 import uuid
+import hashlib
 import threading
 import requests
 from flask import Flask, request, jsonify
@@ -64,37 +65,73 @@ def _bloque_archivo(archivo_bytes, tipo_mime):
         }
     }
 
+def _ya_fue_procesado(hash_archivo):
+    try:
+        res = supabase.table("hashes_comprobantes").select("id").eq("hash_archivo", hash_archivo).execute()
+        return len(res.data) > 0
+    except Exception as e:
+        print(f"Error consultando hashes_comprobantes: {e}")
+        return False  # Si falla la consulta, preferimos procesar de más a perder un comprobante
+
+def _guardar_hashes(hashes_nuevos, cliente_tag):
+    if not hashes_nuevos:
+        return
+    try:
+        filas_hashes = [{"hash_archivo": h, "cliente_asociado": cliente_tag} for h in hashes_nuevos]
+        supabase.table("hashes_comprobantes").insert(filas_hashes).execute()
+    except Exception as e:
+        print(f"Aviso: no se pudieron guardar los hashes nuevos: {e}")
+
 # ==========================================
 # 4. EL CEREBRO DE IA Y GUARDADO
 # ==========================================
 def procesar_y_guardar(rutas_imagenes, cliente_tag):
     """
-    Devuelve una tupla (exito: bool, aviso: str | None).
-    "aviso" se usa para mandar un mensaje extra por WhatsApp cuando el total
-    declarado en una liquidación no coincide con la suma de los cheques leídos.
+    Devuelve una tupla (exito: bool, avisos: list[str]).
+    "avisos" son mensajes extra que se mandan por WhatsApp además del mensaje
+    principal de éxito/error (ej: archivos repetidos salteados, o el total
+    de una liquidación que no coincide con la suma de los cheques leídos).
     """
     urls_supabase = []
     bloques_contenido = []
     id_lote_unico = str(uuid.uuid4())
+    duplicados = []
+    archivos_a_procesar = []  # lista de (ruta, bytes, hash) de los NO repetidos
 
     try:
-        # 1. Subir fotos o PDFs a Supabase, y armar los bloques para Claude
+        # 0. Calcular el hash de cada archivo y separar los repetidos de los nuevos
         for ruta in rutas_imagenes:
+            with open(ruta, "rb") as f:
+                bytes_archivo = f.read()
+            hash_archivo = hashlib.sha256(bytes_archivo).hexdigest()
+
+            if _ya_fue_procesado(hash_archivo):
+                duplicados.append(os.path.basename(ruta))
+            else:
+                archivos_a_procesar.append((ruta, bytes_archivo, hash_archivo))
+
+        # Si TODOS los archivos del lote ya se habían procesado antes, no hay nada que hacer
+        if not archivos_a_procesar:
+            aviso = "⚠️ Los archivos de este lote ya habían sido procesados antes. No se cargó nada nuevo."
+            return False, [aviso]
+
+        # 1. Subir a Supabase los archivos NUEVOS, y armar los bloques para Claude
+        hashes_para_guardar = []
+        for ruta, bytes_archivo, hash_archivo in archivos_a_procesar:
             nombre_archivo = f"doc_{int(time.time())}_{os.path.basename(ruta)}"
             es_pdf = ruta.lower().endswith(".pdf")
             tipo_mime = "application/pdf" if es_pdf else "image/jpeg"
 
-            with open(ruta, "rb") as f:
-                bytes_archivo = f.read()
-                supabase.storage.from_("comprobantes").upload(
-                    path=nombre_archivo,
-                    file=bytes_archivo,
-                    file_options={"content-type": tipo_mime}
-                )
+            supabase.storage.from_("comprobantes").upload(
+                path=nombre_archivo,
+                file=bytes_archivo,
+                file_options={"content-type": tipo_mime}
+            )
             url_publica = supabase.storage.from_("comprobantes").get_public_url(nombre_archivo)
             urls_supabase.append(url_publica)
 
             bloques_contenido.append(_bloque_archivo(bytes_archivo, tipo_mime))
+            hashes_para_guardar.append(hash_archivo)
 
         fotos_juntas = ",".join(urls_supabase)
 
@@ -164,23 +201,33 @@ def procesar_y_guardar(rutas_imagenes, cliente_tag):
         # 5. Guardar en Base de Datos
         supabase.table("cobranzas_pendientes").insert(filas_para_guardar).execute()
 
-        # 6. Verificación de suma: si había un total declarado (liquidación/depósito),
-        #    lo comparamos contra la suma de los cheques que se guardaron.
-        aviso = None
+        # 6. Recién ahora que se guardó todo bien, registramos los hashes de los
+        #    archivos nuevos, para poder detectarlos si se vuelven a mandar.
+        _guardar_hashes(hashes_para_guardar, cliente_tag)
+
+        # 7. Armar los avisos extra (duplicados salteados + chequeo de suma)
+        avisos = []
+
+        if duplicados:
+            texto_dupes = ", ".join(duplicados)
+            avisos.append(
+                f"ℹ️ Se salteó {len(duplicados)} archivo(s) porque ya habían sido procesados antes."
+            )
+
         if total_declarado is not None:
             suma_calculada = sum(f["monto"] or 0 for f in filas_para_guardar)
             if abs(float(total_declarado) - suma_calculada) > 1:
-                aviso = (
+                avisos.append(
                     f"⚠️ Atención: el total del comprobante (${total_declarado:,.2f}) no coincide "
                     f"con la suma de los cheques leídos (${suma_calculada:,.2f}). Puede faltar una foto "
                     f"o algún monto se leyó mal. Revisar manualmente en el panel."
                 )
 
-        return True, aviso
+        return True, avisos
 
     except Exception as e:
         print(f"Error procesando lote: {e}")
-        return False, None
+        return False, []
 
 # ==========================================
 # 5. ENDPOINT WEBHOOK GREEN-API
@@ -244,13 +291,13 @@ def recibir_whatsapp():
                 enviar_mensaje_wa(chat_id, f"⏳ Evaluando {cantidad} archivos para *{cliente}*. {msg_t}")
 
                 def trabajo_pesado(fotos_a_procesar, cliente_a_procesar, chat_destino):
-                    exito, aviso = procesar_y_guardar(fotos_a_procesar, cliente_a_procesar)
+                    exito, avisos = procesar_y_guardar(fotos_a_procesar, cliente_a_procesar)
                     if exito:
                         enviar_mensaje_wa(chat_destino, "🎉 ¡Listo! Ya está en la oficina pendiente de auditoría.")
-                        if aviso:
-                            enviar_mensaje_wa(chat_destino, aviso)
                     else:
                         enviar_mensaje_wa(chat_destino, "⚠️ Hubo un error procesando el lote.")
+                    for aviso in avisos:
+                        enviar_mensaje_wa(chat_destino, aviso)
                     import os
                     for f in fotos_a_procesar:
                         if os.path.exists(f): os.remove(f)
