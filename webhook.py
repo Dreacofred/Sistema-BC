@@ -2,15 +2,13 @@
 import os
 import time
 import uuid
-import json
-import base64
 import threading
 import requests
 from flask import Flask, request, jsonify
 from supabase import create_client, Client
 import anthropic
 
-from core.prompts_ia import prompt_extraccion_cheques_whatsapp
+from core.prompts_ia import HERRAMIENTA_CHEQUES_WHATSAPP, instrucciones_cheques_whatsapp
 
 # ==========================================
 # 1. CREDENCIALES Y CONFIGURACIÓN
@@ -53,10 +51,28 @@ def descargar_imagen(download_url, ruta_destino):
         print(f"Error descargando imagen: {e}")
         return False
 
+def _bloque_archivo(archivo_bytes, tipo_mime):
+    import base64
+    base64_data = base64.b64encode(archivo_bytes).decode("utf-8")
+    es_pdf = tipo_mime == "application/pdf"
+    return {
+        "type": "document" if es_pdf else "image",
+        "source": {
+            "type": "base64",
+            "media_type": tipo_mime,
+            "data": base64_data
+        }
+    }
+
 # ==========================================
 # 4. EL CEREBRO DE IA Y GUARDADO
 # ==========================================
 def procesar_y_guardar(rutas_imagenes, cliente_tag):
+    """
+    Devuelve una tupla (exito: bool, aviso: str | None).
+    "aviso" se usa para mandar un mensaje extra por WhatsApp cuando el total
+    declarado en una liquidación no coincide con la suma de los cheques leídos.
+    """
     urls_supabase = []
     bloques_contenido = []
     id_lote_unico = str(uuid.uuid4())
@@ -78,70 +94,93 @@ def procesar_y_guardar(rutas_imagenes, cliente_tag):
             url_publica = supabase.storage.from_("comprobantes").get_public_url(nombre_archivo)
             urls_supabase.append(url_publica)
 
-            # 2. Codificar en base64 para mandarle directo a Claude (sin subida previa)
-            base64_data = base64.b64encode(bytes_archivo).decode("utf-8")
-            tipo_bloque = "document" if es_pdf else "image"
-            bloques_contenido.append({
-                "type": tipo_bloque,
-                "source": {
-                    "type": "base64",
-                    "media_type": tipo_mime,
-                    "data": base64_data
-                }
-            })
+            bloques_contenido.append(_bloque_archivo(bytes_archivo, tipo_mime))
 
         fotos_juntas = ",".join(urls_supabase)
 
-        # 3. Prompt (el mismo de siempre, centralizado en core/prompts_ia.py)
-        prompt = prompt_extraccion_cheques_whatsapp(cliente_tag)
-        bloques_contenido.append({"type": "text", "text": prompt})
+        # 2. Texto que acompaña a los archivos, recordando el orden y la numeración
+        bloques_contenido.append({
+            "type": "text",
+            "text": (
+                "Los archivos de arriba están numerados en el orden en que fueron enviados: "
+                "el primero es el archivo 1, el segundo el archivo 2, y así sucesivamente. "
+                "Analizalos según las instrucciones y usá la herramienta registrar_cheques_whatsapp."
+            )
+        })
 
+        # 3. Llamada a Claude, forzando el uso de la herramienta (nunca texto libre)
         respuesta = cliente_ia.messages.create(
             model=MODELO_IA,
             max_tokens=4096,
+            system=instrucciones_cheques_whatsapp(cliente_tag),
+            tools=[HERRAMIENTA_CHEQUES_WHATSAPP],
+            tool_choice={"type": "tool", "name": "registrar_cheques_whatsapp"},
             messages=[{"role": "user", "content": bloques_contenido}]
         )
 
-        # 4. Limpieza de JSON a prueba de balas
-        # Claude a veces manda primero un bloque de "pensamiento" (ThinkingBlock)
-        # antes del bloque de texto con la respuesta final. Recorremos todos
-        # los bloques y nos quedamos solo con los de tipo "text".
-        raw_text = ""
+        datos_ia = None
         for bloque in respuesta.content:
-            if bloque.type == "text":
-                raw_text += bloque.text
-        raw_text = raw_text.strip()
+            if bloque.type == "tool_use":
+                datos_ia = bloque.input
+                break
 
-        start = raw_text.find('{')
-        end = raw_text.rfind('}') + 1
+        if datos_ia is None:
+            raise Exception("Claude no devolvió los datos con la herramienta esperada.")
 
-        if start != -1 and end != 0:
-            texto_json = raw_text[start:end]
-            datos_ia = json.loads(texto_json)
-        else:
-            raise Exception("Claude no devolvió un JSON válido para leer.")
+        lista_cheques = datos_ia.get("cheques") or []
+        total_declarado = datos_ia.get("total_declarado")
 
-        # 5. Formatear y vincular foto individual
-        for fila in datos_ia.get("cheques", []):
-            fila['lote_id'] = id_lote_unico
+        if not lista_cheques:
+            raise Exception("Claude no detectó ningún cheque en el lote.")
 
-            num_img = fila.pop('numero_imagen', None)
+        # 4. Formatear y vincular cada cheque con su foto (si tiene una propia)
+        filas_para_guardar = []
+        for fila_ia in lista_cheques:
+            fila = {
+                "cliente_asociado": cliente_tag,
+                "tipo_comprobante": "Cheque Físico",
+                "banco_origen": fila_ia.get("banco_origen") or "",
+                "codigo_banco": fila_ia.get("codigo_banco") or "",
+                "codigo_sucursal": fila_ia.get("codigo_sucursal") or "",
+                "numero_cuenta": fila_ia.get("numero_cuenta") or "",
+                "numero_identificador": fila_ia.get("numero_identificador") or "",
+                "monto": fila_ia.get("monto") or 0,
+                "fecha_emision": fila_ia.get("fecha_emision") or None,
+                "fecha_pago": fila_ia.get("fecha_pago") or None,
+                "cuit_emisor": fila_ia.get("cuit_emisor") or "",
+                "razon_social_emisor": fila_ia.get("razon_social_emisor") or "",
+                "estado_auditoria": "Pendiente",
+                "lote_id": id_lote_unico,
+            }
+
+            num_img = fila_ia.get("numero_imagen")
             if num_img and isinstance(num_img, int) and 1 <= num_img <= len(urls_supabase):
-                fila['archivo_url'] = urls_supabase[num_img - 1]
+                fila["archivo_url"] = urls_supabase[num_img - 1]
             else:
-                fila['archivo_url'] = fotos_juntas  # De respaldo
+                fila["archivo_url"] = fotos_juntas  # De respaldo
 
-            if fila.get('fecha_emision') == "": fila['fecha_emision'] = None
-            if fila.get('fecha_pago') == "": fila['fecha_pago'] = None
+            filas_para_guardar.append(fila)
 
-        # 6. Guardar en Base de Datos
-        supabase.table("cobranzas_pendientes").insert(datos_ia["cheques"]).execute()
+        # 5. Guardar en Base de Datos
+        supabase.table("cobranzas_pendientes").insert(filas_para_guardar).execute()
 
-        return True
+        # 6. Verificación de suma: si había un total declarado (liquidación/depósito),
+        #    lo comparamos contra la suma de los cheques que se guardaron.
+        aviso = None
+        if total_declarado is not None:
+            suma_calculada = sum(f["monto"] or 0 for f in filas_para_guardar)
+            if abs(float(total_declarado) - suma_calculada) > 1:
+                aviso = (
+                    f"⚠️ Atención: el total del comprobante (${total_declarado:,.2f}) no coincide "
+                    f"con la suma de los cheques leídos (${suma_calculada:,.2f}). Puede faltar una foto "
+                    f"o algún monto se leyó mal. Revisar manualmente en el panel."
+                )
+
+        return True, aviso
 
     except Exception as e:
         print(f"Error procesando lote: {e}")
-        return False
+        return False, None
 
 # ==========================================
 # 5. ENDPOINT WEBHOOK GREEN-API
@@ -205,9 +244,11 @@ def recibir_whatsapp():
                 enviar_mensaje_wa(chat_id, f"⏳ Evaluando {cantidad} archivos para *{cliente}*. {msg_t}")
 
                 def trabajo_pesado(fotos_a_procesar, cliente_a_procesar, chat_destino):
-                    exito = procesar_y_guardar(fotos_a_procesar, cliente_a_procesar)
+                    exito, aviso = procesar_y_guardar(fotos_a_procesar, cliente_a_procesar)
                     if exito:
                         enviar_mensaje_wa(chat_destino, "🎉 ¡Listo! Ya está en la oficina pendiente de auditoría.")
+                        if aviso:
+                            enviar_mensaje_wa(chat_destino, aviso)
                     else:
                         enviar_mensaje_wa(chat_destino, "⚠️ Hubo un error procesando el lote.")
                     import os
