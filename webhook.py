@@ -103,7 +103,15 @@ def procesar_y_guardar(rutas_imagenes, cliente_tag):
         )
 
         # 4. Limpieza de JSON a prueba de balas
-        raw_text = respuesta.content[0].text.strip()
+        # Claude a veces manda primero un bloque de "pensamiento" (ThinkingBlock)
+        # antes del bloque de texto con la respuesta final. Recorremos todos
+        # los bloques y nos quedamos solo con los de tipo "text".
+        raw_text = ""
+        for bloque in respuesta.content:
+            if bloque.type == "text":
+                raw_text += bloque.text
+        raw_text = raw_text.strip()
+
         start = raw_text.find('{')
         end = raw_text.rfind('}') + 1
 
