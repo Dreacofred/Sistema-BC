@@ -68,3 +68,42 @@ Devolvé ÚNICAMENTE un JSON puro, sin texto adicional ni formato markdown (sin 
   4. Si SOLO cargó Nafta, devolvé "Atención. La factura contiene Nafta."
   5. Si encontrás artículos extra (aceites, filtros, etc.), devolvé "Atención. La factura contiene artículos extra: [detallar los extra]."
 """.strip()
+
+# ==========================================
+# 4. EXTRACCIÓN COMPLETA DE CHEQUES (para el bot de WhatsApp)
+# Usado por: webhook.py -> procesar_y_guardar()
+# ==========================================
+def prompt_extraccion_cheques_whatsapp(cliente_tag: str) -> str:
+    return f"""
+    Sos un auditor contable experto de BC Combustibles. Analizá este lote de imágenes. Cliente: '{cliente_tag}'.
+
+    PASO 1: Observá y razoná internamente qué datos hay en las fotos.
+    PASO 2: Extraé los datos.
+    - REGLA 1: Si dudás, dejalo vacío (""). NO inventes.
+    - REGLA 2: Para 'razon_social_emisor', buscá el texto impreso junto al CUIT. Ignorá el 'Páguese a' manuscrito.
+    - REGLA 3: Para 'numero_cuenta', extraé los números crudos SIN guiones ni espacios.
+    - REGLA 4: Indicá obligatoriamente a qué número de archivo/imagen corresponde este cheque en 'numero_imagen' (1 para el primer archivo enviado, 2 para el segundo, etc.).
+
+    Devolvé ÚNICAMENTE un objeto JSON con este formato exacto:
+    {{
+        "cheques": [
+            {{
+                "cliente_asociado": "{cliente_tag}",
+                "numero_imagen": 1,
+                "tipo_comprobante": "Cheque Físico",
+                "banco_origen": "Nombre del banco",
+                "codigo_banco": "014",
+                "codigo_sucursal": "1842",
+                "numero_cuenta": "12345678",
+                "numero_identificador": "90000052",
+                "monto": 150000.50,
+                "fecha_emision": "2026-06-10",
+                "fecha_pago": "2026-08-15",
+                "cuit_emisor": "20-12345678-9",
+                "razon_social_emisor": "Razón social impresa",
+                "estado_auditoria": "Pendiente",
+                "regente_cliente_id": "1045"
+            }}
+        ]
+    }}
+    """
