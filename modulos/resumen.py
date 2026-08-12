@@ -71,7 +71,7 @@ def mostrar(supabase, cliente_ia, user, NOMBRES_SUCURSALES, COLOR_ROJO):
         clientes_con_movimientos = df_audit['Cliente'].unique()
         
         st.markdown("### Seleccionar Cuenta Corriente")
-        cliente_sel = st.selectbox("", ["--- Seleccionar ---"] + list(clientes_con_movimientos), label_visibility="collapsed")
+        cliente_sel = st.selectbox("Seleccionar Cuenta Corriente", ["--- Seleccionar ---"] + list(clientes_con_movimientos), label_visibility="collapsed")
         
         if cliente_sel != "--- Seleccionar ---":
             filtro_cliente = df_audit[df_audit['Cliente'] == cliente_sel]
