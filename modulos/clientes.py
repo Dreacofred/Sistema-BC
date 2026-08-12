@@ -4,10 +4,19 @@ modulos/clientes.py
 Módulo "Gestión de Clientes" de lector.py, separado a su propio archivo
 para que lector.py sea más corto y fácil de navegar.
 
-Se llama desde lector.py así: modulos_clientes.mostrar(supabase, NOMBRES_SUCURSALES)
+Se llama desde lector.py así: modulo_clientes.mostrar(supabase, NOMBRES_SUCURSALES)
 """
 import streamlit as st
 import time
+import secrets
+import string
+
+
+def _generar_password_temporal(largo=12):
+    """Genera una contraseña temporal segura, para precargar el campo y ahorrarle
+    el trabajo a quien da de alta el cliente (la puede cambiar si quiere)."""
+    alfabeto = string.ascii_letters + string.digits
+    return "".join(secrets.choice(alfabeto) for _ in range(largo))
 
 
 def mostrar(supabase, NOMBRES_SUCURSALES):
@@ -67,6 +76,12 @@ def mostrar(supabase, NOMBRES_SUCURSALES):
 
     with tab_alta:
         st.markdown('<div class="tarjeta-pro">', unsafe_allow_html=True)
+
+        # La contraseña temporal se genera una sola vez por sesión de carga (no en
+        # cada rerun del form), así no cambia sola mientras el usuario está tipeando.
+        if "password_temp_alta_cliente" not in st.session_state:
+            st.session_state["password_temp_alta_cliente"] = _generar_password_temporal()
+
         with st.form("form_alta"):
             st.subheader("Carga de Datos Iniciales")
             c1, c2 = st.columns(2)
@@ -77,7 +92,14 @@ def mostrar(supabase, NOMBRES_SUCURSALES):
             suc_madre = c3.selectbox("Sucursal Madre", [1, 2, 3, 4], format_func=lambda x: NOMBRES_SUCURSALES.get(x))
             limite_nuevo = c4.number_input("Límite de Efectivo ($)", min_value=0, value=0)
 
-            auth_id = st.text_input("UUID de Autenticación (Supabase Auth)", help="Pegá acá el ID del usuario creado en la sección Authentication de Supabase")
+            st.markdown("**Acceso al Portal:**")
+            c_auth1, c_auth2 = st.columns(2)
+            email_nuevo = c_auth1.text_input("Email de acceso del cliente", placeholder="cliente@empresa.com")
+            password_nueva = c_auth2.text_input(
+                "Contraseña inicial",
+                value=st.session_state["password_temp_alta_cliente"],
+                help="Se generó una contraseña temporal automáticamente. Podés dejarla así o escribir una vos mismo — anotala para pasársela al cliente."
+            )
 
             st.markdown("**Permisos Iniciales:**")
             col_p1, col_p2 = st.columns(2)
@@ -90,24 +112,46 @@ def mostrar(supabase, NOMBRES_SUCURSALES):
 
             st.markdown("<br>", unsafe_allow_html=True)
             if st.form_submit_button("🚀 Dar de Alta Cliente", type="primary", use_container_width=True):
-                if not nombre_nuevo or not cuit_nuevo or not auth_id:
-                    st.error("⚠️ Por favor, completá el Nombre, CUIT y el UUID de Autenticación.")
+                if not nombre_nuevo or not cuit_nuevo or not email_nuevo or not password_nueva:
+                    st.error("⚠️ Por favor, completá el Nombre, CUIT, Email y Contraseña.")
                 else:
                     try:
+                        # Paso 1: crear el usuario de autenticación en Supabase Auth.
+                        # email_confirm=True evita que Supabase le mande un mail de
+                        # confirmación al cliente — el acceso queda habilitado directo.
+                        respuesta_auth = supabase.auth.admin.create_user({
+                            "email": email_nuevo.strip(),
+                            "password": password_nueva,
+                            "email_confirm": True,
+                        })
+                        nuevo_auth_id = respuesta_auth.user.id
+
+                        # Paso 2: recién con el UUID ya generado, crear la fila del cliente.
                         supabase.table("clientes").insert({
                             "nombre": nombre_nuevo,
                             "cuit": cuit_nuevo,
                             "sucursal_madre_id": suc_madre,
                             "limite_efectivo": limite_nuevo,
-                            "auth_user_id": auth_id,
+                            "auth_user_id": nuevo_auth_id,
                             "requiere_foto_remito": req_foto_n,
                             "formato_especial": formato_esp_n,
                             "elige_cuit_facturar": exige_cuit_n,
                             "habilitado": hab_n
                         }).execute()
-                        st.success("✅ ¡Golazo! Cliente registrado exitosamente en la base de datos.")
-                        time.sleep(2)
-                        st.rerun()
+
+                        st.success(
+                            f"✅ ¡Golazo! Cliente registrado y con acceso al portal habilitado.\n\n"
+                            f"**Email:** {email_nuevo.strip()}\n\n"
+                            f"**Contraseña:** {password_nueva}\n\n"
+                            f"Anotá estos datos ahora — pasáselos al cliente por el medio que uses habitualmente."
+                        )
+                        # Generamos una contraseña nueva para la próxima alta, y
+                        # sacamos la usada de sesión para no repetirla por error.
+                        del st.session_state["password_temp_alta_cliente"]
                     except Exception as e:
-                        st.error(f"Error al crear: {e}")
+                        mensaje = str(e)
+                        if "already been registered" in mensaje or "already registered" in mensaje.lower():
+                            st.error(f"⚠️ Ya existe un usuario con ese email en Supabase Auth. Usá otro email, o si es un error, revisá la sección Authentication del dashboard.")
+                        else:
+                            st.error(f"Error al crear: {mensaje}")
         st.markdown('</div>', unsafe_allow_html=True)
