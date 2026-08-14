@@ -1,16 +1,20 @@
 import requests
 import time
 import json
+import base64
+import io
 import urllib3
 import re
 import streamlit as st
 
-from core.prompts_ia import PROMPT_LECTURA_CHEQUES
+from core.prompts_ia import HERRAMIENTA_LECTURA_CHEQUES_BCRA, instrucciones_lectura_cheques_bcra
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # 🔑 LLAVE DE SCRAPEOPS (ahora se lee desde los Secrets de Streamlit)
 API_KEY_SCRAPEOPS = st.secrets["SCRAPEOPS_API_KEY"]
+
+MODELO_CLAUDE = "claude-sonnet-5"
 
 # ==========================================
 # 1. FUNCIÓN DE CONSULTA AL BCRA (NUEVO TÚNEL SCRAPEOPS)
@@ -82,20 +86,58 @@ def consultar_bcra_completo(cuit):
 # ==========================================
 # 2. FUNCIÓN DE INTELIGENCIA ARTIFICIAL (ESCANEO DE CHEQUES)
 # ==========================================
-def procesar_lote_cheques_ia(cliente_ia, img_lote):
+# MIGRADO A CLAUDE (agosto 2026): antes usaba Gemini con un prompt de texto
+# libre y parseo manual de JSON (buscando "[" y "]"). Ahora usa Claude con la
+# herramienta forzada "registrar_cheques_para_verificacion" (ver
+# core/prompts_ia.py). El primer parámetro ahora tiene que ser un cliente de
+# Anthropic (anthropic.Anthropic), no un cliente de Gemini como antes.
+def _bloque_imagen_claude(imagen_pil):
+    """Convierte una imagen PIL (ya redimensionada con .thumbnail() en
+    modulos/verificacion_bcra.py) al formato de bloque de imagen que espera
+    la API de Claude: base64 + media_type."""
+    buffer = io.BytesIO()
+    formato = (imagen_pil.format or "JPEG").upper()
+    if formato not in ("JPEG", "PNG", "GIF", "WEBP"):
+        formato = "JPEG"
+    imagen_pil.save(buffer, format=formato)
+    media_type = f"image/{formato.lower()}"
+    return {
+        "type": "image",
+        "source": {
+            "type": "base64",
+            "media_type": media_type,
+            "data": base64.b64encode(buffer.getvalue()).decode("utf-8"),
+        },
+    }
+
+
+def procesar_lote_cheques_ia(cliente_claude, img_lote):
+    """
+    Lee un lote de cheques físicos de una foto usando Claude. Devuelve una
+    lista de diccionarios con las claves "numero_cheque", "emisor" y "cuit"
+    — la misma forma que devolvía antes con Gemini, para no romper el código
+    que la consume en modulos/verificacion_bcra.py.
+    """
     try:
-        res = cliente_ia.models.generate_content(
-            model='gemini-2.5-pro',
-            contents=[PROMPT_LECTURA_CHEQUES, img_lote]
+        respuesta = cliente_claude.messages.create(
+            model=MODELO_CLAUDE,
+            max_tokens=2048,
+            system=instrucciones_lectura_cheques_bcra(),
+            tools=[HERRAMIENTA_LECTURA_CHEQUES_BCRA],
+            tool_choice={"type": "tool", "name": "registrar_cheques_para_verificacion"},
+            messages=[{
+                "role": "user",
+                "content": [_bloque_imagen_claude(img_lote)],
+            }],
         )
-        txt = res.text.replace("```json", "").replace("```", "").strip()
-        
-        start = txt.find('[')
-        end = txt.rfind(']') + 1
-        if start != -1 and end != 0:
-            return json.loads(txt[start:end])
-        else:
-            return []
+
+        for bloque in respuesta.content:
+            if bloque.type == "tool_use":
+                return bloque.input.get("cheques") or []
+
+        st.error("Falla en el motor de IA: Claude no devolvió los datos con la herramienta esperada.")
+        return []
+
     except Exception as e:
         st.error(f"Falla en el motor de IA: {str(e)}")
         return []
