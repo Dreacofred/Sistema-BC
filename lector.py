@@ -73,13 +73,15 @@ st.markdown(f"""
     </style>
 """, unsafe_allow_html=True)
 
-# Cliente de Gemini: todavía lo usan Verificación BCRA y Facturas de Proveedores.
+# Cliente de Gemini: a partir de agosto 2026 solo lo usa Facturas de
+# Proveedores — que Diego va a sacar del sistema. Cuando eso pase, esta
+# línea y el import de "genai" ya no van a hacer falta.
 cliente_ia = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
 
-# Cliente de Claude: usado por el Generador de Resumen (migrado en agosto 2026).
-# IMPORTANTE: hay que cargar el secret ANTHROPIC_API_KEY en esta app de Streamlit
-# Cloud puntual ("BC Combustibles - Gestión Pro") — cada app tiene su propia
-# bóveda de secrets, cargarlo acá no lo carga automáticamente en las otras.
+# Cliente de Claude: usado por el Generador de Resumen y por Verificación
+# BCRA (ambos migrados en agosto 2026). IMPORTANTE: hay que tener cargado el
+# secret ANTHROPIC_API_KEY en esta app de Streamlit Cloud puntual ("BC
+# Combustibles - Gestión Pro") — cada app tiene su propia bóveda de secrets.
 cliente_claude = anthropic.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
 
 URL_LOGO_OFICIAL = "https://bjhykcdhafoqpfkpngvw.supabase.co/storage/v1/object/public/remitos/Logo%20nuevo.png"
@@ -193,7 +195,7 @@ elif opcion == "Generador de Resumen":
 # 5. MÓDULO: VERIFICACIÓN BCRA Y CHEQUES (IA AVANZADA)
 # ==========================================
 elif opcion == "Verificación BCRA":
-    modulo_bcra.mostrar(supabase, cliente_ia)
+    modulo_bcra.mostrar(supabase, cliente_claude)
 
 # ==========================================
 # 6. MÓDULO: GESTIÓN DE CLIENTES (ADMINISTRACIÓN)
