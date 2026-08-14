@@ -7,7 +7,7 @@ import io
 import pandas as pd
 from datetime import datetime
 from PIL import Image
-from google import genai
+import anthropic
 
 from core.supabase_client import get_supabase_client
 
@@ -32,8 +32,11 @@ st.markdown("""
 # ==========================================
 # 2. CONEXIONES A LA BÓVEDA
 # ==========================================
+# MIGRADO A CLAUDE (agosto 2026): utils_bcra.py (compartido con el módulo
+# Verificación BCRA de lector.py) ya espera un cliente de Anthropic, no de
+# Gemini. Por eso acá también hay que crear un cliente de Claude.
 supabase = get_supabase_client()
-cliente_ia = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
+cliente_claude = anthropic.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
 
 # ==========================================
 # 3. INTERFAZ DEL CLIENTE
@@ -84,7 +87,7 @@ with tab_ia:
             for idx, foto in enumerate(fotos_lote):
                 img = Image.open(foto)
                 img.thumbnail((2500, 3000), Image.Resampling.LANCZOS)
-                lista_cheques = utils_bcra.procesar_lote_cheques_ia(cliente_ia, img)
+                lista_cheques = utils_bcra.procesar_lote_cheques_ia(cliente_claude, img)
                 for cheque in lista_cheques:
                     cuit_limpio = re.sub(r'\D', '', str(cheque.get("cuit", "")))
                     datos_bcra = utils_bcra.consultar_bcra_completo(cuit_limpio) if len(cuit_limpio) == 11 else None
