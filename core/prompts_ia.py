@@ -5,10 +5,11 @@ Acá viven los prompts que se le mandan a Gemini y a Claude. Antes estaban
 escritos sueltos adentro de utils_bcra.py y lector.py; ahora viven acá para
 que, si el día de mañana hay que ajustar una regla, se toque un solo lugar.
 
-Nota: los prompts de proveedores y remitos los usan lector.py / modulos/.
-La herramienta HERRAMIENTA_CHEQUES_WHATSAPP y las instrucciones
-INSTRUCCIONES_CHEQUES_WHATSAPP las usa webhook.py (bot de WhatsApp, con
-Claude/Anthropic).
+Nota: los prompts de proveedores y remitos (versión vieja, Gemini) los usan
+lector.py / modulos/. La herramienta HERRAMIENTA_CHEQUES_WHATSAPP y las
+instrucciones INSTRUCCIONES_CHEQUES_WHATSAPP las usa webhook.py (bot de
+WhatsApp, con Claude/Anthropic). La herramienta HERRAMIENTA_LECTURA_REMITO
+la usa modulos/resumen.py (migrado de Gemini a Claude en agosto 2026).
 """
 
 # ==========================================
@@ -42,6 +43,9 @@ Si un dato no es legible con un 100% de seguridad, devuelve "ERROR_LECTURA" en e
 # ==========================================
 # 2. LECTURA DE FACTURAS DE PROVEEDORES (usado por modulos/proveedores.py)
 # ==========================================
+# NOTA (agosto 2026): Diego confirmó que modulos/proveedores.py se va a sacar
+# del sistema y no se va a usar más. Este prompt queda acá sin tocar por ahora
+# — cuando se saque el módulo, este bloque también se puede borrar.
 PROMPT_FACTURAS_PROVEEDORES = (
     "Eres auditor contable. Objetivo: leer FACTURA DE COMPRA. "
     "BC COMBUSTIBLES es RECEPTOR. Buscá CUIT, Fecha, Nº de Factura y Totales. "
@@ -50,8 +54,12 @@ PROMPT_FACTURAS_PROVEEDORES = (
 
 
 # ==========================================
-# 3. GENERADOR DE RESUMEN A CLIENTES / REMITOS (usado por modulos/resumen.py)
+# 3. GENERADOR DE RESUMEN A CLIENTES / REMITOS — VERSIÓN VIEJA (Gemini)
 # ==========================================
+# NOTA (agosto 2026): este prompt de texto libre ya NO lo usa
+# modulos/resumen.py, que migró a Claude con la herramienta
+# HERRAMIENTA_LECTURA_REMITO (más abajo, sección 5). Se deja acá por si
+# quedara alguna otra referencia suelta — no se detectó ninguna esta sesión.
 PROMPT_AUDITORIA_REMITOS = """
 Sos un auditor experto. El Emisor es 'BC COMBUSTIBLES'. Buscá al CLIENTE Receptor y los datos de la carga.
 
@@ -225,4 +233,93 @@ REGLAS DE ORO PARA LEER CADA CHEQUE FÍSICO (aplican en CASO A y CASO C):
 REGLA GENERAL: si dudás de un dato, dejalo en null. NO inventes. Elegí siempre el tipo_comprobante que mejor describa cada uno — no asumas que todo es un cheque.
 
 Usá siempre la herramienta "registrar_cheques_whatsapp" para responder. No respondas con texto libre.
+""".strip()
+
+
+# ==========================================
+# 5. LECTURA DE REMITOS PARA EL GENERADOR DE RESUMEN (usado por
+#    modulos/resumen.py, con Claude — migrado desde Gemini en agosto 2026)
+# ==========================================
+# Reemplaza al PROMPT_AUDITORIA_REMITOS de la sección 3, con el mismo enfoque
+# de "herramienta forzada" que ya usa webhook.py: en vez de pedirle a la IA
+# que devuelva JSON en texto libre y después buscar "{" y "}" a mano, le
+# damos una estructura fija que está obligada a llenar. Esto evita errores
+# de parseo y hace innecesario "limpiar" números a mano (comas, puntos,
+# separadores de miles), porque el campo ya viene tipado como número.
+
+HERRAMIENTA_LECTURA_REMITO = {
+    "name": "registrar_lectura_remito",
+    "description": (
+        "Registra los datos extraídos de un remito o factura de venta a un cliente "
+        "de BC Combustibles, a partir de la foto del comprobante."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "fecha": {
+                "type": ["string", "null"],
+                "description": "Fecha del comprobante, tal como figura en el documento.",
+            },
+            "razon_social": {
+                "type": ["string", "null"],
+                "description": (
+                    "Nombre del CLIENTE receptor. BC COMBUSTIBLES siempre es el "
+                    "emisor de este tipo de comprobante, nunca el receptor."
+                ),
+            },
+            "importe": {
+                "type": ["number", "null"],
+                "description": "Monto total en números, sin separadores de miles ni símbolo de moneda.",
+            },
+            "comprobante": {
+                "type": ["string", "null"],
+                "description": "Número de comprobante.",
+            },
+            "litros": {
+                "type": ["number", "null"],
+                "description": (
+                    "Suma TOTAL de litros de combustible. NO sumes aceites, aditivos "
+                    "ni otros artículos, solo combustibles."
+                ),
+            },
+            "detalle_productos": {
+                "type": ["string", "null"],
+                "description": (
+                    "Resumen de los combustibles y sus litros exactos. Ejemplo: "
+                    "'Euro Diesel G3: 201 L | Gas Oil 500 G2: 81.5 L'. Si es un solo "
+                    "producto, poné solo ese."
+                ),
+            },
+            "observaciones_ia": {
+                "type": "string",
+                "description": (
+                    "Evaluá TODOS los ítems facturados y aplicá esta regla estricta: "
+                    "1) Si SOLO cargó 'Gas Oil 500 G2' (Gasoil normal), devolvé cadena "
+                    "vacía. 2) Si hay 2 o más combustibles diferentes, devolvé "
+                    "'Atención. La factura tiene varios productos.' 3) Si cargó SOLO "
+                    "Euro, devolvé 'Atención. El producto cargado es Euro, verifique.' "
+                    "4) Si cargó SOLO Nafta, devolvé 'Atención. La factura contiene "
+                    "Nafta.' 5) Si hay artículos extra (aceites, filtros, etc.), "
+                    "devolvé 'Atención. La factura contiene artículos extra: "
+                    "[detallar los extra].'"
+                ),
+            },
+        },
+        "required": [
+            "fecha", "razon_social", "importe", "comprobante",
+            "litros", "detalle_productos", "observaciones_ia",
+        ],
+    },
+}
+
+
+def instrucciones_lectura_remito() -> str:
+    return """
+Sos un auditor experto de BC Combustibles. El Emisor de todos los comprobantes es 'BC COMBUSTIBLES'. Tu trabajo es leer el comprobante adjunto y encontrar los datos del CLIENTE Receptor y de la carga de combustible.
+
+REGLA DE ORO: BC COMBUSTIBLES nunca es el receptor, siempre es el emisor. El receptor es el cliente al que hay que identificar.
+
+Si algún dato no es legible con seguridad, dejalo en null (excepto "observaciones_ia", que siempre tiene que llevar un valor, según la regla que ya tenés en la descripción de ese campo).
+
+Usá siempre la herramienta "registrar_lectura_remito" para responder. No respondas con texto libre.
 """.strip()
