@@ -5,8 +5,19 @@ Módulo "Generador de Resumen" de lector.py, separado a su propio archivo.
 Es el módulo más grande de los 4: maneja la lectura con IA de remitos,
 la revisión manual por camión, y la exportación final a Excel.
 
+MIGRADO A CLAUDE (agosto 2026): antes usaba Gemini con un prompt de texto
+libre y parseo manual de JSON (buscando "{" y "}"). Ahora usa Claude con la
+herramienta forzada "registrar_lectura_remito" (ver core/prompts_ia.py),
+el mismo patrón que ya usa webhook.py con los cheques de WhatsApp. Esto
+elimina la necesidad de "limpiar" números a mano, porque el campo ya viene
+tipado como número desde la herramienta.
+
 Se llama desde lector.py así:
-modulo_resumen.mostrar(supabase, cliente_ia, user, NOMBRES_SUCURSALES, COLOR_ROJO)
+modulo_resumen.mostrar(supabase, cliente_claude, user, NOMBRES_SUCURSALES, COLOR_ROJO)
+
+OJO: el segundo parámetro ahora es un cliente de Anthropic (anthropic.Anthropic),
+NO un cliente de Gemini como antes. lector.py tiene que crear ese cliente
+aparte y pasarlo acá.
 """
 import streamlit as st
 import pandas as pd
@@ -15,13 +26,15 @@ import io
 import time
 import re
 import gc
+import base64
 import requests
 from datetime import datetime
-from PIL import Image
 from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
-from core.prompts_ia import PROMPT_AUDITORIA_REMITOS
+from core.prompts_ia import HERRAMIENTA_LECTURA_REMITO, instrucciones_lectura_remito
+
+MODELO_CLAUDE = "claude-sonnet-5"
 
 
 def convertir_a_numero(valor):
@@ -30,7 +43,95 @@ def convertir_a_numero(valor):
     return v
 
 
-def mostrar(supabase, cliente_ia, user, NOMBRES_SUCURSALES, COLOR_ROJO):
+def _num(valor):
+    """Convierte a float de forma segura. Con la herramienta forzada de Claude
+    el campo ya debería venir como número, pero esto es una red de seguridad
+    por si alguna vez llega None o un string raro."""
+    if valor is None:
+        return 0.0
+    try:
+        return float(valor)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _bloque_imagen_claude(bytes_imagen, tipo_mime):
+    return {
+        "type": "image",
+        "source": {
+            "type": "base64",
+            "media_type": tipo_mime,
+            "data": base64.b64encode(bytes_imagen).decode("utf-8"),
+        },
+    }
+
+
+def _leer_remito_con_claude(cliente_claude, bytes_imagen, tipo_mime, id_orden):
+    """
+    Llama a Claude con la herramienta registrar_lectura_remito para leer un
+    remito. Devuelve un diccionario con los datos extraídos, o None si falló
+    después de los reintentos. Muestra avisos en pantalla igual que hacía la
+    versión anterior con Gemini (st.warning / st.error).
+    """
+    intentos_restantes = 3
+    tiempo_espera = 4
+
+    while intentos_restantes > 0:
+        try:
+            respuesta = cliente_claude.messages.create(
+                model=MODELO_CLAUDE,
+                max_tokens=1024,
+                system=instrucciones_lectura_remito(),
+                tools=[HERRAMIENTA_LECTURA_REMITO],
+                tool_choice={"type": "tool", "name": "registrar_lectura_remito"},
+                messages=[{
+                    "role": "user",
+                    "content": [_bloque_imagen_claude(bytes_imagen, tipo_mime)],
+                }],
+            )
+            for bloque in respuesta.content:
+                if bloque.type == "tool_use":
+                    return bloque.input
+
+            st.warning(f"⚠️ Claude no devolvió los datos con la herramienta esperada para la orden #{id_orden}.")
+            return None
+
+        except Exception as e:
+            error_msg = str(e)
+            # Códigos típicos de saturación/error temporal de la API de Anthropic:
+            # 429 (límite de uso), 529 (sobrecargado), 500 (error interno).
+            es_error_temporal = any(
+                codigo in error_msg for codigo in ["429", "529", "500", "overloaded", "rate_limit"]
+            )
+
+            if es_error_temporal:
+                intentos_restantes -= 1
+                if intentos_restantes > 0:
+                    st.warning(f"⏳ Claude saturado. Reintentando orden #{id_orden} en {tiempo_espera} seg...")
+                    time.sleep(tiempo_espera)
+                    tiempo_espera *= 2
+                else:
+                    st.error(f"❌ Falló la orden #{id_orden} después de varios intentos. Intentá más tarde.")
+            else:
+                st.error(f"❌ Falla técnica inesperada en orden #{id_orden}: {error_msg}")
+                return None
+
+    return None
+
+
+def _guardar_datos_ia_en_sesion(id_orden, d_ia):
+    """Vuelca el resultado de _leer_remito_con_claude en st.session_state,
+    con las mismas claves que usaba la versión con Gemini."""
+    st.session_state[f"ia_fec_{id_orden}"] = str(d_ia.get('fecha') or '')
+    st.session_state[f"ia_rs_{id_orden}"] = str(d_ia.get('razon_social') or '')
+    st.session_state[f"ia_lts_{id_orden}"] = _num(d_ia.get('litros'))
+    st.session_state[f"ia_imp_{id_orden}"] = _num(d_ia.get('importe'))
+    st.session_state[f"ia_fac_{id_orden}"] = str(d_ia.get('comprobante') or '')
+    st.session_state[f"ia_prod_{id_orden}"] = str(d_ia.get('detalle_productos') or '')
+    st.session_state[f"ia_obs_{id_orden}"] = str(d_ia.get('observaciones_ia') or '')
+
+
+def mostrar(supabase, cliente_claude, user, NOMBRES_SUCURSALES, COLOR_ROJO):
     if 'resumen_para_cliente' not in st.session_state: st.session_state.resumen_para_cliente = []
     if 'agregados_excel' not in st.session_state: st.session_state.agregados_excel = []
 
@@ -40,8 +141,6 @@ def mostrar(supabase, cliente_ia, user, NOMBRES_SUCURSALES, COLOR_ROJO):
         st.markdown(f'<div class="tarjeta-pro" style="border-left: 5px solid #28a745; padding:15px;">🔓 <strong>Acceso SUPER ADMIN:</strong> Visualizando órdenes de TODAS las sucursales.</div>', unsafe_allow_html=True)
     else:
         st.markdown(f'<div class="tarjeta-pro" style="border-left: 5px solid {COLOR_ROJO}; padding:15px;">📍 <strong>Acceso Zonal:</strong> Visualizando solo órdenes de la sucursal <strong>{NOMBRES_SUCURSALES.get(user["sucursal_id"])}</strong>.</div>', unsafe_allow_html=True)
-
-    PROMPT_AUDITORIA = PROMPT_AUDITORIA_REMITOS
 
     try:
         query = supabase.table("ordenes_carga").select("*, clientes!inner(nombre, formato_especial, sucursal_madre_id)")
@@ -88,76 +187,31 @@ def mostrar(supabase, cliente_ia, user, NOMBRES_SUCURSALES, COLOR_ROJO):
                         barra_p = st.progress(0)
                         ordenes_con_foto = filtro_cliente[filtro_cliente['url_foto'].notnull()]
                         total = len(ordenes_con_foto)
-                        
+
                         if total > 0:
                             for i, (_, fila) in enumerate(ordenes_con_foto.iterrows()):
-                                exito_extraccion = False
-                                intentos_restantes = 3
-                                tiempo_espera = 4  
-                                
-                                while intentos_restantes > 0 and not exito_extraccion:
-                                    try:
-                                        res_img = requests.get(fila['url_foto'])
-                                        img_rem = Image.open(io.BytesIO(res_img.content))
-                                        
-                                        modelo_actual = 'gemini-2.5-pro' if intentos_restantes > 1 else 'gemini-2.5-flash'
-                                        
-                                        res_ia = cliente_ia.models.generate_content(model=modelo_actual, contents=[PROMPT_AUDITORIA, img_rem])
-                                        raw_t = res_ia.text.strip().replace('```json', '').replace('```', '')
-                                        
-                                        start = raw_t.find('{')
-                                        end = raw_t.rfind('}') + 1
-                                        
-                                        if start != -1 and end != 0:
-                                            d_ia = json.loads(raw_t[start:end])
-                                            
-                                            def limpiar_num(v):
-                                                try:
-                                                    txt = str(v).replace('$', '').replace(' ', '').strip()
-                                                    if ',' in txt and '.' in txt: txt = txt.replace('.', '').replace(',', '.')
-                                                    elif ',' in txt: txt = txt.replace(',', '.')
-                                                    return float(txt) if txt else 0.0
-                                                except:
-                                                    return 0.0
-                                            
-                                            st.session_state[f"ia_fec_{fila['id']}"] = str(d_ia.get('fecha', ''))
-                                            st.session_state[f"ia_rs_{fila['id']}"] = str(d_ia.get('razon_social', ''))
-                                            st.session_state[f"ia_lts_{fila['id']}"] = limpiar_num(d_ia.get('litros', 0.0))
-                                            st.session_state[f"ia_imp_{fila['id']}"] = limpiar_num(d_ia.get('importe', 0.0))
-                                            st.session_state[f"ia_fac_{fila['id']}"] = str(d_ia.get('comprobante', ''))
-                                            st.session_state[f"ia_prod_{fila['id']}"] = str(d_ia.get('detalle_productos', ''))
-                                            st.session_state[f"ia_obs_{fila['id']}"] = str(d_ia.get('observaciones_ia', ''))
-                                        else:
-                                            st.warning(f"La IA no devolvió un formato JSON válido para la orden #{fila['id']}")
-                                            
-                                        try: img_rem.close()
-                                        except: pass
-                                        del res_img     
-                                        gc.collect()    
-                                        
-                                        exito_extraccion = True 
-                                        
-                                    except Exception as e:
-                                        error_msg = str(e)
-                                        if "503" in error_msg or "429" in error_msg or "UNAVAILABLE" in error_msg:
-                                            intentos_restantes -= 1
-                                            
-                                            if intentos_restantes > 1:
-                                                st.warning(f"⏳ Google saturado. Reintentando orden #{fila['id']} en {tiempo_espera} seg...")
-                                                time.sleep(tiempo_espera)
-                                                tiempo_espera *= 2 
-                                            elif intentos_restantes == 1:
-                                                st.warning(f"⚠️ Cambiando a modelo de respaldo para la orden #{fila['id']}...")
-                                                time.sleep(2) 
-                                            else:
-                                                st.error(f"❌ Falló la orden #{fila['id']}. Intentá más tarde.")
-                                        else:
-                                            st.error(f"❌ Falla técnica inesperada en orden #{fila['id']}: {error_msg}")
-                                            break 
-                                
+                                try:
+                                    res_img = requests.get(fila['url_foto'])
+                                    tipo_mime = res_img.headers.get("Content-Type", "image/jpeg")
+                                    if not tipo_mime.startswith("image/") and tipo_mime != "application/pdf":
+                                        tipo_mime = "image/jpeg"
+
+                                    d_ia = _leer_remito_con_claude(cliente_claude, res_img.content, tipo_mime, fila['id'])
+                                    if d_ia is not None:
+                                        _guardar_datos_ia_en_sesion(fila['id'], d_ia)
+
+                                    del res_img
+                                    gc.collect()
+
+                                except Exception as e:
+                                    st.error(f"❌ Falla técnica inesperada en orden #{fila['id']}: {e}")
+
                                 barra_p.progress((i + 1) / total)
-                                time.sleep(3)
-                                
+                                # Pausa chica entre pedidos para no saturar la API.
+                                # PENDIENTE DE DEFINIR: ajustar este valor con el uso real,
+                                # antes era 3 seg. porque Gemini se saturaba seguido.
+                                time.sleep(1)
+
                         st.session_state[clave_estado_ia] = True
                         st.success("✅ Extracción completa.")
                         time.sleep(2)
@@ -185,74 +239,31 @@ def mostrar(supabase, cliente_ia, user, NOMBRES_SUCURSALES, COLOR_ROJO):
                         if foto_nueva:
                             if st.button("💾 Guardar y Analizar Nueva Foto", key=f"btn_up_{fila['id']}", type="primary"):
                                 with st.spinner("Subiendo imagen y analizando..."):
-                                    exito_extraccion_manual = False
-                                    intentos_restantes_manual = 3
-                                    tiempo_espera_manual = 4
-                                    
-                                    while intentos_restantes_manual > 0 and not exito_extraccion_manual:
-                                        try:
-                                            timestamp = int(time.time())
-                                            nombre_archivo = f"ADMIN_Orden{fila['id']}_{timestamp}_remito.jpg"
-                                            file_bytes = foto_nueva.getvalue()
-                                            
-                                            supabase.storage.from_("remitos").upload(
-                                                path=nombre_archivo, file=file_bytes, file_options={"content-type": foto_nueva.type}
-                                            )
-                                            
-                                            url_publica = supabase.storage.from_("remitos").get_public_url(nombre_archivo)
-                                            supabase.table("ordenes_carga").update({
-                                                "url_foto": url_publica, "motivo_sin_foto": "Corregido por Auditoría"
-                                            }).eq("id", fila['id']).execute()
-                                            
-                                            modelo_actual_manual = 'gemini-2.5-pro' if intentos_restantes_manual > 1 else 'gemini-2.5-flash'
-                                            
-                                            img_rem = Image.open(io.BytesIO(file_bytes))
-                                            res_ia = cliente_ia.models.generate_content(model=modelo_actual_manual, contents=[PROMPT_AUDITORIA, img_rem])
-                                            
-                                            raw_t = res_ia.text.strip().replace('```json', '').replace('```', '')
-                                            start = raw_t.find('{')
-                                            end = raw_t.rfind('}') + 1
-                                            if start != -1 and end != 0:
-                                                d_ia = json.loads(raw_t[start:end])
-                                                def limpiar_num(v):
-                                                    try:
-                                                        txt = str(v).replace('$', '').replace(' ', '').strip()
-                                                        if ',' in txt and '.' in txt: txt = txt.replace('.', '').replace(',', '.')
-                                                        elif ',' in txt: txt = txt.replace(',', '.')
-                                                        return float(txt) if txt else 0.0
-                                                    except: return 0.0
-                                                
-                                                st.session_state[f"ia_fec_{fila['id']}"] = str(d_ia.get('fecha', ''))
-                                                st.session_state[f"ia_rs_{fila['id']}"] = str(d_ia.get('razon_social', ''))
-                                                st.session_state[f"ia_lts_{fila['id']}"] = limpiar_num(d_ia.get('litros', 0.0))
-                                                st.session_state[f"ia_imp_{fila['id']}"] = limpiar_num(d_ia.get('importe', 0.0))
-                                                st.session_state[f"ia_fac_{fila['id']}"] = str(d_ia.get('comprobante', ''))
-                                                st.session_state[f"ia_prod_{fila['id']}"] = str(d_ia.get('detalle_productos', ''))
-                                                st.session_state[f"ia_obs_{fila['id']}"] = str(d_ia.get('observaciones_ia', ''))
-                                            
-                                            try: img_rem.close()
-                                            except: pass
-                                            gc.collect()
-                                            
-                                            exito_extraccion_manual = True
-                                            st.success("✅ ¡Foto actualizada y leída por IA! Recargando...")
-                                            time.sleep(1.5)
-                                            st.rerun()
-                                            
-                                        except Exception as e:
-                                            error_msg_manual = str(e)
-                                            if "503" in error_msg_manual or "429" in error_msg_manual or "UNAVAILABLE" in error_msg_manual:
-                                                intentos_restantes_manual -= 1
-                                                if intentos_restantes_manual > 1:
-                                                    time.sleep(tiempo_espera_manual)
-                                                    tiempo_espera_manual *= 2 
-                                                elif intentos_restantes_manual == 1:
-                                                    time.sleep(2) 
-                                                else:
-                                                    st.error(f"❌ Falló incluso con el modelo de respaldo.")
-                                            else:
-                                                st.error(f"❌ Falla técnica inesperada.")
-                                                break
+                                    try:
+                                        timestamp = int(time.time())
+                                        nombre_archivo = f"ADMIN_Orden{fila['id']}_{timestamp}_remito.jpg"
+                                        file_bytes = foto_nueva.getvalue()
+                                        tipo_mime = foto_nueva.type or "image/jpeg"
+
+                                        supabase.storage.from_("remitos").upload(
+                                            path=nombre_archivo, file=file_bytes, file_options={"content-type": tipo_mime}
+                                        )
+
+                                        url_publica = supabase.storage.from_("remitos").get_public_url(nombre_archivo)
+                                        supabase.table("ordenes_carga").update({
+                                            "url_foto": url_publica, "motivo_sin_foto": "Corregido por Auditoría"
+                                        }).eq("id", fila['id']).execute()
+
+                                        d_ia = _leer_remito_con_claude(cliente_claude, file_bytes, tipo_mime, fila['id'])
+                                        if d_ia is not None:
+                                            _guardar_datos_ia_en_sesion(fila['id'], d_ia)
+
+                                        st.success("✅ ¡Foto actualizada y leída por Claude! Recargando...")
+                                        time.sleep(1.5)
+                                        st.rerun()
+
+                                    except Exception as e:
+                                        st.error(f"❌ Falla técnica inesperada: {e}")
                             
                     with c2:
                         if fila['id'] in st.session_state.agregados_excel:
