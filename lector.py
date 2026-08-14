@@ -1,5 +1,6 @@
 import streamlit as st
 from google import genai
+import anthropic
 from pypdf import PdfReader
 from PIL import Image
 import pandas as pd
@@ -72,7 +73,14 @@ st.markdown(f"""
     </style>
 """, unsafe_allow_html=True)
 
+# Cliente de Gemini: todavía lo usan Verificación BCRA y Facturas de Proveedores.
 cliente_ia = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
+
+# Cliente de Claude: usado por el Generador de Resumen (migrado en agosto 2026).
+# IMPORTANTE: hay que cargar el secret ANTHROPIC_API_KEY en esta app de Streamlit
+# Cloud puntual ("BC Combustibles - Gestión Pro") — cada app tiene su propia
+# bóveda de secrets, cargarlo acá no lo carga automáticamente en las otras.
+cliente_claude = anthropic.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
 
 URL_LOGO_OFICIAL = "https://bjhykcdhafoqpfkpngvw.supabase.co/storage/v1/object/public/remitos/Logo%20nuevo.png"
 
@@ -141,7 +149,6 @@ with col_perfil:
     """, unsafe_allow_html=True)
 
 with col_salir:
-    # Agregamos use_container_width=True para que el botón se acomode bien
     if st.button("**🚪 Salir**", use_container_width=True):
         st.session_state.usuario_autenticado = None
         st.rerun()
@@ -154,7 +161,6 @@ opcion = option_menu(
     default_index=0,
     orientation="horizontal",
     styles={
-        # Le sacamos el 0 al padding y le ponemos 10px para que la barra recupere su altura normal
         "container": {"padding": "10px!important", "background-color": COLOR_GRIS_BC, "border-radius": "8px", "margin-top": "15px"},
         "icon": {"color": "#FFFFFF", "font-size": "15px"}, 
         "nav-link": {"color": "#FFFFFF", "font-size": "13px", "text-align": "center", "margin":"0px", "--hover-color": "#4A4A4A"},
@@ -181,7 +187,7 @@ if opcion == "Facturas de Proveedores":
 # 4. MÓDULO: GENERADOR DE RESUMEN A CLIENTES
 # ==========================================
 elif opcion == "Generador de Resumen":
-    modulo_resumen.mostrar(supabase, cliente_ia, user, NOMBRES_SUCURSALES, COLOR_ROJO)
+    modulo_resumen.mostrar(supabase, cliente_claude, user, NOMBRES_SUCURSALES, COLOR_ROJO)
 
 # ==========================================
 # 5. MÓDULO: VERIFICACIÓN BCRA Y CHEQUES (IA AVANZADA)
