@@ -3,7 +3,13 @@ modulos/verificacion_bcra.py
 
 Módulo "Verificación BCRA" de lector.py, separado a su propio archivo.
 
-Se llama desde lector.py así: modulo_bcra.mostrar(supabase, cliente_ia)
+MIGRADO A CLAUDE (agosto 2026): el escáner de cheques (pestaña "Escáner de
+Cheques IA Pro") ahora usa Claude a través de utils_bcra.procesar_lote_cheques_ia,
+que migró de Gemini a Claude. Por eso el segundo parámetro de mostrar() ahora
+tiene que ser un cliente de Anthropic (anthropic.Anthropic), no un cliente de
+Gemini como antes.
+
+Se llama desde lector.py así: modulo_bcra.mostrar(supabase, cliente_claude)
 """
 import streamlit as st
 import utils_bcra
@@ -21,7 +27,7 @@ from PIL import Image
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
-def mostrar(supabase, cliente_ia):
+def mostrar(supabase, cliente_claude):
     # --- INTERFAZ CON 3 PESTAÑAS ---
     tab_manual, tab_ia, tab_masivo = st.tabs(["✍️ Consulta Manual", "📸 Escáner de Cheques (IA Pro)", "📋 Carga Masiva (Excel)"])
 
@@ -83,10 +89,10 @@ def mostrar(supabase, cliente_ia):
                         img = Image.open(foto)
                         img.thumbnail((2500, 3000), Image.Resampling.LANCZOS)
 
-                        lista_cheques = utils_bcra.procesar_lote_cheques_ia(cliente_ia, img)
+                        lista_cheques = utils_bcra.procesar_lote_cheques_ia(cliente_claude, img)
 
-                        for cheque in lista_cheques:
-                            cuit_limpio = re.sub(r'\D', '', str(cheque.get("cuit", "")))
+                        for numero_orden, cheque in enumerate(lista_cheques, start=1):
+                            cuit_limpio = re.sub(r'\D', '', str(cheque.get("cuit") or ""))
                             datos_bcra = None
 
                             if len(cuit_limpio) == 11:
@@ -95,7 +101,7 @@ def mostrar(supabase, cliente_ia):
 
                             st.session_state['lote_procesado'].append({
                                 "img": img,
-                                "id": cheque.get("id"),
+                                "id": numero_orden,
                                 "numero_cheque": cheque.get("numero_cheque"),
                                 "emisor": cheque.get("emisor"),
                                 "cuit": cheque.get("cuit"),
