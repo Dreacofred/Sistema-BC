@@ -5,16 +5,24 @@ Acá viven los prompts que se le mandan a Gemini y a Claude. Antes estaban
 escritos sueltos adentro de utils_bcra.py y lector.py; ahora viven acá para
 que, si el día de mañana hay que ajustar una regla, se toque un solo lugar.
 
-Nota: los prompts de proveedores y remitos (versión vieja, Gemini) los usan
-lector.py / modulos/. La herramienta HERRAMIENTA_CHEQUES_WHATSAPP y las
-instrucciones INSTRUCCIONES_CHEQUES_WHATSAPP las usa webhook.py (bot de
-WhatsApp, con Claude/Anthropic). La herramienta HERRAMIENTA_LECTURA_REMITO
-la usa modulos/resumen.py (migrado de Gemini a Claude en agosto 2026).
+Nota: el prompt de proveedores (versión vieja, Gemini) lo usa
+modulos/proveedores.py — que Diego va a sacar del sistema, no se va a migrar.
+La herramienta HERRAMIENTA_CHEQUES_WHATSAPP y las instrucciones
+INSTRUCCIONES_CHEQUES_WHATSAPP las usa webhook.py (bot de WhatsApp, con
+Claude/Anthropic). La herramienta HERRAMIENTA_LECTURA_REMITO la usa
+modulos/resumen.py (migrado de Gemini a Claude en agosto 2026). La
+herramienta HERRAMIENTA_LECTURA_CHEQUES_BCRA la usa utils_bcra.py, para el
+escáner de cheques del módulo Verificación BCRA (migrado de Gemini a Claude
+en agosto 2026).
 """
 
 # ==========================================
-# 1. LECTURA DE CHEQUES (ya en uso por utils_bcra.py, con Gemini)
+# 1. LECTURA DE CHEQUES — VERSIÓN VIEJA (Gemini)
 # ==========================================
+# NOTA (agosto 2026): este prompt de texto libre ya NO lo usa utils_bcra.py,
+# que migró a Claude con la herramienta HERRAMIENTA_LECTURA_CHEQUES_BCRA (ver
+# sección 6, al final del archivo). Se deja acá por si quedara alguna otra
+# referencia suelta — no se detectó ninguna esta sesión.
 PROMPT_LECTURA_CHEQUES = """
 Actúa como un auditor senior de BC Combustibles. Analiza esta foto que contiene un lote de cheques físicos.
 
@@ -322,4 +330,80 @@ REGLA DE ORO: BC COMBUSTIBLES nunca es el receptor, siempre es el emisor. El rec
 Si algún dato no es legible con seguridad, dejalo en null (excepto "observaciones_ia", que siempre tiene que llevar un valor, según la regla que ya tenés en la descripción de ese campo).
 
 Usá siempre la herramienta "registrar_lectura_remito" para responder. No respondas con texto libre.
+""".strip()
+
+
+# ==========================================
+# 6. LECTURA DE CHEQUES PARA EL ESCÁNER DE VERIFICACIÓN BCRA (usado por
+#    utils_bcra.py, con Claude — migrado desde Gemini en agosto 2026)
+# ==========================================
+# Reemplaza al PROMPT_LECTURA_CHEQUES de la sección 1, con el mismo enfoque
+# de "herramienta forzada" que ya usan webhook.py y modulos/resumen.py.
+# OJO: este es un caso DISTINTO al de HERRAMIENTA_CHEQUES_WHATSAPP — acá el
+# objetivo es identificar rápido número de cheque + emisor + CUIT para
+# consultarlos contra el BCRA, no registrar un cobro completo con banco,
+# cuenta, montos y fechas.
+
+HERRAMIENTA_LECTURA_CHEQUES_BCRA = {
+    "name": "registrar_cheques_para_verificacion",
+    "description": (
+        "Registra los cheques físicos detectados en la foto, para consultarlos "
+        "después contra la Central de Deudores del BCRA."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "cheques": {
+                "type": "array",
+                "description": "Un objeto por cada cheque físico visible en la foto, de arriba hacia abajo.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "numero_cheque": {
+                            "type": ["string", "null"],
+                            "description": (
+                                "Número del cheque. Generalmente está en la esquina superior "
+                                "derecha o en la serie de números de la banda inferior."
+                            ),
+                        },
+                        "emisor": {
+                            "type": ["string", "null"],
+                            "description": (
+                                "Razón social del EMISOR real del cheque. NUNCA el nombre que "
+                                "sigue a 'Páguese a' (ese es el beneficiario). Andá a la parte "
+                                "INFERIOR del cheque, junto a la firma o el logo del banco, y "
+                                "extraé de ahí el nombre del titular."
+                            ),
+                        },
+                        "cuit": {
+                            "type": ["string", "null"],
+                            "description": (
+                                "CUIT de 11 dígitos del emisor (suelen empezar con 20, 23, 27 o "
+                                "30), tomado de la misma zona que la razón social del emisor."
+                            ),
+                        },
+                    },
+                    "required": ["numero_cheque", "emisor", "cuit"],
+                },
+            },
+        },
+        "required": ["cheques"],
+    },
+}
+
+
+def instrucciones_lectura_cheques_bcra() -> str:
+    return """
+Actuá como un auditor senior de BC Combustibles. Analizá esta foto que contiene un lote de cheques físicos.
+
+REGLAS DE ORO (Aislamiento de Datos):
+1. Analizá los cheques visualmente de arriba hacia abajo.
+2. El Emisor del cheque NUNCA es el nombre que sigue a "Páguese a". Ignorá ese nombre gigante.
+3. Andá siempre a la parte INFERIOR del cheque (junto a la firma o el logo del banco).
+4. Extraé de ahí el CUIT (11 dígitos, suelen empezar con 20, 23, 27, 30) y la Razón Social del EMISOR.
+5. Buscá el NÚMERO DEL CHEQUE. Generalmente está en la esquina superior derecha o en la serie de números de la banda inferior.
+
+Si un dato no es legible con un 100% de seguridad, dejalo en null en ese campo específico. NO inventes.
+
+Usá siempre la herramienta "registrar_cheques_para_verificacion" para responder. No respondas con texto libre.
 """.strip()
