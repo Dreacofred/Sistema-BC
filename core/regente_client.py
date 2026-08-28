@@ -122,33 +122,91 @@ def _headers():
 # ==========================================
 def buscar_sujeto_por_cuit(cuit: str):
     """
-    Busca un sujeto en Regente por CUIT (sin guiones ni espacios).
-    Devuelve el diccionario del sujeto si lo encuentra, o None si no existe.
+    Intenta buscar un sujeto en Regente por CUIT.
 
-    Esta función NO crea nada — es de solo lectura. Se usa como el primer
-    paso del flujo (ver si el emisor de un cheque ya existe antes de decidir
-    si hace falta darlo de alta).
+    OJO — LIMITACIÓN CONFIRMADA (28/08/2026): Damián probó esto de su lado y
+    confirmó que el parámetro "q" de este endpoint SOLO busca por el
+    descriptor/nombre del sujeto, no por CUIT. Está agendado para agregarse
+    en una futura versión de la API, pero hoy esta función NO va a encontrar
+    nada buscando por CUIT. Se deja implementada (con el formato de
+    respuesta ya corregido) para cuando esa mejora esté disponible — hasta
+    entonces, usar `buscar_cuenta_por_numero` y `buscar_sujetos_por_apellido`
+    (más abajo) para resolver el emisor.
     """
     base_url, _, _ = _obtener_credenciales()
     cuit_limpio = "".join(c for c in str(cuit) if c.isdigit())
 
     respuesta = requests.get(
         f"{base_url}/api/v1/rgSujetoNg",
-        params={"cuit": cuit_limpio},
+        params={"q": cuit_limpio, "limite": 0},
         headers=_headers(),
         timeout=15,
     )
     respuesta.raise_for_status()
-    resultados = respuesta.json()
+    datos = respuesta.json()
+    resultados = datos.get("data") or []
+    return resultados[0] if resultados else None
 
-    # PENDIENTE DE VERIFICAR: no tenemos confirmado todavía el formato exacto
-    # de la respuesta (si es una lista directa, o un objeto con una clave
-    # "datos"/"resultados" adentro). Este código asume que es una lista
-    # directa de sujetos que hacen match. Hay que confirmarlo con un GET real
-    # antes de usar esta función en la integración de verdad.
-    if isinstance(resultados, list):
-        return resultados[0] if resultados else None
-    return resultados or None
+
+def buscar_cuenta_por_numero(numero_cuenta: str, id_adm_esperado=None):
+    """
+    Busca en rgSujetoCuentaNg (tabla sujetos_bancos_cuentas de Regente) por
+    número de cuenta bancaria. CONFIRMADO Y PROBADO el 28/08/2026 en Swagger
+    contra un caso real (cuenta 1234/5 -> id_sujeto 2158).
+
+    Regente busca por "contiene" (con % adelante), así que acá filtramos
+    nosotros mismos por coincidencia EXACTA del número de cuenta (y, si se
+    pasa, también del banco) para evitar falsos positivos de ese "contiene".
+
+    Devuelve una lista (puede tener 0, 1, o más de 1 resultado — lo normal
+    es 0 o 1; más de 1 sería un caso raro a revisar a mano).
+    """
+    base_url, _, _ = _obtener_credenciales()
+    cuenta_limpia = str(numero_cuenta or "").strip()
+    if not cuenta_limpia:
+        return []
+
+    respuesta = requests.get(
+        f"{base_url}/api/v1/rgSujetoCuentaNg",
+        params={"q": f"%{cuenta_limpia}", "limite": 0},
+        headers=_headers(),
+        timeout=15,
+    )
+    respuesta.raise_for_status()
+    datos = respuesta.json()
+    resultados = datos.get("data") or []
+
+    exactos = [r for r in resultados if str(r.get("cuenta", "")).strip() == cuenta_limpia]
+    if id_adm_esperado is not None:
+        exactos = [r for r in exactos if str(r.get("id_adm")) == str(id_adm_esperado)]
+    return exactos
+
+
+def buscar_sujetos_por_apellido(apellido: str):
+    """
+    Busca en rgSujetoNg por apellido/nombre (búsqueda por "contiene", con %).
+    CONFIRMADO Y PROBADO el 26/08/2026 (caso real: %FOCHESATTO -> 2 resultados).
+
+    Devuelve la lista cruda de resultados tal cual los da Regente. Cada
+    resultado trae, además de "id_sujeto" y "sujeto" (nombre), un campo sin
+    nombre propio (aparece como "?column?" en la respuesta) con el domicilio,
+    la localidad y el CUIT todos concatenados en un solo texto — hay que
+    parsearlo para sacar el CUIT (ver core/regente_resolucion.py).
+    """
+    base_url, _, _ = _obtener_credenciales()
+    texto = str(apellido or "").strip()
+    if not texto:
+        return []
+
+    respuesta = requests.get(
+        f"{base_url}/api/v1/rgSujetoNg",
+        params={"q": f"%{texto}", "limite": 0},
+        headers=_headers(),
+        timeout=15,
+    )
+    respuesta.raise_for_status()
+    datos = respuesta.json()
+    return datos.get("data") or []
 
 
 # ==========================================
