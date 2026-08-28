@@ -216,3 +216,122 @@ if cliente_sel != "--- Elegí un cliente ---":
                 except Exception as e:
                     st.error(f"Error al guardar: {e}")
         st.markdown("</div>", unsafe_allow_html=True)
+
+        # ==========================================
+        # 7. (NUEVO) VISTA PREVIA DE INTEGRACIÓN CON REGENTE
+        # ==========================================
+        # Este bloque es 100% aparte de todo lo de arriba. NO reemplaza el
+        # CSV ni el cierre de lote — es solo una herramienta de prueba para
+        # ir viendo cómo se comportaría la integración real con Regente,
+        # antes de conectarla de verdad. NO manda ni crea nada en Regente,
+        # NI modifica nada en Supabase. Solo hace consultas de LECTURA.
+        st.markdown("<br>", unsafe_allow_html=True)
+        with st.expander("🧪 Vista previa de integración con Regente (no manda nada, solo prueba)"):
+            st.caption(
+                "Arma los datos tal como se mandarían a Regente y consulta si "
+                "cada emisor ya existe (búsqueda real, de solo lectura). "
+                "No crea ni modifica nada en Regente ni en Supabase."
+            )
+            if st.button("🔍 Generar vista previa"):
+                try:
+                    from core.regente_mapeo import armar_grupos_para_regente
+                    from core.regente_resolucion import resolver_emisor
+
+                    # 1. Buscar el id_sujeto_regente del cliente en Supabase
+                    res_cliente = (
+                        supabase.table("clientes")
+                        .select("id_sujeto_regente")
+                        .eq("nombre", cliente_sel)
+                        .execute()
+                    )
+                    id_sujeto_cliente = (
+                        res_cliente.data[0]["id_sujeto_regente"] if res_cliente.data else None
+                    )
+
+                    if not id_sujeto_cliente:
+                        st.error(
+                            f"⚠️ El cliente '{cliente_sel}' no tiene cargado su "
+                            "id_sujeto_regente en la tabla clientes de Supabase. "
+                            "No se puede armar el Recibo sin ese dato."
+                        )
+                    else:
+                        # 2. Armar las filas del lote: tipo_comprobante original
+                        #    + los datos ya corregidos en la auditoría
+                        filas_lote = []
+                        for cid in df_lote["id"]:
+                            fila_original = df_lote[df_lote["id"] == cid].iloc[0]
+                            datos_fila = dict(st.session_state.datos_corregidos[cid])
+                            datos_fila["id"] = cid
+                            datos_fila["tipo_comprobante"] = fila_original.get("tipo_comprobante")
+                            filas_lote.append(datos_fila)
+
+                        # 3. Armar los grupos (Recibo + Valores) — sin llamar a ninguna API
+                        resultado = armar_grupos_para_regente(filas_lote, id_sujeto_cliente)
+
+                        if resultado["sin_procesar"]:
+                            st.warning("⚠️ Hay filas que no se pueden mandar automáticamente:")
+                            for item in resultado["sin_procesar"]:
+                                st.write(f"- Fila {item['fila_id']}: {item['motivo']}")
+
+                        if not resultado["grupos"]:
+                            st.info("No hay ningún grupo armable en este lote.")
+                        else:
+                            for grupo in resultado["grupos"]:
+                                st.markdown(
+                                    f"#### 📦 Grupo: {grupo['tipo_grupo']} "
+                                    f"({len(grupo['valores'])} valor(es))"
+                                )
+                                st.json(grupo["recibo"], expanded=False)
+
+                                for valor in grupo["valores"]:
+                                    dv = valor["datos_valor"]
+                                    emisor = valor["emisor"]
+
+                                    st.markdown(
+                                        f"**Fila {valor['_fila_id']}** — "
+                                        f"{emisor['sujeto']} (CUIT {emisor['cuit']}) — "
+                                        f"${dv['monto']:,.2f}"
+                                    )
+
+                                    with st.spinner(f"Consultando Regente para {emisor['sujeto']}..."):
+                                        try:
+                                            decision = resolver_emisor(
+                                                cuit_cheque=emisor["cuit"],
+                                                razon_social_cheque=emisor["sujeto"],
+                                                numero_cuenta=dv["nro_cuenta"],
+                                                id_adm=dv["id_adm"],
+                                            )
+                                        except Exception as e:
+                                            st.error(f"❌ Error consultando Regente: {e}")
+                                            continue
+
+                                    if decision["accion"] == "usar_existente":
+                                        st.success(
+                                            f"✅ Sujeto ya existe (id_sujeto={decision['id_sujeto']}). "
+                                            f"{decision['motivo']}"
+                                        )
+                                    elif decision["accion"] == "crear_cuenta_para_existente":
+                                        st.info(
+                                            f"ℹ️ Sujeto existente (id_sujeto={decision['id_sujeto']}), "
+                                            f"falta crear la cuenta. {decision['motivo']}"
+                                        )
+                                    elif decision["accion"] == "crear_sujeto_y_cuenta":
+                                        st.warning(
+                                            f"🆕 Emisor nuevo, habría que crear sujeto y cuenta. "
+                                            f"{decision['motivo']}"
+                                        )
+                                    else:
+                                        st.error(f"⚠️ Caso dudoso, revisar a mano. {decision['motivo']}")
+
+                                st.markdown("<hr>", unsafe_allow_html=True)
+
+                except RuntimeError as e:
+                    st.error(
+                        f"⚠️ Faltan credenciales de Regente: {e}\n\n"
+                        "Revisá que REGENTE_API_URL, REGENTE_API_USUARIO y "
+                        "REGENTE_API_TOKEN estén cargados en los Secrets de esta app "
+                        "(la de lector.py, ya que bot.py corre adentro de ella vía "
+                        "Laboratorio IA)."
+                    )
+                except Exception as e:
+                    st.error(f"❌ Error inesperado armando la vista previa: {e}")
