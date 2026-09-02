@@ -4,6 +4,8 @@ import pandas as pd
 from supabase import create_client, Client
 import time
 
+from core.cuentas_propias import resolver_banco_destino
+
 # ==========================================
 # 1. CREDENCIALES
 # ==========================================
@@ -104,6 +106,28 @@ if cliente_sel != "--- Elegí un cliente ---":
                         st.session_state.cheques_listos.remove(cid)
                         st.rerun()
                 else:
+                    # Si falta el código de banco (típico en eCheqs y
+                    # transferencias, que casi nunca lo traen impreso),
+                    # intentamos resolverlo solos comparando los datos de
+                    # destino que extrajo la IA contra las cuentas propias
+                    # de BC ya cargadas en Supabase.
+                    codigo_banco_sugerido = fila.get('codigo_banco', '')
+                    if not str(codigo_banco_sugerido or '').strip():
+                        cuenta_resuelta = resolver_banco_destino(
+                            supabase,
+                            cuenta_destino=fila.get('cuenta_destino'),
+                            cbu_cvu_destino=fila.get('cbu_cvu_destino'),
+                            alias_destino=fila.get('alias_destino'),
+                        )
+                        if cuenta_resuelta:
+                            codigo_banco_sugerido = cuenta_resuelta.get('codigo_banco') or ''
+                            st.success(f"🏦 Banco de destino detectado automáticamente: **{cuenta_resuelta['banco']}**")
+                        elif fila.get('tipo_comprobante') == 'Transferencia':
+                            st.warning(
+                                "⚠️ No se pudo identificar automáticamente el banco de destino. "
+                                "Completalo a mano si lo sabés."
+                            )
+
                     with st.form(f"form_cheque_{cid}"):
                         st.markdown("📝 **Completá o corregí:**")
 
@@ -120,7 +144,7 @@ if cliente_sel != "--- Elegí un cliente ---":
                         f_monto = crear_campo("Monto ($)", fila.get('monto', 0.0), tipo="numero")
                         f_emi = crear_campo("Emisión", fila.get('fecha_emision', ''))
                         f_pago = crear_campo("Vencimiento", fila.get('fecha_pago', ''))
-                        f_banco = crear_campo("Cód. Banco", fila.get('codigo_banco', ''))
+                        f_banco = crear_campo("Cód. Banco", codigo_banco_sugerido)
                         f_sucursal = crear_campo("Cód. Sucursal", fila.get('codigo_sucursal', ''))
                         f_cuenta = crear_campo("Nº Cuenta", fila.get('numero_cuenta', ''))
                         f_cuit = crear_campo("CUIT Emisor", fila.get('cuit_emisor', ''))
