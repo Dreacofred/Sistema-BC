@@ -196,7 +196,34 @@ HERRAMIENTA_CHEQUES_WHATSAPP = {
                                 "Para cheques: el texto impreso junto al CUIT, en la zona de firma/datos "
                                 "del titular del cheque. NUNCA el nombre que sigue a 'Páguese a' o "
                                 "'A la orden de' (ese es el beneficiario, no el emisor). Para "
-                                "transferencias: el nombre de quien envía el dinero."
+                                "transferencias: el nombre de quien envía el dinero (titular de la "
+                                "cuenta de ORIGEN). Si el comprobante no identifica claramente al "
+                                "emisor, dejá este campo en null — no asumas ni inventes."
+                            ),
+                        },
+                        "cuenta_destino": {
+                            "type": ["string", "null"],
+                            "description": (
+                                "SOLO para tipo_comprobante = 'Transferencia'. El número de cuenta "
+                                "bancaria de DESTINO (la cuenta a la que entró la plata), tal como "
+                                "figura en el comprobante, sin guiones ni espacios. Null si no aplica "
+                                "(no es una transferencia) o no figura en el documento. NUNCA pongas "
+                                "acá un dato del emisor/origen."
+                            ),
+                        },
+                        "cbu_cvu_destino": {
+                            "type": ["string", "null"],
+                            "description": (
+                                "SOLO para tipo_comprobante = 'Transferencia'. El CBU o CVU de DESTINO "
+                                "(a donde entró la plata), sin espacios. Null si no aplica o no figura."
+                            ),
+                        },
+                        "alias_destino": {
+                            "type": ["string", "null"],
+                            "description": (
+                                "SOLO para tipo_comprobante = 'Transferencia'. El alias bancario de la "
+                                "cuenta de DESTINO (ej: 'bccombustibles.mp'), tal como figura en el "
+                                "comprobante. Null si no aplica o no figura."
                             ),
                         },
                     },
@@ -228,8 +255,16 @@ Si alguno de los archivos es un comprobante de LIQUIDACIÓN o RESUMEN DE DEPÓSI
 - Si un instrumento de la liquidación no tiene ninguna foto con el mismo monto, igual generá el comprobante con el monto de la liquidación, dejando emisor/cuit/numero_identificador en null si no los podés determinar.
 - Completá "total_declarado" con el TOTAL general que figura en la liquidación.
 
-CASO D — Comprobantes que no son cheques:
-Si alguno de los archivos es una transferencia bancaria (comprobante de "Transferencia enviada", "Transferencia recibida", o similar, SIN número de cheque), generá un comprobante con tipo_comprobante = "Transferencia". Usá como "numero_identificador" el número de operación/comprobante si figura, y como "razon_social_emisor" el nombre de quien envía el dinero.
+CASO D — Comprobantes que no son cheques (Transferencias):
+Si alguno de los archivos es una transferencia bancaria (comprobante de "Transferencia enviada", "Transferencia recibida", "Endoso de eCheq/echeq a...", o similar, SIN número de cheque), generá un comprobante con tipo_comprobante = "Transferencia". Usá como "numero_identificador" el número de operación/comprobante si figura.
+
+Datos del EMISOR (quien envía la plata — la cuenta de ORIGEN):
+- "razon_social_emisor" y "cuit_emisor": el nombre y CUIT de quien envía el dinero.
+- ⚠️ MUY IMPORTANTE: si en el comprobante aparece el nombre "BONAZZOLA FLORENCIA Y BUYATTI ANDRES" (o cualquier variante parecida), ESE ES BC COMBUSTIBLES — es el nombre bajo el cual BC recibe pagos, NUNCA es el emisor. Si ese nombre (o el nombre de BC) aparece asociado a "Beneficiario", "Destino", "Titular de la cuenta destino", o similar, corresponde a los campos de DESTINO de abajo, no a "razon_social_emisor".
+- Si el comprobante no identifica con claridad quién es el verdadero emisor (por ejemplo, solo muestra un número de cuenta de origen sin nombre ni CUIT asociado), dejá "razon_social_emisor" y "cuit_emisor" en null — no asumas que es el cliente del lote, no inventes.
+
+Datos del DESTINO (la cuenta de BC a la que entró la plata):
+- "cuenta_destino", "cbu_cvu_destino", "alias_destino": completá los que figuren en el comprobante (puede venir uno, dos, o los tres juntos). Dejalos en null si no aplican o no figuran. NUNCA pongas ahí datos del emisor/origen.
 
 REGLAS DE ORO PARA LEER CADA CHEQUE FÍSICO (aplican en CASO A y CASO C):
 1. El Emisor del cheque NUNCA es el nombre que sigue a "Páguese a" o "A la orden de". Ignorá ese nombre.
