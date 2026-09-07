@@ -14,8 +14,14 @@ Se llama desde lector.py así: modulo_bcra.mostrar(supabase, cliente_claude)
 DETALLE DE RIESGO (septiembre 2026): utils_bcra.consultar_bcra_completo ahora
 devuelve, además de los campos de siempre, "detalle_entidades" (una fila por
 banco donde el CUIT tiene deuda informada) y "detalle_cheques" (una fila por
-cheque rechazado, con fecha, causal, monto y entidad). Este módulo los muestra
-en desplegables (st.expander) en las tres pestañas.
+cheque rechazado, con fecha, causal, monto y nombre de entidad). Este módulo
+los muestra en desplegables (st.expander) en las tres pestañas.
+
+En "Carga Masiva", la tabla de resultados es interactiva (st.dataframe con
+on_select="rerun"): al hacer clic en una fila se muestra el detalle de ese
+CUIT debajo, con los desplegables ya abiertos. OJO: esto requiere Streamlit
+1.35 o superior. Si al desplegar tira error en esa línea, revisar la versión
+fijada en requirements.txt.
 """
 import streamlit as st
 import utils_bcra
@@ -33,22 +39,25 @@ from PIL import Image
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
-def _mostrar_detalle_bcra(datos, key_prefix=""):
+def _mostrar_detalle_bcra(datos, key_prefix="", expandido=False):
     """
     Dibuja los dos desplegables de detalle (entidades y cheques rechazados)
     para un diccionario "datos" devuelto por utils_bcra.consultar_bcra_completo.
     Se usa en las tres pestañas para no repetir el mismo bloque de código.
+    "key_prefix" evita colisiones de key cuando se llama varias veces en un
+    mismo rerun (por ejemplo, una vez por cada cheque del lote).
+    "expandido" controla si el desplegable arranca abierto o cerrado.
     """
     detalle_entidades = datos.get("detalle_entidades") or []
     detalle_cheques = datos.get("detalle_cheques") or []
 
     if detalle_entidades:
-        with st.expander(f"📊 Ver detalle por entidad ({len(detalle_entidades)})", expanded=False):
-            st.dataframe(pd.DataFrame(detalle_entidades), use_container_width=True, hide_index=True)
+        with st.expander(f"📊 Ver detalle por entidad ({len(detalle_entidades)})", expanded=expandido):
+            st.dataframe(pd.DataFrame(detalle_entidades), use_container_width=True, hide_index=True, key=f"df_entidades_{key_prefix}")
 
     if detalle_cheques:
-        with st.expander(f"📄 Ver detalle de cheques rechazados ({len(detalle_cheques)})", expanded=False):
-            st.dataframe(pd.DataFrame(detalle_cheques), use_container_width=True, hide_index=True)
+        with st.expander(f"📄 Ver detalle de cheques rechazados ({len(detalle_cheques)})", expanded=expandido):
+            st.dataframe(pd.DataFrame(detalle_cheques), use_container_width=True, hide_index=True, key=f"df_cheques_{key_prefix}")
 
 
 def mostrar(supabase, cliente_claude):
@@ -76,6 +85,7 @@ def mostrar(supabase, cliente_claude):
                         datos = utils_bcra.consultar_bcra_completo(cuit_limpio)
                         if datos and not datos.get("error_api"):
                             st.session_state['ultimo_resultado_manual'] = datos
+                            st.session_state['ultimo_cuit_manual'] = cuit_limpio
                         elif datos and datos.get("error_api"):
                             st.session_state['ultimo_resultado_manual'] = None
                             st.error(f"Falla de conexión con el túnel (ScraperAPI): {datos['error_api']}")
@@ -101,7 +111,8 @@ def mostrar(supabase, cliente_claude):
 
             if datos['cheques_rechazados'] > 0:
                 if st.button("Confirmar y Enviar a Lista Negra", key="btn_save_manual"):
-                    utils_bcra.guardar_en_lista_negra(supabase, cuit_limpio if 'cuit_limpio' in dir() else re.sub(r'\D', '', cuit_input), datos['situacion'], datos['denominacion'], f"Rechazos: {datos['cheques_rechazados']}")
+                    cuit_guardar = st.session_state.get('ultimo_cuit_manual', re.sub(r'\D', '', cuit_input))
+                    utils_bcra.guardar_en_lista_negra(supabase, cuit_guardar, datos['situacion'], datos['denominacion'], f"Rechazos: {datos['cheques_rechazados']}")
         st.markdown('</div>', unsafe_allow_html=True)
 
     # ==========================================
@@ -251,7 +262,16 @@ def mostrar(supabase, cliente_claude):
 
         if st.session_state.get('resultados_masivos'):
             df_masivo = pd.DataFrame(st.session_state['resultados_masivos'])
-            st.dataframe(df_masivo, use_container_width=True)
+
+            st.caption("💡 Hacé clic en una fila de la tabla para ver el detalle de ese CUIT más abajo.")
+            evento_tabla = st.dataframe(
+                df_masivo,
+                use_container_width=True,
+                hide_index=True,
+                on_select="rerun",
+                selection_mode="single-row",
+                key="tabla_resultados_masivos",
+            )
 
             st.markdown("<br>", unsafe_allow_html=True)
             col_btn1, col_btn2 = st.columns(2)
@@ -272,28 +292,27 @@ def mostrar(supabase, cliente_claude):
                 st.session_state['datos_completos_masivos'] = {}
                 st.rerun()
 
-            # --- DETALLE POR CUIT SELECCIONADO ---
-            # No se puede desplegar el detalle "adentro" de una fila de
-            # st.dataframe, así que se elige el CUIT en un selector aparte y
-            # el detalle se muestra debajo, sin desarmar la tabla general.
-            if st.session_state.get('datos_completos_masivos'):
-                st.markdown("#### 🔍 Ver detalle de un CUIT en particular")
-                cuits_disponibles = list(st.session_state['datos_completos_masivos'].keys())
-                cuit_seleccionado = st.selectbox(
-                    "Elegí un CUIT de la lista procesada",
-                    cuits_disponibles,
-                    key="select_detalle_masivo"
-                )
+            # --- DETALLE DEL CUIT SELECCIONADO (clic en la fila) ---
+            filas_seleccionadas = []
+            if evento_tabla and getattr(evento_tabla, "selection", None):
+                filas_seleccionadas = evento_tabla.selection.rows
+
+            if filas_seleccionadas:
+                idx_sel = filas_seleccionadas[0]
+                cuit_seleccionado = str(df_masivo.iloc[idx_sel]["CUIT"])
                 datos_sel = st.session_state['datos_completos_masivos'].get(cuit_seleccionado)
 
+                st.markdown(f"#### 🔍 Detalle — CUIT {cuit_seleccionado}")
                 if datos_sel and not datos_sel.get("error_api"):
                     detalle_entidades = datos_sel.get("detalle_entidades") or []
                     detalle_cheques = datos_sel.get("detalle_cheques") or []
                     if detalle_entidades or detalle_cheques:
-                        _mostrar_detalle_bcra(datos_sel, key_prefix=f"masivo_{cuit_seleccionado}")
+                        _mostrar_detalle_bcra(datos_sel, key_prefix=f"masivo_{cuit_seleccionado}", expandido=True)
                     else:
                         st.info("Sin deudas ni cheques rechazados informados para este CUIT.")
                 else:
                     st.warning("No se pudo obtener el detalle de este CUIT (falló la consulta).")
+            else:
+                st.caption("Ningún CUIT seleccionado todavía.")
 
         st.markdown('</div>', unsafe_allow_html=True)
