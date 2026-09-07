@@ -19,60 +19,52 @@ MODELO_CLAUDE = "claude-sonnet-5"
 # ==========================================
 # 1. FUNCIÓN DE CONSULTA AL BCRA (NUEVO TÚNEL SCRAPEOPS)
 # ==========================================
-@st.cache_data(ttl=60 * 60 * 24)
-def _obtener_mapa_entidades():
-    """
-    Trae el listado de entidades financieras del BCRA (código -> nombre) desde
-    /cheques/v1.0/entidades y lo cachea por 24hs, para no gastar una consulta
-    de ScrapeOps extra por cada CUIT consultado. Se usa para traducir el
-    código numérico de entidad que devuelve el endpoint de Cheques Rechazados
-    a un nombre de banco legible. Si falla, devuelve un diccionario vacío
-    (los códigos se muestran tal cual, sin romper nada).
-    """
-    mapa = {}
-    try:
-        url_entidades = "https://api.bcra.gob.ar/cheques/v1.0/entidades"
-        payload = {'api_key': API_KEY_SCRAPEOPS, 'url': url_entidades}
-        res = requests.get('https://proxy.scrapeops.io/v1/', params=payload, timeout=30)
-        if res.status_code == 200:
-            data = res.json()
-            for e in data.get("results", []):
-                codigo = str(e.get("codigoEntidad", ""))
-                nombre = e.get("denominacion", codigo)
-                if codigo:
-                    mapa[codigo] = nombre
-    except Exception:
-        pass
-    return mapa
-
-
-def _parsear_detalle_cheques(data_ch, mapa_entidades=None):
+def _parsear_detalle_cheques(data_ch):
     """
     Recorre la estructura real que devuelve el BCRA para
-    /Deudas/ChequesRechazados/{cuit} (agrupada por causal y entidad) y la
-    aplana en una lista simple de cheques, uno por fila, para mostrar en
-    tabla. Devuelve lista vacía si no hay resultados o la estructura no es
-    la esperada. Si se pasa "mapa_entidades" (código -> nombre), traduce el
-    código de entidad a nombre de banco; si no lo encuentra en el mapa, deja
-    el código tal cual.
+    /Deudas/ChequesRechazados/{cuit} y la aplana en una lista simple de
+    cheques, uno por fila, para mostrar en tabla.
+
+    OJO: el campo "entidad" que trae este endpoint NO es un código de banco
+    real (no coincide con /cheques/v1.0/entidades) — es solo un número de
+    posición del grupo dentro de la respuesta. El BCRA no expone
+    públicamente qué banco rechazó cada cheque puntual, así que ese dato no
+    se incluye acá para no mostrar información engañosa.
+
+    Sobre la multa: el BCRA manda "estadoMulta" (ej. "IMPAGA") cuando la
+    multa sigue sin pagarse, y "fechaPagoMulta" con una fecha cuando ya se
+    pagó — son mutuamente excluyentes en la práctica. Se normalizan acá en
+    una sola columna "Multa" con el texto "Pagada" o "Impaga", para no
+    obligar a interpretar el crudo.
+
+    Devuelve lista vacía si no hay resultados o la estructura no es la
+    esperada.
     """
-    mapa_entidades = mapa_entidades or {}
     detalle = []
     try:
         resultados = data_ch.get("results", {})
         for bloque_causal in resultados.get("causales", []):
             causal = bloque_causal.get("causal", "Sin especificar")
             for bloque_entidad in bloque_causal.get("entidades", []):
-                codigo_entidad = str(bloque_entidad.get("entidad", "Desconocida"))
-                nombre_entidad = mapa_entidades.get(codigo_entidad, f"Entidad {codigo_entidad}")
                 for cheque in bloque_entidad.get("detalle", []):
+                    fecha_pago_multa = cheque.get("fechaPagoMulta")
+                    estado_multa_raw = cheque.get("estadoMulta")
+
+                    if fecha_pago_multa:
+                        estado_multa = "Pagada"
+                    elif estado_multa_raw:
+                        estado_multa = estado_multa_raw.capitalize()
+                    else:
+                        estado_multa = "-"
+
                     detalle.append({
                         "Nº Cheque": cheque.get("nroCheque", "-"),
                         "Causal": causal,
                         "Fecha Rechazo": cheque.get("fechaRechazo", "-"),
                         "Fecha Pago": cheque.get("fechaPago") or "Sin pagar",
                         "Monto": cheque.get("monto", "-"),
-                        "Entidad": nombre_entidad,
+                        "Multa": estado_multa,
+                        "Fecha Pago Multa": fecha_pago_multa or "-",
                     })
     except Exception:
         pass
@@ -84,9 +76,8 @@ def _parsear_detalle_entidades(entidades_periodo):
     Recibe la lista de entidades del período más reciente (tal cual la
     devuelve el BCRA en /Deudas/{cuit} -> results.periodos[0].entidades) y
     arma una tabla con una fila por banco/entidad: situación, monto y días
-    de atraso. Antes solo se miraba la primera entidad de la lista; esto
-    trae el detalle completo de todos los bancos donde el CUIT tiene deuda
-    informada en el último período.
+    de atraso. Acá sí viene el nombre real del banco (a diferencia del
+    endpoint de cheques rechazados).
     """
     detalle = []
     try:
@@ -146,8 +137,7 @@ def consultar_bcra_completo(cuit):
         if res_cheque.status_code == 200:
             try:
                 data_ch = res_cheque.json()
-                mapa_entidades = _obtener_mapa_entidades()
-                detalle_cheques = _parsear_detalle_cheques(data_ch, mapa_entidades)
+                detalle_cheques = _parsear_detalle_cheques(data_ch)
                 datos_cliente['detalle_cheques'] = detalle_cheques
                 datos_cliente['cheques_rechazados'] = len(detalle_cheques)
             except Exception: 
