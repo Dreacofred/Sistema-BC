@@ -19,12 +19,41 @@ MODELO_CLAUDE = "claude-sonnet-5"
 # ==========================================
 # 1. FUNCIÓN DE CONSULTA AL BCRA (NUEVO TÚNEL SCRAPEOPS)
 # ==========================================
+def _parsear_detalle_cheques(data_ch):
+    """
+    Recorre la estructura real que devuelve el BCRA para
+    /Deudas/ChequesRechazados/{cuit} (agrupada por causal y entidad) y la
+    aplana en una lista simple de cheques, uno por fila, para mostrar en
+    tabla. Devuelve lista vacía si no hay resultados o la estructura no es
+    la esperada.
+    """
+    detalle = []
+    try:
+        resultados = data_ch.get("results", {})
+        for bloque_causal in resultados.get("causales", []):
+            causal = bloque_causal.get("causal", "Sin especificar")
+            for bloque_entidad in bloque_causal.get("entidades", []):
+                entidad = bloque_entidad.get("entidad", "Desconocida")
+                for cheque in bloque_entidad.get("detalle", []):
+                    detalle.append({
+                        "Nº Cheque": cheque.get("nroCheque", "-"),
+                        "Causal": causal,
+                        "Fecha Rechazo": cheque.get("fechaRechazo", "-"),
+                        "Fecha Pago": cheque.get("fechaPago") or "Sin pagar",
+                        "Monto": cheque.get("monto", "-"),
+                        "Entidad": entidad,
+                    })
+    except Exception:
+        pass
+    return detalle
+
+
 def consultar_bcra_completo(cuit):
     cuit = str(cuit).strip()
     url_deudas = f"https://api.bcra.gob.ar/centraldedeudores/v1.0/Deudas/{cuit}"
     url_cheques = f"https://api.bcra.gob.ar/centraldedeudores/v1.0/Deudas/ChequesRechazados/{cuit}"
     
-    datos_cliente = {"situacion": 1, "entidad": "Sin Registros", "denominacion": "Cliente Desconocido", "cheques_rechazados": 0, "error_api": False}
+    datos_cliente = {"situacion": 1, "entidad": "Sin Registros", "denominacion": "Cliente Desconocido", "cheques_rechazados": 0, "detalle_cheques": [], "error_api": False}
     
     try:
         payload_deudas = {'api_key': API_KEY_SCRAPEOPS, 'url': url_deudas}
@@ -57,17 +86,12 @@ def consultar_bcra_completo(cuit):
         if res_cheque.status_code == 200:
             try:
                 data_ch = res_cheque.json()
-                json_str = json.dumps(data_ch).lower()
-                conteo_real = max(
-                    json_str.count('"nrocheque"'),
-                    json_str.count('"fecharechazo"'),
-                    json_str.count('"numerocheque"')
-                )
-                if conteo_real == 0 and data_ch.get("results"):
-                    conteo_real = 1
-                datos_cliente['cheques_rechazados'] = conteo_real
+                detalle_cheques = _parsear_detalle_cheques(data_ch)
+                datos_cliente['detalle_cheques'] = detalle_cheques
+                datos_cliente['cheques_rechazados'] = len(detalle_cheques)
             except Exception: 
                 datos_cliente['cheques_rechazados'] = -1
+                datos_cliente['detalle_cheques'] = []
                 
         elif res_cheque.status_code == 404: 
             datos_cliente['cheques_rechazados'] = 0
