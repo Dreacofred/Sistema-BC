@@ -48,12 +48,35 @@ def _parsear_detalle_cheques(data_ch):
     return detalle
 
 
+def _parsear_detalle_entidades(entidades_periodo):
+    """
+    Recibe la lista de entidades del período más reciente (tal cual la
+    devuelve el BCRA en /Deudas/{cuit} -> results.periodos[0].entidades) y
+    arma una tabla con una fila por banco/entidad: situación, monto y días
+    de atraso. Antes solo se miraba la primera entidad de la lista; esto
+    trae el detalle completo de todos los bancos donde el CUIT tiene deuda
+    informada en el último período.
+    """
+    detalle = []
+    try:
+        for e in entidades_periodo:
+            detalle.append({
+                "Entidad": e.get("entidad", "Desconocida"),
+                "Situación": e.get("situacion", "-"),
+                "Monto (miles $)": e.get("monto", "-"),
+                "Días Atraso": e.get("diasAtrasoPago", "-"),
+            })
+    except Exception:
+        pass
+    return detalle
+
+
 def consultar_bcra_completo(cuit):
     cuit = str(cuit).strip()
     url_deudas = f"https://api.bcra.gob.ar/centraldedeudores/v1.0/Deudas/{cuit}"
     url_cheques = f"https://api.bcra.gob.ar/centraldedeudores/v1.0/Deudas/ChequesRechazados/{cuit}"
     
-    datos_cliente = {"situacion": 1, "entidad": "Sin Registros", "denominacion": "Cliente Desconocido", "cheques_rechazados": 0, "detalle_cheques": [], "error_api": False}
+    datos_cliente = {"situacion": 1, "entidad": "Sin Registros", "denominacion": "Cliente Desconocido", "cheques_rechazados": 0, "detalle_cheques": [], "detalle_entidades": [], "error_api": False}
     
     try:
         payload_deudas = {'api_key': API_KEY_SCRAPEOPS, 'url': url_deudas}
@@ -70,9 +93,15 @@ def consultar_bcra_completo(cuit):
                     datos_cliente['denominacion'] = res.get('denominacion', 'Cliente')
                     periodos = res.get('periodos', [])
                     if periodos and 'entidades' in periodos[0] and periodos[0]['entidades']:
-                        entity_info = periodos[0]['entidades'][0]
-                        datos_cliente['situacion'] = entity_info.get("situacion", 1)
-                        datos_cliente['entidad'] = entity_info.get("entidad", "Entidad Financiera")
+                        entidades_periodo = periodos[0]['entidades']
+                        datos_cliente['detalle_entidades'] = _parsear_detalle_entidades(entidades_periodo)
+
+                        # Situación = la PEOR de todas las entidades del período (más
+                        # conservador que mirar solo la primera de la lista, como
+                        # se hacía antes).
+                        peor_entidad = max(entidades_periodo, key=lambda e: e.get("situacion", 1))
+                        datos_cliente['situacion'] = peor_entidad.get("situacion", 1)
+                        datos_cliente['entidad'] = peor_entidad.get("entidad", "Entidad Financiera")
             except Exception: pass
         
         time.sleep(1) 
