@@ -39,6 +39,52 @@ from PIL import Image
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
+# Colores para pintar filas enteras en las tablas de detalle (semáforo).
+COLOR_VERDE_CLARO = "#C8E6C9"   # Multa Pagada / Situación 1
+COLOR_ROJO_CLARO = "#FFCDD2"    # Multa Impaga / Situación 2
+COLOR_ROJO_MEDIO = "#EF9A9A"    # Situación 3
+COLOR_ROJO_FUERTE = "#E57373"   # Situación 4
+COLOR_ROJO_INTENSO = "#EF5350"  # Situación 5
+COLOR_ROJO_MAXIMO = "#B71C1C"   # Situación 6 o superior (por las dudas)
+
+
+def _pintar_fila_cheques(fila):
+    """Devuelve el estilo CSS de toda la fila según si el CHEQUE fue pagado
+    (verde clarito) o no (rojo clarito). Ojo: esto mira la columna "Fecha
+    Pago" (pago del cheque en sí), NO la columna "Multa" (que es sobre la
+    multa que aplica el BCRA por el rechazo — son cosas distintas). Si
+    "Fecha Pago" tiene una fecha real, el cheque se pagó; si dice
+    "Sin pagar", no. Se usa con df.style.apply(axis=1)."""
+    color = COLOR_ROJO_CLARO if fila.get("Fecha Pago") == "Sin pagar" else COLOR_VERDE_CLARO
+    return [f"background-color: {color}"] * len(fila)
+
+
+def _pintar_fila_entidades(fila):
+    """Devuelve el estilo CSS de toda la fila según la Situación BCRA:
+    1 = verde clarito, y de 2 a 5 (o más) va de rojo clarito a rojo intenso.
+    Se usa con df.style.apply(axis=1)."""
+    colores_por_situacion = {
+        1: COLOR_VERDE_CLARO,
+        2: COLOR_ROJO_CLARO,
+        3: COLOR_ROJO_MEDIO,
+        4: COLOR_ROJO_FUERTE,
+        5: COLOR_ROJO_INTENSO,
+    }
+    try:
+        situacion = int(fila.get("Situación"))
+    except (TypeError, ValueError):
+        situacion = None
+
+    if situacion in colores_por_situacion:
+        color = colores_por_situacion[situacion]
+    elif situacion is not None and situacion > 5:
+        color = COLOR_ROJO_MAXIMO
+    else:
+        color = "#FFFFFF"  # Situación desconocida ("-"), sin pintar
+
+    return [f"background-color: {color}"] * len(fila)
+
+
 def _mostrar_detalle_bcra(datos, key_prefix="", expandido=False):
     """
     Dibuja los dos desplegables de detalle (entidades y cheques rechazados)
@@ -47,17 +93,29 @@ def _mostrar_detalle_bcra(datos, key_prefix="", expandido=False):
     "key_prefix" evita colisiones de key cuando se llama varias veces en un
     mismo rerun (por ejemplo, una vez por cada cheque del lote).
     "expandido" controla si el desplegable arranca abierto o cerrado.
+
+    Las filas se pintan tipo semáforo (ver _pintar_fila_cheques y
+    _pintar_fila_entidades más arriba) para que de un vistazo se note qué
+    cheque está pagado y qué situación crediticia tiene cada entidad.
     """
     detalle_entidades = datos.get("detalle_entidades") or []
     detalle_cheques = datos.get("detalle_cheques") or []
 
     if detalle_entidades:
         with st.expander(f"📊 Ver detalle por entidad ({len(detalle_entidades)})", expanded=expandido):
-            st.dataframe(pd.DataFrame(detalle_entidades), use_container_width=True, hide_index=True, key=f"df_entidades_{key_prefix}")
+            df_entidades = pd.DataFrame(detalle_entidades)
+            st.dataframe(
+                df_entidades.style.apply(_pintar_fila_entidades, axis=1),
+                use_container_width=True, hide_index=True, key=f"df_entidades_{key_prefix}"
+            )
 
     if detalle_cheques:
         with st.expander(f"📄 Ver detalle de cheques rechazados ({len(detalle_cheques)})", expanded=expandido):
-            st.dataframe(pd.DataFrame(detalle_cheques), use_container_width=True, hide_index=True, key=f"df_cheques_{key_prefix}")
+            df_cheques = pd.DataFrame(detalle_cheques)
+            st.dataframe(
+                df_cheques.style.apply(_pintar_fila_cheques, axis=1),
+                use_container_width=True, hide_index=True, key=f"df_cheques_{key_prefix}"
+            )
 
 
 def mostrar(supabase, cliente_claude):
