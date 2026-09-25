@@ -52,6 +52,8 @@ los parseadores de la sección 3, pero conviene saberlos):
 import re
 import requests
 
+from concurrent.futures import ThreadPoolExecutor
+
 from datetime import date, datetime, timedelta
 
 from core.regente_client import obtener_base_url, obtener_jwt, invalidar_jwt
@@ -582,7 +584,75 @@ def buscar_cliente_por_cuit(cuit, supabase=None):
 
 
 # ==========================================
-# 8. AYUDAS PARA LA PANTALLA
+# 8. QUIÉN PAGA LA CUENTA (ENTIDADES PAGADORAS)
+# ==========================================
+# Una "entidad pagadora" es un cliente que manda a cargar combustible a otras
+# personas o empresas: las cargas se facturan a nombre de esos terceros, pero
+# las paga ella. Si no se sabe, se le reclama al que no debe pagar.
+#
+# CÓMO SE REGISTRA EN REGENTE (verificado el 25/09/2026): NO está en la ficha
+# del cliente. La tabla sujetos_relacion tiene un tipo "Pagadora" (id_rel = 5),
+# pero en los casos reales que miramos está vacía. El vínculo real vive en
+# CADA COMPROBANTE, en su subtabla "compgarantes": la factura del cliente 4181
+# (PICONE MARIANO LUIS) tiene como garante al 1058 (RUIZ MARCELO HUGO), y eso
+# es lo que la caja de Regente muestra entre paréntesis al lado del nombre.
+#
+# OJO CON EL COSTO: hay que pedir el comprobante entero, uno por uno. Por eso
+# se consultan solo unos pocos y en paralelo — ver obtener_pagadores_de_deuda.
+def obtener_garantes(id_comp):
+    """
+    Los garantes de un comprobante: quién responde por esa factura además del
+    cliente facturado. Devuelve [{"id_sujeto", "nombre", "doc"}, ...], vacío si
+    no tiene.
+    """
+    data = _get(f"/rgComprobanteNg/{id_comp}") or {}
+    bloque = data.get("compgarantes") or {}
+    return [
+        {
+            "id_sujeto": _a_int(g.get("id_sujeto")),
+            "nombre": g.get("sujeto") or "",
+            "doc": g.get("doc") or "",
+        }
+        for g in (bloque.get("data") or [])
+        if g.get("id_sujeto")
+    ]
+
+
+def obtener_pagadores_de_deuda(deuda, max_comprobantes=3, max_hilos=3):
+    """
+    Mira los primeros comprobantes pendientes de un cliente y devuelve quiénes
+    figuran como garantes, o sea quién paga esa cuenta. Lista sin repetidos.
+
+    Es una MUESTRA, no un relevamiento completo: consultar los garantes de cada
+    comprobante cuesta una consulta por comprobante, y un cliente puede tener
+    decenas. Con tres alcanza para detectar el caso, porque cuando hay una
+    entidad pagadora suele ser la misma en todos. Los tres van en paralelo, así
+    que el costo es el de una sola consulta.
+    """
+    filas = (deuda or {}).get("filas") or []
+    ids = []
+    for f in filas:
+        if f.get("id_comp") and f["id_comp"] not in ids:
+            ids.append(f["id_comp"])
+        if len(ids) >= max_comprobantes:
+            break
+    if not ids:
+        return []
+
+    with ThreadPoolExecutor(max_workers=max_hilos) as ejecutor:
+        resultados = list(ejecutor.map(obtener_garantes, ids))
+
+    pagadores, vistos = [], set()
+    for lista in resultados:
+        for g in lista:
+            if g["id_sujeto"] not in vistos:
+                vistos.add(g["id_sujeto"])
+                pagadores.append(g)
+    return pagadores
+
+
+# ==========================================
+# 9. AYUDAS PARA LA PANTALLA
 # ==========================================
 def rango_de_fechas_por_defecto(meses_atras=6):
     """

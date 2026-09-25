@@ -104,6 +104,39 @@ def _dato(etiqueta, valor, color=COLOR_GRIS):
     )
 
 
+def _linea_pagadores(deuda):
+    """
+    Si los comprobantes del cliente tienen un garante, es que la cuenta la paga
+    otro (una "entidad pagadora"): quien la mire tiene que saberlo antes de
+    salir a reclamarle al cliente equivocado.
+
+    Si la consulta falla, se avisa en vez de callarse: no mostrar nada se leería
+    como "no tiene pagadora", que es justo la conclusión errónea.
+    """
+    try:
+        pagadores = utils_regente.obtener_pagadores_de_deuda(deuda)
+    except ErrorRegente:
+        st.caption("No se pudo verificar si esta cuenta la paga un tercero.")
+        return
+
+    if not pagadores:
+        return
+
+    nombres = " · ".join(
+        f"{p['nombre']} ({p['id_sujeto']})" for p in pagadores
+    )
+    st.markdown(
+        f'<div style="margin:2px 0 14px 0;padding:8px 12px;border-radius:8px;'
+        f'background:#FFF4E5;border-left:4px solid #F9A825;font-size:14px;'
+        f'color:{COLOR_GRIS};">'
+        f'<b>Esta cuenta la paga:</b> {nombres}'
+        f'<div style="font-size:12px;color:{COLOR_GRIS_SUAVE};margin-top:2px;">'
+        f'Figura como garante de sus comprobantes. La cobranza va contra esa '
+        f'cuenta, no contra este cliente.</div></div>',
+        unsafe_allow_html=True,
+    )
+
+
 def _vencimiento_mas_viejo(deuda):
     """
     El vencimiento pendiente más viejo entre las filas que SUMAN deuda (las
@@ -567,6 +600,7 @@ def _mostrar_cuenta(id_sujeto, nombre):
             unsafe_allow_html=True,
         )
 
+        _linea_pagadores(deuda)
         _mostrar_resumen(estado, deuda)
         st.divider()
         _mostrar_deuda(deuda)

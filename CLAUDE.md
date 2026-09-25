@@ -102,6 +102,17 @@ dependen de que Regente habilite `estado_cuenta` y `listado` **sin `id_sujeto`**
 (pedido el 25/09/2026): sin eso no se puede listar a todos los deudores, y una
 lista de cobranza incompleta no sirve.
 
+### Entidades pagadoras
+
+Un cliente puede tener sus facturas pagadas por otro. Eso se ve en los
+**garantes del comprobante**, así que la ficha consulta los garantes de sus
+primeros comprobantes pendientes y, si aparece alguien, avisa **"Esta cuenta la
+paga: …"**. Cuesta una consulta por comprobante, por eso se miran solo tres y en
+paralelo (`utils_regente.obtener_pagadores_de_deuda`).
+
+Al revés todavía no se puede: desde la entidad pagadora no hay forma de listar a
+quiénes les paga, y por eso su saldo aislado engaña. Está en los pendientes.
+
 ### El semáforo
 
 El color **se calcula, no se guarda** (`core/semaforo.py`): verde hasta 2 días
@@ -183,7 +194,28 @@ No se mandaron todavía, a la espera de la respuesta al primer mail:
    listado multi-cliente no va a traer ese detalle**: si devuelve estos mismos
    campos rotos, el ranking de atrasados va a salir mal ordenado. Hay que
    pedirle a Damián que los revise junto con los puntos 1 y 2.
-4. **Paginación en `rgSujetoNg`** — hoy devuelve como máximo 500 filas aun con
+4. **La deuda no consolida las entidades pagadoras.** Una entidad pagadora es
+   un cliente que manda a cargar combustible a otros: las cargas se facturan a
+   nombre de esos terceros, pero las paga ella. El vínculo está en los
+   **garantes de cada comprobante** (subtabla `compgarantes`), no en la ficha
+   del cliente: ojo que `sujetos_relacion` tiene un tipo "Pagadora"
+   (`id_rel` = 5) que en la práctica está vacío. **La pantalla de caja de
+   Regente consolida la deuda**, pero la API no. Caso verificado el 25/09/2026
+   con el cliente 1058:
+
+   | | Total |
+   |---|---|
+   | `GET /rgCompCuotaNg/deuda?id_sujeto=1058` | −6.088.623,87 |
+   | Caja de Regente, mismo cliente | −402.259,66 |
+
+   Sin consolidar, una entidad pagadora aparenta millones a favor y sus
+   clientes figuran como deudores sin serlo. Hay que pedir que la deuda y el
+   estado de cuenta se puedan calcular consolidados como la caja, o al menos
+   poder consultar los comprobantes por su garante (hoy solo se puede ir del
+   cliente facturado hacia su pagadora, leyendo `compgarantes` comprobante por
+   comprobante: eso es lo que hace `utils_regente.obtener_garantes()`).
+
+5. **Paginación en `rgSujetoNg`** — hoy devuelve como máximo 500 filas aun con
    `limite=0`, y no tiene `offset`. Con el punto 1 resuelto deja de hacer falta.
 
 ### Otros pendientes del proyecto
