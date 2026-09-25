@@ -250,7 +250,30 @@ if cliente_sel != "--- Elegí un cliente ---":
         # antes de conectarla de verdad. NO manda ni crea nada en Regente,
         # NI modifica nada en Supabase. Solo hace consultas de LECTURA.
         st.markdown("<br>", unsafe_allow_html=True)
-        with st.expander("🧪 Vista previa de integración con Regente (no manda nada, solo prueba)"):
+        with st.expander("⚠️ Vista previa de integración con Regente (no confiable — ver aviso)"):
+            # AVISO (25/09/2026): core/regente_resolucion.py busca el CUIT del
+            # emisor dentro de un campo llamado "?column?" que la API de Regente
+            # ya no devuelve — hoy ese campo se llama "detalle_adic". Como el
+            # CUIT le sale siempre vacío, la comparación por CUIT nunca coincide
+            # y TODOS los emisores terminan clasificados como nuevos.
+            #
+            # A propósito NO se parchea el nombre del campo: todo ese rodeo
+            # (buscar por apellido y parsear un texto concatenado) existía solo
+            # porque no se podía buscar por CUIT, y desde el 10/09/2026 existe
+            # GET /rgSujetoNg/buscar?criterio=D:{cuit}, que lo resuelve en una
+            # consulta y trae el CUIT en su propio campo. La función se reescribe
+            # entera junto con core/regente_mapeo.py —que también quedó obsoleto
+            # por el mecanismo de escritura (PUT rgCajaNg)— cuando llegue la spec
+            # del bloque detalles."0". Ver CLAUDE.md.
+            st.warning(
+                "**Esta vista previa todavía no es confiable.** Por un error "
+                "conocido al resolver los emisores, van a aparecer **todos** "
+                "como nuevos (habría que crear sujeto y cuenta), incluso los "
+                "que ya están cargados en Regente. El armado de los grupos, "
+                "los importes y los datos de cada cheque sí son correctos: lo "
+                "único que no hay que creerle es la conclusión sobre el emisor. "
+                "Se arregla cuando se rehaga la integración con Regente."
+            )
             st.caption(
                 "Arma los datos tal como se mandarían a Regente y consulta si "
                 "cada emisor ya existe (búsqueda real, de solo lectura). "
