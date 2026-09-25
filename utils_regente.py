@@ -395,6 +395,12 @@ def obtener_estado_cuenta(id_sujeto, toda_la_deuda=True, fecha_desde=None,
     OJO con id_area: 0 = todas las sucursales, y eso requiere el permiso 879.
     Si el usuario de integración no lo tuviera, la respuesta puede venir vacía
     aunque el cliente sí tenga deuda en otra sucursal.
+
+    Probado el 25/09/2026 con el cliente 2824: con id_area=0 devuelve el estado
+    de cuenta completo, y filtrando por sucursal suelta devuelve VACÍO en tres
+    de las cuatro (solo la 2 trae datos). O sea que pasar un id_area concreto
+    puede esconder deuda real del cliente en otras sucursales. Si algún día se
+    agrega un filtro por sucursal a la pantalla, tenerlo muy presente.
     """
     params = {
         "id_sujeto": id_sujeto,

@@ -26,8 +26,14 @@ credenciales de `ia_client` no llegan a esas bases (probado).
 
 ## Reglas de trabajo
 
-- **Nunca commitear ni pushear sin confirmación explícita de Diego**, mostrando
-  antes qué archivos entran y el mensaje de commit propuesto.
+- **Commits, según de qué sean** (regla ajustada con Diego el 25/09/2026):
+  - *Documentación, comentarios, textos de pantalla y cambios cosméticos*:
+    alcanza con avisarle qué archivos entran, y se commitea directo.
+  - *Cambios de lógica*: se le muestran los archivos **y el mensaje propuesto**,
+    y se espera su OK. Cuenta como lógica todo lo que toque `webhook.py`, la
+    integración con Regente, las consultas a Supabase o el flujo de auditoría.
+  - **Ante la duda, se trata como lógica.**
+  - El push es una decisión aparte: si no lo pidió, se pregunta.
 - **Las credenciales van siempre en `st.secrets`** (Streamlit) o en variables de
   entorno (Render). Nunca hardcodeadas. `.streamlit/secrets.toml` está en
   `.gitignore`.
@@ -296,6 +302,22 @@ módulo de `modulos/` solo con la pantalla.**
   una lista vacía, no con un error.
 - El usuario de integración necesita los permisos 112, 144, 221, 691, 879 y 984.
   Si le vence la contraseña en Regente, la API empieza a devolver 403.
+- **No hay más endpoints que buscar.** El OpenAPI (`/openapi.json`) declara
+  **696 rutas**, pero solo **seis tienen lógica propia**: los cuatro de cuenta
+  corriente, `/rgSujetoNg/buscar` y `/clases`. Todo el resto es el CRUD genérico
+  de cada tabla (`rgLoQueSea/` con `q`, `clave`, `limite` y `campos_busq`).
+  Revisado entero el 25/09/2026.
+- **El CRUD genérico no sirve para traer volumen**, aunque parezca el atajo
+  obvio: `rgComprobanteNg/?q=%` devuelve **500 a los 32 segundos** (el corte del
+  servidor) y `rgCompCuotaNg/` devuelve `ok:false` con cero filas. Sí sirve para
+  filtrar por un campo puntual: `campos_busq` acepta el nombre de la columna.
+- **Cuánto tarda, si alguna vez hay que barrer muchos clientes** (medido el
+  25/09/2026 contra el servidor real): **1,41 s por cliente** de a uno, y
+  **0,46 s por cliente con 4 hilos**, sin un solo error. Con 4 hilos, 500
+  clientes son unos 4 minutos. Ojo que **el túnel ngrok empieza a cortar
+  conexiones cuando le entra una ráfaga larga** — pasó a las ~190 consultas
+  seguidas —, así que cualquier barrido tiene que reintentar y, sobre todo,
+  **informar lo que no pudo resolver en vez de descartarlo en silencio**.
 
 ## El módulo de Cuentas Corrientes
 
@@ -422,6 +444,21 @@ sigue llamando a Gemini es `modulos/proveedores.py`, que quedó fuera de la app.
 
 `REGENTE_API_URL` va **sin** el `/api/v1` final: eso lo agrega el código.
 
+### Para correr algo en local
+
+Hay un `.streamlit/secrets.toml` en la máquina de Diego (ignorado por git) que
+tiene **solo las tres credenciales de Regente**; las otras cuatro están
+comentadas. Por eso **`lector.py` entero no levanta en local**: falla al pedir
+`SUPABASE_URL` apenas arranca.
+
+Para ver el módulo de Cuentas Corrientes sin esos secrets está
+`scripts/preview_cuenta_corriente.py`, que corre esa pantalla sola con el mismo
+CSS de la app:
+
+```bash
+streamlit run scripts/preview_cuenta_corriente.py
+```
+
 ## Deuda técnica conocida
 
 Todo esto es verificable leyendo los archivos, y conviene tenerlo a mano antes
@@ -456,6 +493,31 @@ de tocar algo:
 
 ## Pendientes
 
+### ⛔ El árbol de git está así a propósito — no lo "limpies"
+
+Si `git status` muestra esto, **está bien y no hay que arreglarlo**:
+
+```
+ D contexto-bot-cobranzas.md                    ← borrado, SIN commitear
+?? contexto-bot-cobranzas-completo_10-09-26.md  ← nuevo, SIN trackear
+```
+
+`contexto-bot-cobranzas.md` era el volcado viejo del bot (julio 2026) y Diego lo
+reemplazó por el nuevo. **El borrado se dejó sin commitear a propósito**: mientras
+no se commitee, el archivo viejo sigue recuperable con
+`git checkout -- contexto-bot-cobranzas.md` (verificado el 25/09/2026: 26.982
+bytes accesibles desde HEAD).
+
+Se mantiene así hasta decidir **dónde van a parar los JSON reales de las
+respuestas de la API y el detalle de los dos cheques que se cargaron a mano el
+03/09/2026**, que están en el documento nuevo y que el `CLAUDE.md` no absorbió a
+propósito. Decisión ya tomada: **van a un `docs/` aparte, no acá**. Recién
+cuando eso esté hecho se commitean juntos el borrado del viejo y el alta del
+nuevo.
+
+**No commitear ese borrado, no borrar el archivo sin trackear y no hacer
+`git checkout`/`git clean` sobre ellos** sin hablarlo con Diego.
+
 ### 🔴 Lo más urgente: el acceso a `app_clientes.py`
 
 `app_clientes.py` **no tiene ningún control de acceso**: no pide legajo y PIN
@@ -469,19 +531,16 @@ qué control corresponde ponerle.
 
 ### Esperando respuesta de Regente (Damián)
 
-Diego mandó el pedido por mail el **25/09/2026**. Hasta que haya respuesta, no
-se avanza con las consultas de listado: una lista de cobranza que puede dejar
-afuera deudores reales no sirve.
+Diego le mandó **dos mails el 25/09/2026**: primero uno con los puntos 1 y 2, y
+después uno consolidado con los cinco que siguen. **Los cinco están enviados**;
+lo que falta es la respuesta. Hasta que llegue no se avanza con las consultas de
+listado: una lista de cobranza que puede dejar afuera deudores reales no sirve.
 
 1. **`GET /rgComprobanteNg/estado_cuenta` sin `id_sujeto`** — para traer el
    listado de todos los clientes de una. Habilita las consultas "Vencidas" y
    "Mis urgentes".
 2. **`GET /rgComprobanteNg/listado` sin `id_sujeto`** — para saber quién compró
    en un período y quién no. Habilita "Sin cargar".
-
-### Para sumar al pedido cuando conteste
-
-No se mandaron todavía, a la espera de la respuesta al primer mail:
 
 3. **Los campos resumidos de `estado_cuenta` vienen mal.** Verificado el
    25/09/2026 con casos reales:
