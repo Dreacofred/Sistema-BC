@@ -1,0 +1,15 @@
+# Secretos locales de Streamlit (credenciales de Supabase, Claude, Regente...).
+# NUNCA se suben al repositorio: en Streamlit Cloud se cargan desde la bóveda
+# de secrets de la app, no desde un archivo.
+.streamlit/secrets.toml
+secrets.toml
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Config local de Claude Code (launch.json de la vista previa)
+.claude/

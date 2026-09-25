@@ -82,13 +82,38 @@ def _obtener_credenciales():
 _token_cache = {"jwt": None, "vence_en": 0}
 
 
-def _obtener_jwt():
+def obtener_base_url():
+    """
+    Devuelve la URL base del servidor de Regente (sin "/api/v1" y sin barra
+    final). Público a propósito: lo usa utils_regente.py para armar las URLs
+    de los endpoints de cuenta corriente.
+    """
+    base_url, _, _ = _obtener_credenciales()
+    return base_url
+
+
+def invalidar_jwt():
+    """
+    Borra el JWT guardado en memoria para forzar un login nuevo en la próxima
+    consulta. Se usa cuando Regente responde 401 (token vencido antes de lo
+    previsto, o reinicio del servidor).
+    """
+    _token_cache["jwt"] = None
+    _token_cache["vence_en"] = 0
+
+
+def obtener_jwt(forzar_renovacion: bool = False):
     """
     Devuelve un JWT válido, pidiendo uno nuevo si no hay uno en memoria o si
     el que hay está por vencer (con 5 minutos de margen de seguridad).
+
+    Con forzar_renovacion=True pide uno nuevo sí o sí (lo usa utils_regente.py
+    para reintentar una consulta que volvió 401).
     """
     ahora = time.time()
-    if _token_cache["jwt"] and ahora < _token_cache["vence_en"] - 300:
+    if forzar_renovacion:
+        invalidar_jwt()
+    elif _token_cache["jwt"] and ahora < _token_cache["vence_en"] - 300:
         return _token_cache["jwt"]
 
     base_url, usuario, token = _obtener_credenciales()
@@ -111,6 +136,11 @@ def _obtener_jwt():
     _token_cache["jwt"] = jwt
     _token_cache["vence_en"] = ahora + 55 * 60
     return jwt
+
+
+# Alias interno: el resto de este archivo (y el código viejo) sigue llamando
+# a _obtener_jwt(). Es exactamente la misma función que obtener_jwt().
+_obtener_jwt = obtener_jwt
 
 
 def _headers():
@@ -262,3 +292,103 @@ def resolver_id_adm_desde_codigo_bcra(codigo_bcra: str):
     """
     codigo_limpio = str(codigo_bcra).strip().lstrip("0") or "0"
     return int(codigo_limpio)
+
+
+# ==========================================
+# 5. USUARIOS DE REGENTE (PUENTE CON empleados)
+# ==========================================
+# Cada cliente de Regente tiene un vendedor asignado, que viene como "id_asesor"
+# (por ejemplo "ssilvaave"). Pero el que se loguea en Sistema-BC es un empleado
+# con legajo y PIN. El puente entre los dos mundos es el número de legajo, que
+# Regente guarda en la ficha del usuario como "nro_legajo".
+#
+# VERIFICADO el 25/09/2026 contra un caso real: el usuario "ssilvaave" tiene
+# nro_legajo 900 e id_area 2, y en la tabla empleados de Supabase el legajo 900
+# es "SILVA SOFIA (AVELLANEDA)", sucursal 2. Cruzar por legajo es exacto; cruzar
+# por nombre NO sirve, porque hay dos "SILVA SOFIA" (legajos 90 y 900).
+#
+# OJO con el costo: el listado de usuarios solo trae id_usuario y ape_nombre —
+# el legajo aparece únicamente en la ficha individual. Armar el mapa completo
+# son ~190 consultas, así que conviene hacerlo una vez y cachear el resultado en
+# la columna empleados.usuario_regente, no pedirlo en cada login.
+
+
+def listar_usuarios():
+    """
+    Devuelve todos los usuarios de Regente como lista de dicts con "id_usuario"
+    y "ape_nombre". No trae el legajo (para eso está obtener_usuario).
+    """
+    base_url, _, _ = _obtener_credenciales()
+    respuesta = requests.get(
+        f"{base_url}/api/v1/rgUsuarioNg/",
+        params={"q": "%", "limite": 0},
+        headers=_headers(),
+        timeout=30,
+    )
+    respuesta.raise_for_status()
+    return respuesta.json().get("data") or []
+
+
+def obtener_usuario(id_usuario):
+    """
+    Ficha completa de un usuario de Regente. Devuelve un dict con, entre otros,
+    "nro_legajo", "id_area", "perfil_rg", "apellido", "nombre" y "email", o None
+    si no existe.
+    """
+    base_url, _, _ = _obtener_credenciales()
+    respuesta = requests.get(
+        f"{base_url}/api/v1/rgUsuarioNg/{id_usuario}",
+        headers=_headers(),
+        timeout=30,
+    )
+    respuesta.raise_for_status()
+    sobre = (respuesta.json() or {}).get("data") or {}
+    # La ficha viene envuelta: {"rows": 1, "cols": 37, "data": [ {...} ], ...}
+    filas = sobre.get("data") or []
+    return filas[0] if filas else None
+
+
+def mapear_usuarios_por_legajo(max_hilos=4, reintentos=3):
+    """
+    Devuelve (mapa, fallidos):
+      - mapa: {legajo (int): id_usuario} de todos los usuarios con legajo cargado.
+      - fallidos: lista de id_usuario que no se pudieron consultar.
+
+    Usa unos pocos hilos porque cada ficha es una consulta aparte: medido contra
+    el servidor real, de a 4 tarda ~0,4 s por usuario. No conviene subirlo: del
+    otro lado hay un ERP en producción, y además el túnel ngrok empieza a cortar
+    conexiones cuando le entra una ráfaga larga (pasó con 190 consultas
+    seguidas). Por eso cada ficha se reintenta con una espera creciente.
+
+    IMPORTANTE: los usuarios que fallan se devuelven en "fallidos", nunca se
+    descartan en silencio. Un mapa al que le faltan legajos sin avisar haría que
+    un vendedor no vea su lista y nadie se entere de por qué.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    usuarios = [u.get("id_usuario") for u in listar_usuarios() if u.get("id_usuario")]
+
+    def _legajo_de(id_usuario):
+        for intento in range(reintentos):
+            try:
+                ficha = obtener_usuario(id_usuario)
+            except Exception:
+                # Puede ser el túnel cortando bajo ráfaga: esperamos y volvemos.
+                time.sleep(2 * (intento + 1))
+                continue
+
+            if not ficha:
+                return (None, id_usuario, False)  # existe pero no devolvió ficha
+            legajo = str(ficha.get("nro_legajo") or "").strip()
+            if not legajo.isdigit():
+                return (None, id_usuario, False)  # sin legajo cargado, no es un fallo
+            return (int(legajo), id_usuario, False)
+
+        return (None, id_usuario, True)  # se agotaron los reintentos: esto sí es un fallo
+
+    with ThreadPoolExecutor(max_workers=max_hilos) as ejecutor:
+        resultados = list(ejecutor.map(_legajo_de, usuarios))
+
+    mapa = {legajo: usuario for legajo, usuario, _ in resultados if legajo is not None}
+    fallidos = [usuario for _, usuario, fallo in resultados if fallo]
+    return mapa, fallidos

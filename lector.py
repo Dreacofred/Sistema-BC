@@ -1,5 +1,4 @@
 import streamlit as st
-from google import genai
 import anthropic
 from pypdf import PdfReader
 from PIL import Image
@@ -17,7 +16,7 @@ from datetime import datetime
 from core.supabase_client import get_supabase_client
 from core.prompts_ia import PROMPT_AUDITORIA_REMITOS
 from modulos import clientes as modulo_clientes
-from modulos import proveedores as modulo_proveedores
+from modulos import cuenta_corriente as modulo_cuenta_corriente
 from modulos import verificacion_bcra as modulo_bcra
 from modulos import resumen as modulo_resumen
 import requests 
@@ -73,10 +72,12 @@ st.markdown(f"""
     </style>
 """, unsafe_allow_html=True)
 
-# Cliente de Gemini: a partir de agosto 2026 solo lo usa Facturas de
-# Proveedores — que Diego va a sacar del sistema. Cuando eso pase, esta
-# línea y el import de "genai" ya no van a hacer falta.
-cliente_ia = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
+# Gemini ya no se usa en esta app (septiembre 2026): el único módulo que lo
+# necesitaba era Facturas de Proveedores, que salió del menú y quedó
+# reemplazado por Cuentas Corrientes. Por eso se sacaron de acá el import de
+# "genai" y el cliente. El archivo modulos/proveedores.py sigue en el repo
+# pero ya no lo llama nadie — si algún día vuelve, hay que volver a crear el
+# cliente con el secret GEMINI_API_KEY.
 
 # Cliente de Claude: usado por el Generador de Resumen y por Verificación
 # BCRA (ambos migrados en agosto 2026). IMPORTANTE: hay que tener cargado el
@@ -158,8 +159,8 @@ with col_salir:
 # 3. MENÚ HORIZONTAL AJUSTADO (GROSOR NORMAL)
 opcion = option_menu(
     menu_title=None, 
-    options=["Generador de Resumen", "Facturas de Proveedores", "Verificación BCRA", "Gestión de Clientes", "Laboratorio IA"], 
-    icons=["file-earmark-spreadsheet", "receipt", "shield-check", "people", "robot"], 
+    options=["Generador de Resumen", "Cuentas Corrientes", "Verificación BCRA", "Gestión de Clientes", "Laboratorio IA"], 
+    icons=["file-earmark-spreadsheet", "cash-coin", "shield-check", "people", "robot"], 
     default_index=0,
     orientation="horizontal",
     styles={
@@ -180,10 +181,10 @@ def convertir_a_numero(valor):
     return v
 
 # ==========================================
-# 3. MÓDULO: FACTURAS DE PROVEEDORES
+# 3. MÓDULO: CUENTAS CORRIENTES (API REGENTE, SOLO LECTURA)
 # ==========================================
-if opcion == "Facturas de Proveedores":
-    modulo_proveedores.mostrar(cliente_ia)
+if opcion == "Cuentas Corrientes":
+    modulo_cuenta_corriente.mostrar(supabase)
 
 # ==========================================
 # 4. MÓDULO: GENERADOR DE RESUMEN A CLIENTES
