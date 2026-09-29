@@ -9,8 +9,6 @@ from datetime import datetime
 from PIL import Image
 import anthropic
 
-from core.supabase_client import get_supabase_client
-
 # ==========================================
 # 1. CONFIGURACIÓN E IDENTIDAD
 # ==========================================
@@ -35,7 +33,13 @@ st.markdown("""
 # MIGRADO A CLAUDE (agosto 2026): utils_bcra.py (compartido con el módulo
 # Verificación BCRA de lector.py) ya espera un cliente de Anthropic, no de
 # Gemini. Por eso acá también hay que crear un cliente de Claude.
-supabase = get_supabase_client()
+#
+# Esta app NO se conecta a Supabase. Sus tres pestañas solo consultan el BCRA:
+# no lee ni escribe ninguna tabla, y guardar_en_lista_negra() la llaman los
+# módulos de lector.py, nunca esta pantalla. Como no tiene login, tener acá la
+# service key era exponerla sin ninguna necesidad, así que se sacó (y con ella
+# SUPABASE_URL y SUPABASE_KEY de la bóveda de esta app en Streamlit Cloud).
+# El logo sale de un bucket público, que no necesita credenciales.
 cliente_claude = anthropic.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
 
 # ==========================================
