@@ -72,12 +72,11 @@ st.markdown(f"""
     </style>
 """, unsafe_allow_html=True)
 
-# Gemini ya no se usa en esta app (septiembre 2026): el único módulo que lo
-# necesitaba era Facturas de Proveedores, que salió del menú y quedó
-# reemplazado por Cuentas Corrientes. Por eso se sacaron de acá el import de
-# "genai" y el cliente. El archivo modulos/proveedores.py sigue en el repo
-# pero ya no lo llama nadie — si algún día vuelve, hay que volver a crear el
-# cliente con el secret GEMINI_API_KEY.
+# Gemini ya no se usa en ningún lado del proyecto. El único módulo que lo
+# necesitaba era Facturas de Proveedores, que salió del menú en septiembre de
+# 2026 (reemplazado por Cuentas Corrientes) y se borró el 28/09/2026 junto con
+# su prompt y las dependencias google-genai y google-generativeai. El secret
+# GEMINI_API_KEY tampoco hace falta.
 
 # Cliente de Claude: usado por el Generador de Resumen y por Verificación
 # BCRA (ambos migrados en agosto 2026). IMPORTANTE: hay que tener cargado el

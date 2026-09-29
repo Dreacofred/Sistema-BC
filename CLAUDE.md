@@ -14,8 +14,7 @@ comparten `lector.py` y `core/`:
 - El **Bot de Cobranzas**: cheques y comprobantes que entran por WhatsApp,
   auditoría, verificación BCRA y la integración con Regente.
 - El **Sistema de Gestión de Cargas**: los pedidos de carga de combustible de
-  los clientes (Generador de Resumen, Gestión de Clientes, y el módulo de
-  proveedores que quedó fuera del menú).
+  los clientes (Generador de Resumen y Gestión de Clientes).
 
 El módulo de Cuentas Corrientes, el más nuevo, es una tercera pata que se apoya
 en la misma API de Regente que usa el bot.
@@ -44,6 +43,10 @@ credenciales de `ia_client` no llegan a esas bases (probado).
   preparado para descomentar. Lo que sí se puede es **decidir y mostrar qué
   habría que escribir**, sin escribirlo — así están armados
   `core/regente_resolucion.py` y la vista previa de `bot.py`.
+  Sí está pensada **una primera etapa de escritura, con el bot de cobranzas**,
+  pero no es ahora: **el cambio de regla lo va a dar Diego como una orden
+  explícita**, y hasta entonces rige la prohibición completa. No la levanta que
+  llegue la spec de `detalles."0"` ni que el código quede listo.
 
 ## Las dos aplicaciones
 
@@ -80,9 +83,9 @@ daba la service key sin necesidad. **La misma funcionalidad sigue disponible con
 login** en la pestaña Verificación BCRA de `lector.py`: si alguien necesita
 verificar cheques, se le da legajo y PIN en vez de volver a publicar esto.
 
-`app_clientes.py` queda entonces como **código sin deploy**, en la misma
-situación que `modulos/proveedores.py`. PENDIENTE DE DEFINIR si los dos se
-borran juntos.
+`app_clientes.py` queda entonces como **código sin deploy**. Es el único
+archivo en esa situación: `modulos/proveedores.py`, que estaba igual, se borró
+el 28/09/2026. PENDIENTE DE DEFINIR si este también se borra.
 
 ## Módulos del menú de `lector.py`
 
@@ -97,10 +100,13 @@ ya inicializados los clientes que necesita (Supabase, Claude) desde `lector.py`.
 | Gestión de Clientes | `modulos/clientes.py` | `mostrar(supabase, NOMBRES_SUCURSALES)` | Alta y edición de clientes, límites y permisos del portal. |
 | Laboratorio IA | `bot.py` (vía `exec`) | — | Auditoría de los comprobantes que entran por el bot de WhatsApp. Ver "El bot de cobranzas", abajo. |
 
-`modulos/proveedores.py` ("Facturas de Proveedores") **quedó fuera del menú en
-septiembre 2026**, reemplazado por Cuentas Corrientes. El archivo sigue en el
-repositorio pero no lo llama nadie. Era el último consumidor de Gemini: por eso
-`lector.py` ya no crea el cliente de `genai` ni usa `GEMINI_API_KEY`.
+`modulos/proveedores.py` ("Facturas de Proveedores") salió del menú en
+septiembre de 2026, reemplazado por Cuentas Corrientes, y **se borró del
+repositorio el 28/09/2026** junto con su prompt
+(`PROMPT_FACTURAS_PROVEEDORES`) y las dependencias `google-genai` y
+`google-generativeai`. Era el último consumidor de Gemini, así que **hoy no
+queda nada de Gemini en el proyecto**: ni imports, ni prompts, ni el secret
+`GEMINI_API_KEY`.
 
 ## El bot de cobranzas
 
@@ -245,9 +251,13 @@ que la agrupación se puede elegir por conveniencia.
 
 **Regla de seguridad vigente:** nada de esto se programa ni se prueba contra la
 API real. **Nunca se hace nada que implique un cambio en la base de Regente**
-(Diego, 28/09/2026): es producción, no hay ambiente de pruebas, y la
-prohibición no se levanta porque llegue la spec. Todo lo de arriba está
-documentado para saber cómo sería la escritura, no para ejecutarla.
+(Diego, 28/09/2026): es producción y no hay ambiente de pruebas. Todo lo de
+arriba está documentado para saber cómo sería la escritura, no para ejecutarla.
+
+Esta es, justamente, la etapa de escritura que está pensada como primera —
+pero **arranca cuando Diego dé la orden explícita de cambiar la regla**, no
+cuando llegue la spec ni cuando el código esté listo. Mientras tanto, se
+investiga y se documenta; no se implementa.
 
 ### 5. El documento de continuidad del bot
 
@@ -275,10 +285,10 @@ El modelo es `claude-sonnet-5` en los tres casos.
 | `registrar_lectura_remito` | `modulos/resumen.py` | Fecha, razón social, importe, comprobante, litros, detalle de productos y observaciones de la IA. |
 | `registrar_cheques_para_verificacion` | `utils_bcra.py` (módulo Verificación BCRA) | Número de cheque, emisor y CUIT. |
 
-En el mismo archivo quedan tres prompts viejos de Gemini, de texto libre:
-`PROMPT_LECTURA_CHEQUES` (ya no lo usa nadie), `PROMPT_FACTURAS_PROVEEDORES`
-(solo `modulos/proveedores.py`, que está fuera del menú) y
-`PROMPT_AUDITORIA_REMITOS`, que `lector.py` **importa pero nunca usa**.
+En el mismo archivo quedan dos prompts viejos de texto libre, herencia de la
+época de Gemini: `PROMPT_LECTURA_CHEQUES` (ya no lo usa nadie) y
+`PROMPT_AUDITORIA_REMITOS`, que `lector.py` **importa pero nunca usa**. El
+tercero, `PROMPT_FACTURAS_PROVEEDORES`, se borró el 28/09/2026 con su módulo.
 
 ## APIs externas y dónde vive cada conexión
 
@@ -476,8 +486,9 @@ Como el archivo la pide al arrancar, la app murió con un `KeyError` durante mes
 y medio sin que nadie lo notara. **Una migración de credenciales hay que
 replicarla en la bóveda de cada app, no solo en la principal.**
 
-`GEMINI_API_KEY` ya no lo usa ningún archivo que esté en el menú. El único que
-sigue llamando a Gemini es `modulos/proveedores.py`, que quedó fuera de la app.
+`GEMINI_API_KEY` **ya no lo usa ningún archivo del proyecto**: el último que
+llamaba a Gemini era `modulos/proveedores.py`, borrado el 28/09/2026. Si
+todavía está cargado en alguna bóveda, se puede sacar.
 
 `REGENTE_API_URL` va **sin** el `/api/v1` final: eso lo agrega el código.
 
@@ -507,16 +518,12 @@ de tocar algo:
 - **`core/regente_mapeo.py` quedó obsoleto**: arma el payload del mecanismo de
   escritura viejo (POST por entidad), incompatible con el `PUT` a `rgCajaNg` que
   se confirmó después. Hay que rehacerlo. Ver la sección del bot de cobranzas.
-- **`modulos/proveedores.py` está muerto**: nadie lo llama desde septiembre de
-  2026, pero sigue en el repositorio y es el único consumidor de Gemini. Por él
-  siguen en `requirements.txt` `google-genai` y `google-generativeai`.
 - **`lector.py` importa `PROMPT_AUDITORIA_REMITOS` y no lo usa** en ninguna
   línea.
 - **El docstring de `core/supabase_client.py` dice que no lo usa nadie**, cuando
   lo usa `lector.py`.
 - **`app_clientes.py` quedó sin deploy**: su app de Streamlit Cloud se borró el
-  28/09/2026 y el archivo sigue en el repositorio, igual que
-  `modulos/proveedores.py`. Falta decidir si los dos se borran juntos.
+  28/09/2026 y el archivo sigue en el repositorio. Falta decidir si se borra.
 - **`contexto-bot-cobranzas.md` está desactualizado** (julio 2026, dice que el
   motor de IA es Gemini).
 - **Los lotes del bot de WhatsApp viven en memoria del proceso**: se pierden si
@@ -680,5 +687,3 @@ Diego antes de asumir nada:
   en memoria. El documento viejo menciona el host
   `bot-sice-whatsapp.onrender.com`, pero eso no se puede verificar desde el
   código.
-- **Si `modulos/proveedores.py` se borra o se deja**, y con él las dependencias
-  de Gemini.

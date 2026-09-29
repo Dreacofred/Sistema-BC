@@ -1,12 +1,12 @@
 """
 core/prompts_ia.py
 
-Acá viven los prompts que se le mandan a Gemini y a Claude. Antes estaban
-escritos sueltos adentro de utils_bcra.py y lector.py; ahora viven acá para
-que, si el día de mañana hay que ajustar una regla, se toque un solo lugar.
+Acá viven los prompts que se le mandan a Claude. Antes estaban escritos
+sueltos adentro de utils_bcra.py y lector.py; ahora viven acá para que, si el
+día de mañana hay que ajustar una regla, se toque un solo lugar.
 
-Nota: el prompt de proveedores (versión vieja, Gemini) lo usa
-modulos/proveedores.py — que Diego va a sacar del sistema, no se va a migrar.
+Nota: el prompt de facturas de proveedores se borró el 28/09/2026 junto con
+modulos/proveedores.py, el módulo que lo usaba.
 La herramienta HERRAMIENTA_CHEQUES_WHATSAPP y las instrucciones
 INSTRUCCIONES_CHEQUES_WHATSAPP las usa webhook.py (bot de WhatsApp, con
 Claude/Anthropic). La herramienta HERRAMIENTA_LECTURA_REMITO la usa
@@ -46,19 +46,6 @@ Devuelve ÚNICAMENTE un JSON puro (sin formato markdown) que sea una LISTA de ob
 
 Si un dato no es legible con un 100% de seguridad, devuelve "ERROR_LECTURA" en ese campo específico.
 """
-
-
-# ==========================================
-# 2. LECTURA DE FACTURAS DE PROVEEDORES (usado por modulos/proveedores.py)
-# ==========================================
-# NOTA (agosto 2026): Diego confirmó que modulos/proveedores.py se va a sacar
-# del sistema y no se va a usar más. Este prompt queda acá sin tocar por ahora
-# — cuando se saque el módulo, este bloque también se puede borrar.
-PROMPT_FACTURAS_PROVEEDORES = (
-    "Eres auditor contable. Objetivo: leer FACTURA DE COMPRA. "
-    "BC COMBUSTIBLES es RECEPTOR. Buscá CUIT, Fecha, Nº de Factura y Totales. "
-    "Extraé JSON puro."
-)
 
 
 # ==========================================
