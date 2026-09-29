@@ -162,8 +162,14 @@ HERRAMIENTA_CHEQUES_WHATSAPP = {
                             ),
                         },
                         "monto": {
-                            "type": "number",
-                            "description": "Número decimal puro, sin separadores de miles.",
+                            "type": ["number", "null"],
+                            "description": (
+                                "Número decimal puro, sin separadores de miles. Ver la regla de "
+                                "VERIFICACIÓN DEL MONTO en las instrucciones antes de completarlo: "
+                                "si no podés confirmarlo con confianza, va en null — NUNCA un valor "
+                                "adivinado. Un monto vacío lo completa el auditor mirando el "
+                                "original; uno inventado parece válido y nadie lo detecta."
+                            ),
                         },
                         "fecha_emision": {
                             "type": ["string", "null"],
@@ -175,7 +181,12 @@ HERRAMIENTA_CHEQUES_WHATSAPP = {
                         },
                         "cuit_emisor": {
                             "type": ["string", "null"],
-                            "description": "11 dígitos. Podés incluir los guiones tal cual figuran (ej: '20-12345678-9').",
+                            "description": (
+                                "11 dígitos seguidos, SIN guiones, puntos ni espacios "
+                                "(ej: '20123456789', nunca '20-12345678-9'). Ver la regla de "
+                                "VERIFICACIÓN DEL CUIT en las instrucciones: si el dígito de "
+                                "control no cierra, va en null."
+                            ),
                         },
                         "razon_social_emisor": {
                             "type": ["string", "null"],
@@ -259,6 +270,22 @@ REGLAS DE ORO PARA LEER CADA CHEQUE FÍSICO (aplican en CASO A y CASO C):
 3. Extraé de ahí el CUIT (11 dígitos) y la Razón Social del EMISOR real.
 4. Si el cheque no especifica una fecha de pago diferido, "fecha_pago" debe ser igual a "fecha_emision".
 5. "numero_cuenta": solo números, SIN guiones ni espacios.
+6. UNA FOTO PUEDE TENER VARIOS CHEQUES, y mezclar datos entre ellos es el error más frecuente. Cada comprobante que devolvés tiene que salir de UN SOLO cheque: el monto, el número, la fecha, el emisor, el CUIT y la cuenta de ese ítem tienen que estar TODOS impresos dentro del mismo rectángulo de papel. No completes un campo con lo que ves en el cheque de al lado, por más razonable que parezca. Si no estás seguro de a qué cheque pertenece un dato, ese campo va en null.
+
+VERIFICACIÓN DEL CUIT (importante: el emisor se busca en el sistema POR CUIT, así que uno mal leído no es un dato feo, es una ficha duplicada o —peor— confundida con otra empresa):
+- Va como 11 dígitos seguidos, SIN guiones ni puntos.
+- Según el banco viene rotulado de distintas formas: "CUIT", "CUIL", "CUIT/CUIL/CDI", "CDI" o simplemente "CT" (así lo imprime el Banco Credicoop). Es el número de 11 dígitos que acompaña al nombre del titular de la cuenta.
+- VERIFICÁ EL DÍGITO DE CONTROL antes de devolverlo. El último dígito se calcula a partir de los otros diez: multiplicá los primeros 10 por 5, 4, 3, 2, 7, 6, 5, 4, 3 y 2 respectivamente, sumá los diez productos, sacá el resto de dividir esa suma por 11, y restáselo a 11 (si el resultado da 11, el dígito es 0; si da 10, es 9). Si el dígito que leíste NO coincide con el calculado, quiere decir que leíste mal algún número: volvé a mirar el CUIT completo, dígito por dígito. Si después de revisarlo sigue sin coincidir, devolvé "cuit_emisor" en null.
+- El prefijo también avisa: las personas físicas empiezan con 20, 23, 24 o 27, y las empresas con 30, 33 o 34. Si te dio "30" en el cheque de una persona, o "20" en el de una S.A. o S.R.L., volvé a mirarlo.
+- Siempre es preferible devolver "cuit_emisor" en null que devolver uno equivocado.
+
+VERIFICACIÓN DEL MONTO (crítico: los cheques físicos suelen venir varios juntos en una misma foto y es fácil confundir cifras entre uno y otro):
+Un cheque argentino trae el importe escrito DOS VECES — en números (el recuadro "$") y en letras (el renglón "La cantidad de pesos..."). El texto en letras A VECES CONTINÚA EN EL RENGLÓN SIGUIENTE (por ejemplo: "Un millón doscientos sesenta y cuatro mil" en una línea, "cuatrocientos noventa y cuatro" en la de abajo) — leé TODO el texto en letras hasta el final antes de convertirlo a número. Antes de completar "monto":
+   a) Leé el importe en números.
+   b) Leé el importe en letras COMPLETO, de forma independiente.
+   c) Confirmá que ambos coincidan Y que corresponden al MISMO cheque que estás describiendo en ese ítem (no a otro de al lado en la misma foto).
+Si podés confirmar los tres pasos con confianza, completá "monto". Si hay CUALQUIER duda —no coinciden, alguno no se lee con claridad, o no estás seguro de que pertenezcan al mismo cheque— dejá "monto" en null.
+Excepción del CASO C: si el instrumento figura en la liquidación pero su foto es ambigua, usá el monto de la LIQUIDACIÓN, que es más confiable que arriesgar una lectura dudosa de la foto.
 
 REGLA GENERAL: si dudás de un dato, dejalo en null. NO inventes. Elegí siempre el tipo_comprobante que mejor describa cada uno — no asumas que todo es un cheque.
 

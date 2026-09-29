@@ -10,6 +10,7 @@ from supabase import create_client, Client
 import anthropic
 
 from core.prompts_ia import HERRAMIENTA_CHEQUES_WHATSAPP, instrucciones_cheques_whatsapp
+from core.validaciones import limpiar_cuit
 
 # ==========================================
 # 1. CREDENCIALES Y CONFIGURACIÓN
@@ -155,6 +156,18 @@ def procesar_y_guardar(rutas_imagenes, cliente_tag):
             messages=[{"role": "user", "content": bloques_contenido}]
         )
 
+        # Si la respuesta llegó al tope de max_tokens, lo que vino está
+        # incompleto: el bloque de la herramienta quedó cortado y los cheques
+        # que se puedan leer son un subconjunto SILENCIOSO del total. Antes
+        # esto se guardaba como si fuera el lote entero. Preferimos fallar a
+        # la vista y que el cliente reenvíe en partes.
+        if getattr(respuesta, "stop_reason", None) == "max_tokens":
+            raise Exception(
+                "La lectura se cortó por llegar al límite de tokens, así que el lote "
+                "quedó leído a medias y no se guardó nada. Mandá los archivos en "
+                "tandas más chicas (menos fotos o menos cheques por foto)."
+            )
+
         datos_ia = None
         for bloque in respuesta.content:
             if bloque.type == "tool_use":
@@ -172,7 +185,22 @@ def procesar_y_guardar(rutas_imagenes, cliente_tag):
 
         # 4. Formatear y vincular cada cheque con su foto (si tiene una propia)
         filas_para_guardar = []
+        cuits_descartados = 0
+        montos_sin_leer = 0
         for fila_ia in lista_cheques:
+            # El CUIT se guarda solo si pasa el dígito de control. Uno mal
+            # leído es peor que uno vacío: el emisor se busca en Regente POR
+            # CUIT, así que un dígito cambiado crea una ficha duplicada o
+            # matchea con otra empresa. Si no valida, va vacío y lo completa
+            # el auditor. Se normaliza a 11 dígitos, sin guiones, para que el
+            # mismo emisor no entre dos veces escrito distinto.
+            cuit_validado = limpiar_cuit(fila_ia.get("cuit_emisor"))
+            if fila_ia.get("cuit_emisor") and not cuit_validado:
+                cuits_descartados += 1
+
+            if fila_ia.get("monto") is None:
+                montos_sin_leer += 1
+
             fila = {
                 "cliente_asociado": cliente_tag,
                 "tipo_comprobante": fila_ia.get("tipo_comprobante") or "Cheque Físico",
@@ -181,10 +209,15 @@ def procesar_y_guardar(rutas_imagenes, cliente_tag):
                 "codigo_sucursal": fila_ia.get("codigo_sucursal") or "",
                 "numero_cuenta": fila_ia.get("numero_cuenta") or "",
                 "numero_identificador": fila_ia.get("numero_identificador") or "",
+                # La IA ahora puede devolver monto en null cuando no logra
+                # confirmar la cifra. La columna es NOT NULL, así que ese caso
+                # entra como 0 — que en un cheque es imposible y por lo tanto
+                # se ve como lo que es: un dato a completar. El aviso de más
+                # abajo se lo dice al cliente por WhatsApp.
                 "monto": fila_ia.get("monto") or 0,
                 "fecha_emision": fila_ia.get("fecha_emision") or None,
                 "fecha_pago": fila_ia.get("fecha_pago") or None,
-                "cuit_emisor": fila_ia.get("cuit_emisor") or "",
+                "cuit_emisor": cuit_validado or "",
                 "razon_social_emisor": fila_ia.get("razon_social_emisor") or "",
                 "estado_auditoria": "Pendiente",
                 "lote_id": id_lote_unico,
@@ -212,6 +245,21 @@ def procesar_y_guardar(rutas_imagenes, cliente_tag):
             texto_dupes = ", ".join(duplicados)
             avisos.append(
                 f"ℹ️ Se salteó {len(duplicados)} archivo(s) porque ya habían sido procesados antes."
+            )
+
+        if montos_sin_leer:
+            avisos.append(
+                f"⚠️ {montos_sin_leer} comprobante(s) quedaron SIN MONTO porque no se "
+                "pudo confirmar la cifra (los números y las letras no coincidían, o no "
+                "se leía con claridad). Hay que completarlos a mano en el panel, "
+                "mirando el original."
+            )
+
+        if cuits_descartados:
+            avisos.append(
+                f"ℹ️ A {cuits_descartados} comprobante(s) se les dejó el CUIT vacío: el "
+                "que se leyó no pasó el dígito de control, así que estaba mal. "
+                "Completalo a mano en el panel."
             )
 
         if total_declarado is not None:
