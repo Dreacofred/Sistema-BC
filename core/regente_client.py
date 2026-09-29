@@ -150,32 +150,47 @@ def _headers():
 # ==========================================
 # 3. CONSULTAS DE LECTURA (GET) — sin ningún riesgo
 # ==========================================
-def buscar_sujeto_por_cuit(cuit: str):
+def buscar_sujetos_por_cuit(cuit: str):
     """
-    Intenta buscar un sujeto en Regente por CUIT.
+    Busca sujetos en Regente por CUIT, con el endpoint dedicado
+    GET /rgSujetoNg/buscar. PROBADO contra el servidor real el 28/09/2026:
+    con criterio "D:30547794482" devuelve una fila (AGRONORTE SRL,
+    id_sujeto 2824), y con un CUIT inexistente devuelve `data: []` con
+    `ok: true` — o sea que "no existe" se detecta con una lista vacía, no
+    con un error.
 
-    OJO — LIMITACIÓN CONFIRMADA (28/08/2026): Damián probó esto de su lado y
-    confirmó que el parámetro "q" de este endpoint SOLO busca por el
-    descriptor/nombre del sujeto, no por CUIT. Está agendado para agregarse
-    en una futura versión de la API, pero hoy esta función NO va a encontrar
-    nada buscando por CUIT. Se deja implementada (con el formato de
-    respuesta ya corregido) para cuando esa mejora esté disponible — hasta
-    entonces, usar `buscar_cuenta_por_numero` y `buscar_sujetos_por_apellido`
-    (más abajo) para resolver el emisor.
+    El parámetro `criterio` acepta prefijos: "D:" busca por documento y
+    "S:" por id_sujeto. Es un endpoint distinto del CRUD genérico de
+    rgSujetoNg, cuyo parámetro "q" solo mira el nombre del sujeto: por eso
+    antes había que buscar por apellido y parsear el CUIT de un texto
+    concatenado. Acá el CUIT viene en su propio campo, "doc".
+
+    Cada resultado trae id_sujeto, sujeto (nombre), doc (el CUIT), y además
+    dirección, localidad, cod_postal, teléfono y condición de IVA.
+
+    Filtramos por coincidencia EXACTA de dígitos igual que hace
+    `buscar_cuenta_por_numero`, para no depender de si el servidor busca por
+    "contiene". Devuelve una lista (lo normal es 0 o 1 resultado).
     """
     base_url, _, _ = _obtener_credenciales()
-    cuit_limpio = "".join(c for c in str(cuit) if c.isdigit())
+    cuit_limpio = "".join(c for c in str(cuit or "") if c.isdigit())
+    if not cuit_limpio:
+        return []
 
     respuesta = requests.get(
-        f"{base_url}/api/v1/rgSujetoNg",
-        params={"q": cuit_limpio, "limite": 0},
+        f"{base_url}/api/v1/rgSujetoNg/buscar",
+        params={"criterio": f"D:{cuit_limpio}"},
         headers=_headers(),
         timeout=15,
     )
     respuesta.raise_for_status()
     datos = respuesta.json()
     resultados = datos.get("data") or []
-    return resultados[0] if resultados else None
+
+    return [
+        r for r in resultados
+        if "".join(c for c in str(r.get("doc", "")) if c.isdigit()) == cuit_limpio
+    ]
 
 
 def buscar_cuenta_por_numero(numero_cuenta: str, id_adm_esperado=None):
@@ -217,11 +232,18 @@ def buscar_sujetos_por_apellido(apellido: str):
     Busca en rgSujetoNg por apellido/nombre (búsqueda por "contiene", con %).
     CONFIRMADO Y PROBADO el 26/08/2026 (caso real: %FOCHESATTO -> 2 resultados).
 
+    HOY NO LA USA NADIE. Era el camino de respaldo de
+    core/regente_resolucion.py cuando no se podía buscar por CUIT; desde el
+    28/09/2026 ese módulo usa `buscar_sujetos_por_cuit`, que resuelve en una
+    sola consulta y sin parsear texto. Se deja porque sigue siendo la única
+    forma de buscar un sujeto por nombre, que puede hacer falta más adelante.
+
     Devuelve la lista cruda de resultados tal cual los da Regente. Cada
-    resultado trae, además de "id_sujeto" y "sujeto" (nombre), un campo sin
-    nombre propio (aparece como "?column?" en la respuesta) con el domicilio,
-    la localidad y el CUIT todos concatenados en un solo texto — hay que
-    parsearlo para sacar el CUIT (ver core/regente_resolucion.py).
+    resultado trae "id_sujeto", "sujeto" (nombre) y un campo `detalle_adic`
+    con el domicilio, la localidad y el CUIT concatenados en un solo texto.
+    OJO: ese campo se llamaba "?column?" cuando se escribió esta función, y
+    Regente lo renombró — no confiar en su nombre ni en su contenido para
+    identificar a nadie, para eso está la búsqueda por CUIT.
     """
     base_url, _, _ = _obtener_credenciales()
     texto = str(apellido or "").strip()

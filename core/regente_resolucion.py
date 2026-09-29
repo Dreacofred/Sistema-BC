@@ -13,51 +13,35 @@ Reglas de negocio confirmadas con Diego (28/08/2026):
 1. Se busca primero por número de cuenta (rgSujetoCuentaNg). Si aparece una
    coincidencia exacta (mismo número de cuenta, mismo banco), ya tenemos el
    id_sujeto — no hace falta crear nada.
-2. Si la cuenta no aparece, se busca por apellido en rgSujetoNg (que puede
-   traer 0, 1 o varios resultados, ya que el apellido puede repetirse).
-3. De esos resultados, se extrae el CUIT de cada uno (viene pegado en un
-   campo de texto sin nombre propio) y se compara contra el CUIT real del
-   cheque — la comparación es SIEMPRE por CUIT exacto, nunca por parecido
-   de nombre.
-4. Si ningún resultado coincide en CUIT -> emisor 100% nuevo: hay que crear
-   el sujeto Y la cuenta.
-5. Si coincide exactamente uno -> el sujeto ya existe (con otra cuenta):
+2. Si la cuenta no aparece, se busca el sujeto por CUIT. La comparación es
+   SIEMPRE por CUIT exacto, nunca por parecido de nombre.
+3. Si no aparece ningún sujeto con ese CUIT -> emisor 100% nuevo: hay que
+   crear el sujeto Y la cuenta.
+4. Si aparece exactamente uno -> el sujeto ya existe (con otra cuenta):
    alcanza con darle de alta la cuenta nueva, sin tocar el sujeto.
-6. Si coincidiera más de uno (no debería pasar) -> caso dudoso, se marca
+5. Si apareciera más de uno (no debería pasar) -> caso dudoso, se marca
    para revisión manual en el panel de auditoría.
+
+HISTORIA DEL PASO 2 (corregido el 28/09/2026):
+Cuando se escribió este módulo, la API de Regente no sabía buscar por CUIT,
+así que el paso 2 daba un rodeo: buscaba por la primera palabra de la razón
+social y después sacaba el CUIT de cada candidato con una expresión regular
+aplicada a un campo de texto concatenado. Ese campo se llamaba "?column?" y
+Regente lo renombró a `detalle_adic`, con lo cual la regex dejó de encontrar
+nada: el CUIT salía siempre vacío, la comparación nunca coincidía y **todo
+emisor que ya existiera en Regente se clasificaba igual como nuevo**.
+
+Se reemplazó por GET /rgSujetoNg/buscar?criterio=D:{cuit}, que Damián liberó
+el 10/09/2026 y resuelve en una sola consulta, con el CUIT en su propio campo
+`doc`. No se parcheó el nombre del campo viejo a propósito: todo el rodeo
+existía nada más que porque no se podía buscar por CUIT.
+
+Ojo al leer estadísticas viejas de la pantalla de auditoría: mientras el bug
+estuvo vivo, mostró el 100% de los emisores como nuevos. La estimación de que
+"alrededor de la mitad" de los cheques son de emisores desconocidos salió de
+ahí, así que hay que volver a medirla ahora que esto funciona.
 """
-import re
-
-from core.regente_client import buscar_cuenta_por_numero, buscar_sujetos_por_apellido
-
-
-def _extraer_cuit_de_texto(texto):
-    """
-    Busca el patrón "CUIT" seguido de números dentro del campo de texto sin
-    nombre propio que devuelve la búsqueda por apellido (aparece como
-    "?column?" en la respuesta cruda de Regente). Devuelve el CUIT como
-    string de solo dígitos, o None si no lo encuentra.
-    """
-    if not texto:
-        return None
-    coincidencia = re.search(r"CUIT\s*(\d{6,})", str(texto))
-    return coincidencia.group(1) if coincidencia else None
-
-
-def _obtener_apellido_para_busqueda(razon_social):
-    """
-    Toma la primera palabra de la razón social como "apellido" para la
-    búsqueda de respaldo (ej: 'FOCHESATTO SILVIO JOSE' -> 'FOCHESATTO').
-    Funciona bien para personas físicas. Para razones sociales de empresas
-    (ej: 'TOURNE Y TOURNE S.A.') puede no ser un apellido real, pero sigue
-    siendo un texto de búsqueda razonable.
-
-    PENDIENTE DE VERIFICAR: si en la práctica esto da resultados pobres para
-    empresas, se puede ajustar más adelante (probar con más palabras, o con
-    la razón social completa).
-    """
-    texto = str(razon_social or "").strip()
-    return texto.split(" ")[0] if texto else ""
+from core.regente_client import buscar_cuenta_por_numero, buscar_sujetos_por_cuit
 
 
 def resolver_emisor(cuit_cheque, razon_social_cheque, numero_cuenta, id_adm):
@@ -99,39 +83,39 @@ def resolver_emisor(cuit_cheque, razon_social_cheque, numero_cuenta, id_adm):
             ),
         }
 
-    # Paso 2: la cuenta no existe. Buscar por apellido y comparar por CUIT.
-    apellido = _obtener_apellido_para_busqueda(razon_social_cheque)
-    if not apellido or not cuit_limpio:
+    # Paso 2: la cuenta no existe. Buscar el sujeto por CUIT exacto.
+    if not cuit_limpio:
         return {
             "accion": "revision_manual",
             "id_sujeto": None,
-            "motivo": "Falta razón social o CUIT del emisor para poder buscar con seguridad.",
+            "motivo": (
+                "El comprobante no trae CUIT del emisor, que es el único dato por "
+                "el que se puede identificar un sujeto con seguridad. Revisar a mano."
+            ),
         }
 
-    candidatos = buscar_sujetos_por_apellido(apellido)
-    coincidencias = [
-        c for c in candidatos
-        if _extraer_cuit_de_texto(c.get("?column?")) == cuit_limpio
-    ]
+    coincidencias = buscar_sujetos_por_cuit(cuit_limpio)
 
     if len(coincidencias) == 1:
+        encontrado = coincidencias[0]
         return {
             "accion": "crear_cuenta_para_existente",
-            "id_sujeto": int(coincidencias[0]["id_sujeto"]),
+            "id_sujeto": int(encontrado["id_sujeto"]),
             "motivo": (
-                f"El sujeto ya existe en Regente (encontrado por CUIT {cuit_limpio} "
-                f"entre los resultados de '{apellido}'), pero con otra cuenta. Hay "
-                "que darle de alta la cuenta nueva."
+                f"El sujeto ya existe en Regente por CUIT {cuit_limpio} "
+                f"('{encontrado.get('sujeto')}'), pero con otra cuenta. Hay que "
+                "darle de alta la cuenta nueva."
             ),
         }
 
     if len(coincidencias) > 1:
+        nombres = ", ".join(str(c.get("sujeto")) for c in coincidencias)
         return {
             "accion": "revision_manual",
             "id_sujeto": None,
             "motivo": (
-                f"Más de un sujeto con CUIT {cuit_limpio} entre los resultados de "
-                f"'{apellido}' — caso inesperado, revisar a mano."
+                f"Más de un sujeto en Regente con el CUIT {cuit_limpio} "
+                f"({nombres}) — caso inesperado, revisar a mano."
             ),
         }
 
@@ -141,6 +125,6 @@ def resolver_emisor(cuit_cheque, razon_social_cheque, numero_cuenta, id_adm):
         "id_sujeto": None,
         "motivo": (
             f"No se encontró ni la cuenta '{numero_cuenta}' ni el CUIT "
-            f"{cuit_limpio} en Regente. Es un emisor nuevo."
+            f"{cuit_limpio} en Regente. '{razon_social_cheque}' es un emisor nuevo."
         ),
     }
