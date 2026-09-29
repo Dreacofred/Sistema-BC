@@ -41,22 +41,44 @@ credenciales de `ia_client` no llegan a esas bases (probado).
   POST/PUT contra su API sin el OK explícito de Diego. Hoy toda la integración
   es de solo lectura.
 
-## Las tres aplicaciones
+## Las dos aplicaciones
 
 | Archivo | Qué es | Dónde corre |
 |---|---|---|
 | `lector.py` | App principal de gestión interna ("BC Combustibles - Gestión Pro"). Login por legajo + PIN contra la tabla `empleados`, y un menú horizontal (`streamlit-option-menu`) que delega en los módulos de `modulos/`. | Streamlit Cloud |
-| `app_clientes.py` | Pantalla de verificación de cheques contra el BCRA, titulada "Herramienta exclusiva para clientes de BC Combustibles". Tres pestañas: consulta manual por CUIT, escáner de cheques con IA y carga masiva por Excel. | Streamlit Cloud |
 | `webhook.py` | Servidor Flask del bot de WhatsApp de cobranzas: recibe fotos de cheques y comprobantes y los lee con Claude. | Render |
 
 `bot.py` no es una app aparte: es la pantalla de auditoría de comprobantes, que
 `lector.py` ejecuta con `exec()` dentro de la pestaña "Laboratorio IA". Por eso
 usa los secrets de `lector.py` y no los suyos.
 
-**OJO con `app_clientes.py`: no tiene ningún login.** No pide legajo y PIN como
-`lector.py`, ni usa Supabase Auth: quien abra la URL entra directo y puede
-consultar cualquier CUIT contra el BCRA. PENDIENTE DE DEFINIR cómo se controla
-el acceso a esa app (¿URL privada? ¿no está publicada?).
+### `app_clientes.py` ya no está desplegada (borrada el 28/09/2026)
+
+El archivo sigue en el repositorio, pero **su app de Streamlit Cloud se borró**.
+Era una pantalla de verificación de cheques contra el BCRA ("Herramienta
+exclusiva para clientes de BC Combustibles") con tres pestañas: consulta manual
+por CUIT, escáner de cheques con IA y carga masiva por Excel. Diego se la había
+pasado a Fochesatto para consultar el estado de los CUIT de los cheques en el
+Central.
+
+Se borró por dos motivos que se sumaron:
+
+- **No tenía ningún control de acceso.** No pedía legajo y PIN como `lector.py`
+  ni usaba Supabase Auth: cualquiera con la URL consultaba cualquier CUIT del
+  país, gastando los créditos de ScrapeOps de BC.
+- **Venía rota desde la migración a Claude de agosto de 2026.** Pide
+  `st.secrets["ANTHROPIC_API_KEY"]` al arrancar, y esa clave nunca se cargó en
+  su bóveda: la app moría con un `KeyError` antes de dibujar la pantalla. Estaba
+  hibernando en Streamlit Cloud, señal de que hacía mucho que nadie entraba.
+
+Antes de borrarla se le sacó la conexión a Supabase, que era código muerto y le
+daba la service key sin necesidad. **La misma funcionalidad sigue disponible con
+login** en la pestaña Verificación BCRA de `lector.py`: si alguien necesita
+verificar cheques, se le da legajo y PIN en vez de volver a publicar esto.
+
+`app_clientes.py` queda entonces como **código sin deploy**, en la misma
+situación que `modulos/proveedores.py`. PENDIENTE DE DEFINIR si los dos se
+borran juntos.
 
 ## Módulos del menú de `lector.py`
 
@@ -67,7 +89,7 @@ ya inicializados los clientes que necesita (Supabase, Claude) desde `lector.py`.
 |---|---|---|---|
 | Generador de Resumen | `modulos/resumen.py` | `mostrar(supabase, cliente_claude, user, NOMBRES_SUCURSALES, COLOR_ROJO)` | Toma las órdenes de la tabla `ordenes_carga`, lee los remitos con Claude, permite corregirlos a mano y exporta el resumen final a Excel (`openpyxl`). Sube las fotos al bucket `remitos` de Supabase Storage. El módulo más grande del repo. |
 | Cuentas Corrientes | `modulos/cuenta_corriente.py` | `mostrar(supabase)` | **Contenedor** de consultas sobre la cuenta corriente de Regente (solo lectura). Ver abajo. |
-| Verificación BCRA | `modulos/verificacion_bcra.py` | `mostrar(supabase, cliente_claude)` | Deudores y cheques rechazados del BCRA, en tres pestañas (manual, escáner con IA, carga masiva). Guarda CUITs en `cuits_afectados`. Misma lógica que `app_clientes.py`, pero adentro de la app interna. |
+| Verificación BCRA | `modulos/verificacion_bcra.py` | `mostrar(supabase, cliente_claude)` | Deudores y cheques rechazados del BCRA, en tres pestañas (manual, escáner con IA, carga masiva). Guarda CUITs en `cuits_afectados`. Desde que se borró el deploy de `app_clientes.py`, es el único lugar donde se verifican cheques contra el BCRA. |
 | Gestión de Clientes | `modulos/clientes.py` | `mostrar(supabase, NOMBRES_SUCURSALES)` | Alta y edición de clientes, límites y permisos del portal. |
 | Laboratorio IA | `bot.py` (vía `exec`) | — | Auditoría de los comprobantes que entran por el bot de WhatsApp. Ver "El bot de cobranzas", abajo. |
 
@@ -259,13 +281,13 @@ módulo de `modulos/` solo con la pantalla.**
 
 | API | Archivo de conexión | Notas |
 |---|---|---|
-| BCRA (Central de Deudores y cheques rechazados) | `utils_bcra.py` | Se consulta a través del proxy de ScrapeOps (`SCRAPEOPS_API_KEY`). Lo comparten el módulo Verificación BCRA y `app_clientes.py`. |
+| BCRA (Central de Deudores y cheques rechazados) | `utils_bcra.py` | Se consulta a través del proxy de ScrapeOps (`SCRAPEOPS_API_KEY`). Hoy lo usa solo el módulo Verificación BCRA: `app_clientes.py` también lo importa, pero ya no está desplegada. |
 | WhatsApp (Green-API) | `webhook.py` | Recibe los mensajes por webhook y contesta con `sendMessage`. Necesita `GREEN_API_URL` y `GREEN_API_TOKEN`. |
 | Claude / Anthropic | `core/prompts_ia.py` (prompts y herramientas) | Modelo: `claude-sonnet-5`. Todos los módulos usan *tool use* forzado en vez de parsear JSON a mano. |
 | Regente — cuenta corriente | `utils_regente.py` | Los 4 endpoints de solo lectura del instructivo TK-3139. |
 | Semáforo de cobranza | `core/semaforo.py` | La regla del color por días de atraso. Sin dependencias: la usan la pantalla, y más adelante el portal y el bloqueo de órdenes. |
 | Regente — sujetos, cuentas, usuarios y catálogos | `core/regente_client.py` | Login, caché del JWT, el puente legajo ↔ usuario de Regente y las consultas que usa el bot de cobranzas. `utils_regente.py` reusa de acá el login y el token. |
-| Supabase | `core/supabase_client.py` | `get_supabase_client()` cacheado con `@st.cache_resource`. Lo usan `lector.py` y `app_clientes.py`; `bot.py` y `webhook.py` arman su propio cliente (uno con `st.secrets`, el otro con variables de entorno). El docstring del archivo dice que no lo usa nadie: quedó desactualizado. |
+| Supabase | `core/supabase_client.py` | `get_supabase_client()` cacheado con `@st.cache_resource`. Hoy lo usa solo `lector.py` (`app_clientes.py` dejó de usarlo el 28/09/2026); `bot.py` y `webhook.py` arman su propio cliente (uno con `st.secrets`, el otro con variables de entorno). El docstring del archivo dice que no lo usa nadie: quedó desactualizado. |
 
 ### Integración con Regente (el ERP)
 
@@ -416,9 +438,10 @@ código; existirán por la app de afuera, que probablemente use la anon key.
 
 Esto importa para no engañarse: cuando creé `lista_urgentes` le puse políticas
 solo para el rol `anon`, pensando que así un cliente del portal no la vería.
-**No protege nada**, por dos motivos encadenados: `app_clientes.py` no tiene
-login (entra con el mismo rol que la app interna) y, con la service key, el rol
-ni siquiera se evalúa.
+**No protege nada**: con la service key el rol ni siquiera se evalúa, así que
+toda app de este repositorio ve todo. (El razonamiento original sumaba que
+`app_clientes.py` tampoco tenía login; esa app ya no está desplegada, pero la
+conclusión no cambia, porque el problema es la key, no el login.)
 
 **En este proyecto, la única barrera real entre un dato y un usuario es qué
 consulta hace cada pantalla.** Si hay que proteger algo de verdad, se cambia la
@@ -438,6 +461,14 @@ las de arriba: `SUPABASE_URL`, `SUPABASE_KEY`, `ANTHROPIC_API_KEY`,
 `bot.py` no tiene bóveda propia: corre adentro de `lector.py`, así que usa sus
 secrets — incluidos los tres de Regente, que necesita para la vista previa de
 integración.
+
+`app_clientes.py` tenía su propia bóveda, que se borró junto con la app el
+28/09/2026. **Ojo con la trampa que la dejó rota**: cada app de Streamlit Cloud
+tiene su bóveda separada, y cuando en agosto de 2026 se migró de Gemini a
+Claude, se cargó `ANTHROPIC_API_KEY` en la de `lector.py` pero no en la suya.
+Como el archivo la pide al arrancar, la app murió con un `KeyError` durante mes
+y medio sin que nadie lo notara. **Una migración de credenciales hay que
+replicarla en la bóveda de cada app, no solo en la principal.**
 
 `GEMINI_API_KEY` ya no lo usa ningún archivo que esté en el menú. El único que
 sigue llamando a Gemini es `modulos/proveedores.py`, que quedó fuera de la app.
@@ -477,7 +508,10 @@ de tocar algo:
 - **`lector.py` importa `PROMPT_AUDITORIA_REMITOS` y no lo usa** en ninguna
   línea.
 - **El docstring de `core/supabase_client.py` dice que no lo usa nadie**, cuando
-  lo usan `lector.py` y `app_clientes.py`.
+  lo usa `lector.py`.
+- **`app_clientes.py` quedó sin deploy**: su app de Streamlit Cloud se borró el
+  28/09/2026 y el archivo sigue en el repositorio, igual que
+  `modulos/proveedores.py`. Falta decidir si los dos se borran juntos.
 - **`contexto-bot-cobranzas.md` está desactualizado** (julio 2026, dice que el
   motor de IA es Gemini).
 - **Los lotes del bot de WhatsApp viven en memoria del proceso**: se pierden si
@@ -518,16 +552,12 @@ nuevo.
 **No commitear ese borrado, no borrar el archivo sin trackear y no hacer
 `git checkout`/`git clean` sobre ellos** sin hablarlo con Diego.
 
-### 🔴 Lo más urgente: el acceso a `app_clientes.py`
+### ✅ Resuelto: el acceso a `app_clientes.py` (28/09/2026)
 
-`app_clientes.py` **no tiene ningún control de acceso**: no pide legajo y PIN
-como `lector.py` ni usa Supabase Auth. Cualquiera que tenga la URL entra y puede
-consultar el historial de deudas y cheques rechazados de **cualquier CUIT** del
-país contra el BCRA, y esas consultas se pagan con los créditos de ScrapeOps de
-BC. Además la app se conecta con la service key de Supabase.
-
-PENDIENTE DE DEFINIR con Diego: si esa app está publicada, quién tiene la URL y
-qué control corresponde ponerle.
+Era el pendiente más urgente: esa app no tenía ningún control de acceso y se
+conectaba con la service key de Supabase. **Se resolvió borrando su deploy de
+Streamlit Cloud**, porque además venía rota desde agosto. Ver "`app_clientes.py`
+ya no está desplegada", más arriba.
 
 ### Esperando respuesta de Regente (Damián)
 
