@@ -37,9 +37,13 @@ credenciales de `ia_client` no llegan a esas bases (probado).
 - **Las credenciales van siempre en `st.secrets`** (Streamlit) o en variables de
   entorno (Render). Nunca hardcodeadas. `.streamlit/secrets.toml` está en
   `.gitignore`.
-- **Regente es producción y no tiene ambiente de pruebas.** No se hace ningún
-  POST/PUT contra su API sin el OK explícito de Diego. Hoy toda la integración
-  es de solo lectura.
+- **Nunca se hace nada que implique un cambio en la base de Regente.** Es una
+  prohibición, no un "pedir permiso antes" (Diego, 28/09/2026). Regente es
+  producción y no tiene ambiente de pruebas: la integración es **solo GET**,
+  ningún POST/PUT/PATCH/DELETE, ni siquiera para probar un caso, ni dejado
+  preparado para descomentar. Lo que sí se puede es **decidir y mostrar qué
+  habría que escribir**, sin escribirlo — así están armados
+  `core/regente_resolucion.py` y la vista previa de `bot.py`.
 
 ## Las dos aplicaciones
 
@@ -169,28 +173,28 @@ Supabase.
 
 **`core/regente_resolucion.py`** sí consulta Regente, **solo con GET**, para
 decidir qué hacer con cada emisor: primero lo busca por número de cuenta y, si
-no aparece, por apellido comparando **siempre por CUIT exacto, nunca por
-parecido de nombre**. Devuelve `usar_existente`,
-`crear_cuenta_para_existente`, `crear_sujeto_y_cuenta` o `revision_manual`.
+no aparece, por CUIT con `GET /rgSujetoNg/buscar?criterio=D:{cuit}`. La
+comparación es **siempre por CUIT exacto, nunca por parecido de nombre**.
+Devuelve `usar_existente`, `crear_cuenta_para_existente`,
+`crear_sujeto_y_cuenta` o `revision_manual`.
 
-⚠️ **Hoy ese segundo camino está roto, y además quedó obsoleto.** Está roto
-porque saca el CUIT con una expresión regular aplicada al campo `"?column?"` de
-la respuesta, un nombre que Regente ya no devuelve: ese campo ahora se llama
-`detalle_adic` (verificado el 25/09/2026). Como el CUIT le sale siempre vacío,
-la comparación nunca coincide y **cualquier emisor que ya exista en Regente se
-clasifica igual como "crear_sujeto_y_cuenta"**.
+✅ **Ese segundo camino estuvo roto hasta el 28/09/2026** y conviene saberlo,
+porque contamina los números viejos. Sacaba el CUIT con una expresión regular
+sobre el campo `"?column?"`, un nombre que Regente renombró a `detalle_adic`;
+como el CUIT salía siempre vacío, la comparación nunca coincidía y **cualquier
+emisor que ya existiera en Regente se clasificaba igual como
+"crear_sujeto_y_cuenta"**. Se corrigió reemplazando todo ese rodeo por el
+endpoint de búsqueda por CUIT, que resuelve en una consulta y trae el CUIT en
+su propio campo `doc`. Probado contra el servidor real: AGRONORTE SRL
+(`id_sujeto` 2824), que antes salía como nuevo, ahora se resuelve como
+`crear_cuenta_para_existente`.
 
-Y quedó obsoleto porque todo ese rodeo —buscar por apellido, parsear un texto
-concatenado, comparar CUITs a mano— existía solo porque no se podía buscar por
-CUIT. Con `GET /rgSujetoNg/buscar?criterio=D:{cuit}` se resuelve en una
-consulta, y la respuesta ya trae el CUIT en su propio campo `doc`, sin parsear
-nada. **Al corregirlo conviene reemplazarlo, no parchear el nombre del campo.**
-Se venía estimando que alrededor de la mitad de los cheques que llegan son de
-emisores o cuentas que no están en Regente, lo que haría del alta automática de
-sujetos un caso central y no una excepción. **Ese número hay que tomarlo con
-pinzas**: por el bug que se explica abajo, la pantalla viene mostrando el 100%
-de los emisores como nuevos, así que la estimación puede estar contaminada. No
-conviene diseñar sobre ese porcentaje hasta que la resolución funcione. Un emisor nuevo necesita **dos altas**: el sujeto y la cuenta
+⚠️ **Hay que volver a medir cuántos emisores son realmente nuevos.** Se venía
+estimando que alrededor de la mitad de los cheques son de emisores o cuentas
+que no están en Regente, lo que haría del alta automática de sujetos un caso
+central y no una excepción. **Ese número salió de la pantalla mientras el bug
+estaba vivo**, o sea cuando mostraba el 100% como nuevos, así que no sirve. Hoy
+la vista previa de `bot.py` ya es confiable para volver a medirlo. Un emisor nuevo necesita **dos altas**: el sujeto y la cuenta
 (`rgSujetoNg` + `rgSujetoCuentaNg`); sin la segunda, el próximo cheque de esa
 cuenta se vuelve a tratar como nuevo.
 
@@ -239,9 +243,11 @@ transferencias, y que el tipo "Otro" se carga a mano), más el detalle de que un
 recibo combinado y varios recibos separados dan el mismo resultado contable, así
 que la agrupación se puede elegir por conveniencia.
 
-**Regla de seguridad vigente:** ningún `POST` ni `PUT` de prueba contra la API
-real hasta tener la spec y el OK explícito de Diego. Es producción y no hay
-ambiente de pruebas.
+**Regla de seguridad vigente:** nada de esto se programa ni se prueba contra la
+API real. **Nunca se hace nada que implique un cambio en la base de Regente**
+(Diego, 28/09/2026): es producción, no hay ambiente de pruebas, y la
+prohibición no se levanta porque llegue la spec. Todo lo de arriba está
+documentado para saber cómo sería la escritura, no para ejecutarla.
 
 ### 5. El documento de continuidad del bot
 
@@ -495,10 +501,9 @@ streamlit run scripts/preview_cuenta_corriente.py
 Todo esto es verificable leyendo los archivos, y conviene tenerlo a mano antes
 de tocar algo:
 
-- **`core/regente_resolucion.py` tiene un bug vivo**: busca el CUIT en un campo
-  `"?column?"` que la API ya no devuelve (hoy es `detalle_adic`), así que nunca
-  reconoce a un emisor existente. Se arregla reemplazando esa búsqueda por
-  `GET /rgSujetoNg/buscar?criterio=D:{cuit}`.
+- **`core/regente_client.buscar_sujetos_por_apellido` quedó sin uso** desde que
+  la resolución de emisores busca por CUIT (28/09/2026). Se dejó porque sigue
+  siendo la única forma de buscar un sujeto por nombre.
 - **`core/regente_mapeo.py` quedó obsoleto**: arma el payload del mecanismo de
   escritura viejo (POST por entidad), incompatible con el `PUT` a `rgCajaNg` que
   se confirmó después. Hay que rehacerlo. Ver la sección del bot de cobranzas.
@@ -655,10 +660,13 @@ así que hay que normalizar los dos lados antes de comparar; y el
   está.
 - **Filtros comunes** (sucursal, vendedor, rango de montos) en el contenedor:
   entran junto con el primer listado.
-- **Adoptar `GET /rgSujetoNg/buscar`** en dos lugares: en el buscador de
-  clientes de Cuentas Corrientes, para buscar por CUIT contra Regente en vez de
-  contra Supabase; y en `core/regente_resolucion.py`, que además de simplificarse
-  se arregla (hoy no reconoce emisores existentes).
+- **Adoptar `GET /rgSujetoNg/buscar` en el buscador de clientes de Cuentas
+  Corrientes**, para buscar por CUIT contra Regente en vez de contra Supabase.
+  En `core/regente_resolucion.py` ya se adoptó (28/09/2026): de ahí se puede
+  copiar `core.regente_client.buscar_sujetos_por_cuit`.
+- **Volver a medir qué porcentaje de emisores es nuevo**, con la vista previa
+  de `bot.py` ahora que la resolución funciona. De ese número depende cuánto
+  importa el alta automática de sujetos.
 
 ### PENDIENTE DE DEFINIR (dudas del relevamiento del 25/09/2026)
 
