@@ -149,6 +149,60 @@ tiene el lote. PENDIENTE DE DEFINIR con cuántos workers corre hoy en Render.
    los cheques leídos (tolerancia de $1), avisa por WhatsApp que puede faltar
    una foto o que un monto se leyó mal.
 
+#### Los controles de lectura (agregados el 28/09/2026)
+
+Están tomados del proyecto **`sistema-financiero-bc`**, que lee los mismos
+comprobantes con su propio código (`utils/extraccion_ocr.py`) y ya había pasado
+por estos problemas. Ese repositorio es una buena fuente para seguir mejorando
+la lectura: no comparte nada de código con Sistema-BC, pero sí el dominio.
+
+- **El CUIT se guarda solo si pasa el dígito de control**
+  (`core/validaciones.py:limpiar_cuit`), normalizado a 11 dígitos sin guiones.
+  Importa más desde que `resolver_emisor` busca el emisor POR CUIT: uno mal
+  leído no es un dato feo, es una ficha duplicada en Regente o un match con
+  otra empresa. Si no valida, se guarda vacío y el bot avisa por WhatsApp.
+  Antes el prompt pedía el CUIT "con guiones tal cual figuran", y el mismo
+  emisor entraba dos veces escrito distinto.
+- **El monto puede venir en `null`**, con la regla de leer el importe en
+  números y en letras y compararlos. Antes era obligatorio y de tipo `number`,
+  así que la IA no tenía forma de decir "no lo pude leer" y quedaba forzada a
+  inventarlo. La columna es NOT NULL, así que ese caso entra como 0 — imposible
+  en un cheque, y por lo tanto visible como lo que es.
+- **Se mira `stop_reason`**: si la respuesta se corta por `max_tokens`, el lote
+  queda leído a medias. Antes se guardaba igual, en silencio; ahora falla con
+  un mensaje que pide reenviar en tandas más chicas.
+
+**Resultado de la primera prueba con fotos difíciles (30/09/2026)**, tres fotos
+con cinco cheques: **los 5 montos salieron correctos**, incluidos los escritos
+a mano en letra complicada, y **2 de los 5 CUITs venían mal leídos**. Los dos
+estaban perfectamente legibles en el original, así que no fueron falsos
+positivos: el dígito de control no puede rechazar un CUIT bien leído, porque se
+calcula a partir de los otros diez. Sin ese control habrían entrado mal.
+
+#### Lo que falta de la lectura, y una decisión de diseño pendiente
+
+`sistema-financiero-bc` tiene además un **reintento con la foto rotada**, que
+usa el dígito de control como señal: si todos los CUIT fallan, lo más probable
+es que la foto esté de costado, así que reintenta a 90° y -90° y se queda con
+la mejor lectura. Lo midieron sobre una foto real con cuatro cheques de
+costado: 0 de 4 CUIT válidos sin rotar, 4 de 4 rotando.
+
+**No se puede copiar tal cual.** Ellos mandan **un comprobante por consulta**,
+así que pueden reintentar solo el archivo que salió mal. `webhook.py` manda
+**todos los archivos del lote en una sola llamada a Claude**, así que o se
+parte el lote en una consulta por archivo (y hay que ver cómo queda el CASO C,
+que necesita ver la liquidación y las fotos juntas), o se reintenta el lote
+entero rotado (más caro, y arruina las fotos que estaban bien).
+
+Un dato de la prueba del 30/09 que conviene tener en cuenta al decidir: **la
+rotación sola no explica los fallos**. De las dos fotos con el cheque de
+costado, una se leyó bien y la otra no; lo que distinguía a las que fallaron
+era la suma de rotación con poca luz, ángulo o letra chica. Y el disparador de
+ellos —"fallan todos"— no se habría activado, porque fallaron 2 de 5.
+
+**Antes de elegir camino hay que juntar más lotes de prueba** (decisión de
+Diego, 30/09/2026). Con cinco cheques no alcanza.
+
 ### 3. Auditoría: `bot.py` (dentro de "Laboratorio IA")
 
 Trae de `cobranzas_pendientes` todo lo que está en `"Pendiente"`, agrupado por
@@ -195,12 +249,37 @@ su propio campo `doc`. Probado contra el servidor real: AGRONORTE SRL
 (`id_sujeto` 2824), que antes salía como nuevo, ahora se resuelve como
 `crear_cuenta_para_existente`.
 
-⚠️ **Hay que volver a medir cuántos emisores son realmente nuevos.** Se venía
-estimando que alrededor de la mitad de los cheques son de emisores o cuentas
-que no están en Regente, lo que haría del alta automática de sujetos un caso
-central y no una excepción. **Ese número salió de la pantalla mientras el bug
-estaba vivo**, o sea cuando mostraba el 100% como nuevos, así que no sirve. Hoy
-la vista previa de `bot.py` ya es confiable para volver a medirlo. Un emisor nuevo necesita **dos altas**: el sujeto y la cuenta
+#### Cuántos emisores son realmente nuevos (medido el 28/09/2026)
+
+Se venía estimando que alrededor de la mitad de los cheques son de emisores o
+cuentas que no están en Regente, pero **ese número salió de la pantalla
+mientras el bug estaba vivo**, o sea cuando mostraba el 100% como nuevos. Con
+la resolución ya corregida se volvió a medir, corriendo `resolver_emisor` sobre
+los emisores que había entonces en `cobranzas_pendientes`:
+
+| | Emisores | Cheques |
+|---|---|---|
+| Emisor **nuevo** (dos altas) | 5 (42%) | 5 (20%) |
+| Sujeto existe, falta la cuenta | 4 (33%) | 14 (56%) |
+| Cuenta ya registrada | 3 (25%) | 6 (24%) |
+
+El dato interesante no es el 42% sino la diferencia entre las dos columnas:
+**contado por cheque, los emisores nuevos son solo el 20%**. Los emisores
+nuevos son los de un cheque suelto; los que traen volumen ya están en Regente.
+O sea que **el 80% de los cheques se resolvería sin crear ningún sujeto**, y el
+caso más común es el barato — agregarle una cuenta a alguien que ya existe.
+
+Eso sugiere que una primera etapa de escritura que cubra solo `usar_existente`
+y `crear_cuenta_para_existente`, mandando el resto a carga manual, ya se
+comería la mayor parte del trabajo. **Es una hipótesis para discutir cuando
+Diego dé la orden, no una decisión tomada.**
+
+⚠️ **Tomar estos números con pinzas: la muestra era de 12 emisores**, y los
+datos que la respaldaban se borraron el 30/09/2026 al limpiar la tabla. Con ese
+tamaño, dos cheques mueven el porcentaje diez puntos. Conviene rehacer la
+medición cuando se junten más lotes reales.
+
+Un emisor nuevo necesita **dos altas**: el sujeto y la cuenta
 (`rgSujetoNg` + `rgSujetoCuentaNg`); sin la segunda, el próximo cheque de esa
 cuenta se vuelve a tratar como nuevo.
 
@@ -671,9 +750,12 @@ así que hay que normalizar los dos lados antes de comparar; y el
   Corrientes**, para buscar por CUIT contra Regente en vez de contra Supabase.
   En `core/regente_resolucion.py` ya se adoptó (28/09/2026): de ahí se puede
   copiar `core.regente_client.buscar_sujetos_por_cuit`.
-- **Volver a medir qué porcentaje de emisores es nuevo**, con la vista previa
-  de `bot.py` ahora que la resolución funciona. De ese número depende cuánto
-  importa el alta automática de sujetos.
+- **Rehacer la medición de emisores nuevos** cuando haya más lotes reales. La
+  del 28/09/2026 (42% por emisor, 20% por cheque) salió de una muestra de 12 y
+  los datos ya se borraron. Ver la sección del bot de cobranzas.
+- **Elegir cómo adaptar el reintento con rotación** de `sistema-financiero-bc`:
+  una consulta por archivo, o reintentar el lote entero rotado. Primero hay que
+  juntar más lotes de prueba. Ver la sección del bot de cobranzas.
 
 ### PENDIENTE DE DEFINIR (dudas del relevamiento del 25/09/2026)
 
