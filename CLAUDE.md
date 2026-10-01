@@ -340,11 +340,19 @@ investiga y se documenta; no se implementa.
 
 ### 5. El documento de continuidad del bot
 
-`contexto-bot-cobranzas-completo_10-09-26.md` (última actualización 10/09/2026)
-es el documento donde se viene registrando la investigación de la integración
-con Regente: el mecanismo de escritura, los catálogos confirmados, los hallazgos
-con datos reales y los pendientes con Damián. **Lo que dice sobre Regente es la
-fuente más completa que hay**, y de ahí salen las secciones de arriba.
+**`docs/contexto-bot-cobranzas-completo_10-09-26.md`** (última actualización
+10/09/2026) es el documento donde se viene registrando la investigación de la
+integración con Regente: el mecanismo de escritura, los catálogos confirmados,
+los hallazgos con datos reales y los pendientes con Damián. **Lo que dice sobre
+Regente es la fuente más completa que hay**, y de ahí salen las secciones de
+arriba.
+
+Ahí están, en particular, las cosas que este `CLAUDE.md` no absorbe a propósito
+porque son volcados crudos: los **JSON reales de las respuestas de la API**
+(`rgSujetoNg/buscar`, `rgCajaNg/abrir`, el cierre de caja) y el **detalle de los
+dos cheques que se cargaron a mano el 03/09/2026** con sus `id_valor`,
+`id_titular`, `cod_postal_plaza` y números de cuenta. Cuando haga falta el dato
+exacto de una respuesta, se mira ahí.
 
 Cuidado con cuatro cosas que en ese documento quedaron viejas respecto del
 código de hoy: dice que `lector.py` y `utils_bcra.py` siguen usando Gemini
@@ -603,8 +611,6 @@ de tocar algo:
   lo usa `lector.py`.
 - **`app_clientes.py` quedó sin deploy**: su app de Streamlit Cloud se borró el
   28/09/2026 y el archivo sigue en el repositorio. Falta decidir si se borra.
-- **`contexto-bot-cobranzas.md` está desactualizado** (julio 2026, dice que el
-  motor de IA es Gemini).
 - **Los lotes del bot de WhatsApp viven en memoria del proceso**: se pierden si
   Render reinicia.
 - **El truco de `<div class="tarjeta-pro">`** que usan `modulos/clientes.py`,
@@ -618,30 +624,24 @@ de tocar algo:
 
 ## Pendientes
 
-### ⛔ El árbol de git está así a propósito — no lo "limpies"
+### ✅ Resuelto: el árbol de git quedó limpio (01/10/2026)
 
-Si `git status` muestra esto, **está bien y no hay que arreglarlo**:
+Durante meses `git status` mostró a propósito un borrado sin commitear y un
+archivo sin trackear, hasta decidir dónde iban los JSON reales de las respuestas
+de la API y el detalle de los dos cheques cargados a mano el 03/09/2026. **Ya
+está resuelto**: el documento de continuidad vive en **`docs/`** y el borrado
+del volcado viejo se commiteó junto con él.
 
+El archivo viejo, `contexto-bot-cobranzas.md` (julio 2026, decía que el motor de
+IA era Gemini), **sigue recuperable desde el historial** aunque ya no esté en el
+árbol:
+
+```bash
+git show 1f9461f:contexto-bot-cobranzas.md
 ```
- D contexto-bot-cobranzas.md                    ← borrado, SIN commitear
-?? contexto-bot-cobranzas-completo_10-09-26.md  ← nuevo, SIN trackear
-```
 
-`contexto-bot-cobranzas.md` era el volcado viejo del bot (julio 2026) y Diego lo
-reemplazó por el nuevo. **El borrado se dejó sin commitear a propósito**: mientras
-no se commitee, el archivo viejo sigue recuperable con
-`git checkout -- contexto-bot-cobranzas.md` (verificado el 25/09/2026: 26.982
-bytes accesibles desde HEAD).
-
-Se mantiene así hasta decidir **dónde van a parar los JSON reales de las
-respuestas de la API y el detalle de los dos cheques que se cargaron a mano el
-03/09/2026**, que están en el documento nuevo y que el `CLAUDE.md` no absorbió a
-propósito. Decisión ya tomada: **van a un `docs/` aparte, no acá**. Recién
-cuando eso esté hecho se commitean juntos el borrado del viejo y el alta del
-nuevo.
-
-**No commitear ese borrado, no borrar el archivo sin trackear y no hacer
-`git checkout`/`git clean` sobre ellos** sin hablarlo con Diego.
+Si hoy `git status` muestra algo, es trabajo en curso de verdad y se puede
+tratar como tal.
 
 ### ✅ Resuelto: el acceso a `app_clientes.py` (28/09/2026)
 
